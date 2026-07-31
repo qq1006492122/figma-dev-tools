@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://figma-dev-tools.com/mcp-config.schema.json",
+  "title": "Figma Dev Tools MCP Server Configuration",
+  "description": "JSON Schema for configuring the figma-dev-tools MCP server in AI editors (Trae, VS Code, Cursor, Windsurf, Claude Desktop, etc.)",
+  "type": "object",
+  "required": ["mcpServers"],
+  "properties": {
+    "mcpServers": {
+      "type": "object",
+      "description": "MCP server configurations keyed by server name",
+      "required": ["figma-dev-tools"],
+      "properties": {
+        "figma-dev-tools": {
+          "type": "object",
+          "description": "Figma Dev Tools MCP server configuration",
+          "required": ["command", "args"],
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "The command to launch the MCP server (use 'node' for Node.js-based servers)",
+              "default": "node",
+              "examples": ["node", "npx", "node.exe"]
+            },
+            "args": {
+              "type": "array",
+              "description": "Command arguments. The first argument must be the absolute path to dist/index.js",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              },
+              "examples": [
+                ["/usr/local/lib/node_modules/figma-dev-tools/dist/index.js"],
+                ["C:\\Users\\YourName\\AppData\\Roaming\\npm\\node_modules\\figma-dev-tools\\dist\\index.js"]
+              ]
+            },
+            "env": {
+              "type": "object",
+              "description": "Environment variables passed to the MCP server",
+              "properties": {
+                "FIGMA_ACCESS_TOKEN": {
+                  "type": "string",
+                  "description": "Your Figma Personal Access Token. Get one at https://www.figma.com/developers/api#access-tokens",
+                  "default": ""
+                },
+                "FIGMA_OAUTH_TOKEN": {
+                  "type": "string",
+                  "description": "Alternative OAuth token (if using OAuth flow instead of personal access token)"
+                },
+                "NODE_ENV": {
+                  "type": "string",
+                  "enum": ["development", "production"],
+                  "description": "Node environment setting",
+                  "default": "production"
+                },
+                "DEBUG": {
+                  "type": "string",
+                  "description": "Debug mode (set to 'true' or '*' for verbose logging)"
+                }
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Working directory for the server process (optional)"
+            },
+            "disabled": {
+              "type": "boolean",
+              "description": "Set to true to temporarily disable this server without removing the config",
+              "default": false
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "description": "Additional MCP server configurations"
+      }
+    }
+  },
+  "examples": [
+    {
+      "mcpServers": {
+        "figma-dev-tools": {
+          "command": "node",
+          "args": ["/usr/local/lib/node_modules/figma-dev-tools/dist/index.js"],
+          "env": {
+            "FIGMA_ACCESS_TOKEN": "figd_your_personal_access_token_here"
+          }
+        }
+      }
+    },
+    {
+      "mcpServers": {
+        "figma-dev-tools": {
+          "command": "npx",
+          "args": ["-y", "figma-dev-tools@latest", "mcp"],
+          "env": {
+            "FIGMA_ACCESS_TOKEN": ""
+          }
+        }
+      }
+    }
+  ]
+}
