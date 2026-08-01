@@ -217,7 +217,11 @@ function rgbToHex(r: number, g: number, b: number): string {
   return (
     '#' +
     [r, g, b]
-      .map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0'))
+      .map((v) =>
+        Math.max(0, Math.min(255, Math.round(v)))
+          .toString(16)
+          .padStart(2, '0'),
+      )
       .join('')
       .toUpperCase()
   );
@@ -249,18 +253,13 @@ function rgbToHex(r: number, g: number, b: number): string {
  * @param c2 - 颜色 2（0-255 RGB）
  * @returns 颜色距离值（0 = 完全相同，值越大差异越大）
  */
-function colorDistance(
-  c1: { r: number; g: number; b: number },
-  c2: { r: number; g: number; b: number },
-): number {
+function colorDistance(c1: { r: number; g: number; b: number }, c2: { r: number; g: number; b: number }): number {
   const rmean = (c1.r + c2.r) / 2;
   const dr = c1.r - c2.r;
   const dg = c1.g - c2.g;
   const db = c1.b - c2.b;
   // 加权欧氏距离：红色通道权重随亮度变化，绿色通道固定高权重，蓝色通道固定低权重
-  return Math.sqrt(
-    (2 + rmean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rmean) / 256) * db * db,
-  );
+  return Math.sqrt((2 + rmean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rmean) / 256) * db * db);
 }
 
 // ============ 颜色扁平化处理 ============

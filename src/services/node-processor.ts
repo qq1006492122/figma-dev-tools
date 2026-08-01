@@ -32,7 +32,6 @@ import type {
   NodeSemanticRole,
   ProcessingStats,
   ProcessingResult,
-  GradientStop,
 } from '../types/nodes.js';
 
 // ============ 配置类型 ============
@@ -244,8 +243,8 @@ function convertFill(fill: FigmaPaint): ProcessedFill | null {
       if (!fill.gradientStops || !fill.gradientHandlePositions) return null;
       return {
         type: 'gradient-linear',
-        gradientHandlePositions: fill.gradientHandlePositions.map(p => ({ x: p.x, y: p.y })),
-        gradientStops: fill.gradientStops.map(s => ({ position: s.position, color: s.color })),
+        gradientHandlePositions: fill.gradientHandlePositions.map((p) => ({ x: p.x, y: p.y })),
+        gradientStops: fill.gradientStops.map((s) => ({ position: s.position, color: s.color })),
         opacity: fill.opacity,
       };
     }

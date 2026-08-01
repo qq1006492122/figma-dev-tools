@@ -471,11 +471,7 @@ export class FigmaClient {
    * @param maxDepth - 最大深度，-1 表示无限制
    * @returns 匹配的节点数组（深度优先顺序）
    */
-  findNodesByType(
-    root: FigmaNode,
-    type: FigmaNode['type'] | FigmaNode['type'][],
-    maxDepth: number = -1,
-  ): FigmaNode[] {
+  findNodesByType(root: FigmaNode, type: FigmaNode['type'] | FigmaNode['type'][], maxDepth: number = -1): FigmaNode[] {
     const types = Array.isArray(type) ? type : [type];
     const results: FigmaNode[] = [];
 

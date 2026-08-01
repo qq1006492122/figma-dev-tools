@@ -75,7 +75,7 @@ async function runCli() {
   if (hasDist) {
     try {
       await runNodeScript(distCli, args);
-    } catch (err) {
+    } catch (_err) {
       process.exit(1);
     }
   } else {

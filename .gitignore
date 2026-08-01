@@ -8,3 +8,4 @@ Thumbs.db
 .vscode/
 .idea/
 fix-types.mjs
+.npmrc

@@ -90,9 +90,9 @@ export type NodeSemanticRole =
  */
 export interface ProcessedSize {
   /** 宽度（像素） */
-width: number;
+  width: number;
   /** 高度（像素） */
-height: number;
+  height: number;
 }
 
 /**
@@ -100,9 +100,9 @@ height: number;
  */
 export interface ProcessedPosition {
   /** X 坐标 */
-x: number;
+  x: number;
   /** Y 坐标 */
-y: number;
+  y: number;
 }
 
 /**
@@ -110,13 +110,13 @@ y: number;
  */
 export interface ProcessedPadding {
   /** 上内边距 */
-top: number;
+  top: number;
   /** 右内边距 */
-right: number;
+  right: number;
   /** 下内边距 */
-bottom: number;
+  bottom: number;
   /** 左内边距 */
-left: number;
+  left: number;
 }
 
 /**
@@ -124,15 +124,15 @@ left: number;
  */
 export interface ProcessedCornerRadius {
   /** 左上角圆角半径 */
-topLeft: number;
+  topLeft: number;
   /** 右上角圆角半径 */
-topRight: number;
+  topRight: number;
   /** 右下角圆角半径 */
-bottomRight: number;
+  bottomRight: number;
   /** 左下角圆角半径 */
-bottomLeft: number;
+  bottomLeft: number;
   /** 是否四角圆角相同（可使用统一 rounded-* 类名） */
-uniform?: boolean;
+  uniform?: boolean;
 }
 
 /**
@@ -140,17 +140,17 @@ uniform?: boolean;
  */
 export interface ProcessedShadow {
   /** 阴影类型 */
-type: 'drop' | 'inner';
+  type: 'drop' | 'inner';
   /** X 轴偏移 */
-x: number;
+  x: number;
   /** Y 轴偏移 */
-y: number;
+  y: number;
   /** 模糊半径 */
-blur: number;
+  blur: number;
   /** 扩展距离 */
-spread: number;
+  spread: number;
   /** 阴影颜色 */
-color: FigmaColor;
+  color: FigmaColor;
 }
 
 /**
@@ -158,46 +158,46 @@ color: FigmaColor;
  */
 export interface GradientStop {
   /** 停点位置，0-1 */
-position: number;
+  position: number;
   /** 停点颜色 */
-color: FigmaColor;
+  color: FigmaColor;
 }
 
 /**
  * 渐变控制点位置
  */
 export interface GradientHandlePosition {
-x: number;
-y: number;
+  x: number;
+  y: number;
 }
 
 /**
  * 纯色填充
  */
 export interface ProcessedSolidFill {
-type: 'solid';
-color: FigmaColor;
-opacity?: number;
+  type: 'solid';
+  color: FigmaColor;
+  opacity?: number;
 }
 
 /**
  * 线性渐变填充
  */
 export interface ProcessedGradientFill {
-type: 'gradient-linear';
-gradientHandlePositions: GradientHandlePosition[];
-gradientStops: GradientStop[];
-opacity?: number;
+  type: 'gradient-linear';
+  gradientHandlePositions: GradientHandlePosition[];
+  gradientStops: GradientStop[];
+  opacity?: number;
 }
 
 /**
  * 图片填充
  */
 export interface ProcessedImageFill {
-type: 'image';
-imageRef?: string;
-scaleMode?: FigmaScaleMode;
-opacity?: number;
+  type: 'image';
+  imageRef?: string;
+  scaleMode?: FigmaScaleMode;
+  opacity?: number;
 }
 
 /**
@@ -213,13 +213,13 @@ export type ProcessedFill = ProcessedSolidFill | ProcessedGradientFill | Process
  */
 export interface ProcessedStroke {
   /** 描边颜色 */
-color: FigmaColor;
+  color: FigmaColor;
   /** 描边粗细 */
-weight: number;
+  weight: number;
   /** 描边对齐方式 */
-align: FigmaStrokeAlign;
+  align: FigmaStrokeAlign;
   /** 虚线模式 [线长, 间隙, ...] */
-dashPattern?: number[];
+  dashPattern?: number[];
 }
 
 /**
@@ -235,23 +235,23 @@ dashPattern?: number[];
  */
 export interface ProcessedAutoLayout {
   /** 布局方向（HORIZONTAL=row, VERTICAL=column, NONE=非自动布局） */
-mode: FigmaLayoutMode;
+  mode: FigmaLayoutMode;
   /** 主轴对齐方式（justify-content） */
-primaryAxisAlign: FigmaPrimaryAxisAlign;
+  primaryAxisAlign: FigmaPrimaryAxisAlign;
   /** 交叉轴对齐方式（align-items） */
-counterAxisAlign: FigmaCounterAxisAlign;
+  counterAxisAlign: FigmaCounterAxisAlign;
   /** 主轴尺寸模式 */
-primaryAxisSizing: FigmaSizingMode;
+  primaryAxisSizing: FigmaSizingMode;
   /** 交叉轴尺寸模式 */
-counterAxisSizing: FigmaSizingMode;
+  counterAxisSizing: FigmaSizingMode;
   /** 是否换行（flex-wrap） */
-layoutWrap: FigmaLayoutWrap;
+  layoutWrap: FigmaLayoutWrap;
   /** 子项间距（gap） */
-itemSpacing: number;
+  itemSpacing: number;
   /** 交叉轴间距（多行/列时的行距/列距） */
-counterAxisSpacing?: number;
+  counterAxisSpacing?: number;
   /** 内边距 */
-padding: ProcessedPadding;
+  padding: ProcessedPadding;
 }
 
 /**
@@ -259,23 +259,23 @@ padding: ProcessedPadding;
  */
 export interface ProcessedTextStyle {
   /** 字体族 */
-fontFamily: string;
+  fontFamily: string;
   /** 字重 */
-fontWeight: number;
+  fontWeight: number;
   /** 字号（像素） */
-fontSize: number;
+  fontSize: number;
   /** 行高（像素） */
-lineHeightPx?: number;
+  lineHeightPx?: number;
   /** 字间距 */
-letterSpacing?: number;
+  letterSpacing?: number;
   /** 水平对齐 */
-textAlignHorizontal?: FigmaTextAlignHorizontal;
+  textAlignHorizontal?: FigmaTextAlignHorizontal;
   /** 垂直对齐 */
-textAlignVertical?: FigmaTextAlignVertical;
+  textAlignVertical?: FigmaTextAlignVertical;
   /** 文本装饰 */
-textDecoration?: FigmaTextDecoration;
+  textDecoration?: FigmaTextDecoration;
   /** 文本大小写 */
-textCase?: FigmaTextCase;
+  textCase?: FigmaTextCase;
 }
 
 /**
@@ -291,13 +291,13 @@ export type AlignSelf = 'STRETCH' | 'MIN' | 'CENTER' | 'MAX';
  */
 export interface ProcessedAbsolutePosition {
   /** 距父容器左边距离 */
-left: number;
+  left: number;
   /** 距父容器顶部距离 */
-top: number;
+  top: number;
   /** 距父容器右边距离（可选） */
-right?: number;
+  right?: number;
   /** 距父容器底部距离（可选） */
-bottom?: number;
+  bottom?: number;
 }
 
 // ============================================================
@@ -317,27 +317,27 @@ export type AssetType = 'image' | 'icon' | 'svg';
  */
 export interface ProcessedAsset {
   /** Figma 节点 ID */
-nodeId: string;
+  nodeId: string;
   /** 资源名称（来自 Figma 节点名） */
-name: string;
+  name: string;
   /** 资源类型 */
-type: AssetType;
+  type: AssetType;
   /** 导出格式 */
-format: FigmaExportFormat;
+  format: FigmaExportFormat;
   /** Figma 图片填充引用 ID（从 fill.imageRef 获取，用于调用 images API） */
-imageRef?: string;
+  imageRef?: string;
   /** 图片缩放模式 */
-scaleMode?: FigmaScaleMode;
+  scaleMode?: FigmaScaleMode;
   /** Figma 导出临时 URL（下载后失效） */
-exportUrl?: string;
+  exportUrl?: string;
   /** 下载后本地路径（相对于 public 目录） */
-localPath?: string;
+  localPath?: string;
   /** 通过 publicCdnUrl() 生成的 CDN 引用路径 */
-cdnUrl?: string;
+  cdnUrl?: string;
   /** 资源宽度 */
-width?: number;
+  width?: number;
   /** 资源高度 */
-height?: number;
+  height?: number;
 }
 
 // ============================================================
@@ -360,67 +360,67 @@ height?: number;
  */
 export interface ProcessedNode {
   /** 节点唯一 ID（处理后可能变化，用于构建树） */
-id: string;
+  id: string;
   /** 节点名称 */
-name: string;
+  name: string;
   /** 原始 Figma 节点类型 */
-originalType: FigmaNodeType;
+  originalType: FigmaNodeType;
   /** 语义角色（决定代码生成策略） */
-role: NodeSemanticRole;
+  role: NodeSemanticRole;
   /** 是否可见 */
-visible: boolean;
+  visible: boolean;
   /** 透明度，范围 0-1 */
-opacity?: number;
+  opacity?: number;
   /** 旋转角度（度） */
-rotation?: number;
+  rotation?: number;
   /** 是否裁剪子节点溢出内容 */
-clipsContent: boolean;
+  clipsContent: boolean;
 
   /** 尺寸信息 */
-size?: ProcessedSize;
+  size?: ProcessedSize;
   /** 相对父节点的位置 */
-position?: ProcessedPosition;
+  position?: ProcessedPosition;
   /** 绝对定位信息（layoutMode=NONE 时存在） */
-absolutePosition?: ProcessedAbsolutePosition;
+  absolutePosition?: ProcessedAbsolutePosition;
 
   /** 自动布局属性 */
-layout?: ProcessedAutoLayout;
+  layout?: ProcessedAutoLayout;
   /** align-self 属性（layoutAlign） */
-alignSelf?: AlignSelf;
+  alignSelf?: AlignSelf;
   /** flex-grow 拉伸因子（layoutGrow，Figma 中为 0 或 1） */
-flexGrow?: number;
+  flexGrow?: number;
 
   /** 填充（背景）列表 */
-fills?: ProcessedFill[];
+  fills?: ProcessedFill[];
   /** 描边列表 */
-strokes?: ProcessedStroke[];
+  strokes?: ProcessedStroke[];
   /** 圆角信息 */
-cornerRadius?: ProcessedCornerRadius;
+  cornerRadius?: ProcessedCornerRadius;
   /** 阴影/模糊效果列表 */
-effects?: ProcessedShadow[];
+  effects?: ProcessedShadow[];
 
   /** 文本内容（TEXT 节点存在） */
-textContent?: string;
+  textContent?: string;
   /** 文本样式（TEXT 节点存在） */
-textStyle?: ProcessedTextStyle;
+  textStyle?: ProcessedTextStyle;
 
   /** 关联的 Figma Component ID（COMPONENT/INSTANCE 节点） */
-componentId?: string;
+  componentId?: string;
   /** Component Key（用于组件映射查找） */
-componentKey?: string;
+  componentKey?: string;
   /** Component 名称 */
-componentName?: string;
+  componentName?: string;
 
   /** 资源引用（图片/图标节点） */
-asset?: ProcessedAsset;
+  asset?: ProcessedAsset;
 
   /** 子节点列表（已精简处理） */
-children?: ProcessedNode[];
+  children?: ProcessedNode[];
 
   /** 节点原始 Figma ID（用于溯源和 API 调用） */
-figmaId: string;
+  figmaId: string;
   /** 扁平化原因标记（调试用，记录该节点为何被保留/扁平化） */
-flattenReason?: string;
+  flattenReason?: string;
 }
 
 // ============================================================
@@ -435,23 +435,23 @@ flattenReason?: string;
  */
 export interface NodeOverview {
   /** 节点 ID */
-id: string;
+  id: string;
   /** 节点名称 */
-name: string;
+  name: string;
   /** 节点类型 */
-type: string;
+  type: string;
   /** 节点尺寸 */
-size: ProcessedSize;
+  size: ProcessedSize;
   /** 直接子节点数量 */
-childCount: number;
+  childCount: number;
   /** 是否为 Component 或 Instance */
-isComponent: boolean;
+  isComponent: boolean;
   /** 是否包含图片填充 */
-hasImageFill: boolean;
+  hasImageFill: boolean;
   /** 是否包含文本 */
-hasText: boolean;
+  hasText: boolean;
   /** 推断的语义角色 */
-semanticRole: NodeSemanticRole;
+  semanticRole: NodeSemanticRole;
 }
 
 /**
@@ -469,27 +469,27 @@ export type MetadataNodeType = 'CANVAS' | 'FRAME' | 'COMPONENT' | 'COMPONENT_SET
  */
 export interface DesignMetadata {
   /** 节点名称 */
-name: string;
+  name: string;
   /** 节点类型 */
-type: MetadataNodeType;
+  type: MetadataNodeType;
   /** 节点尺寸 */
-size: ProcessedSize;
+  size: ProcessedSize;
   /** 直接子节点概览（仅一层） */
-children: NodeOverview[];
+  children: NodeOverview[];
   /** 子节点总数（递归） */
-childCount: number;
+  childCount: number;
   /** 使用的颜色（去重 hex 列表） */
-colorsUsed: CssColorValue[];
+  colorsUsed: CssColorValue[];
   /** 使用到的 Figma Component 名称列表 */
-componentsUsed: string[];
+  componentsUsed: string[];
   /** 使用到的字体样式名称列表 */
-typographyStyles: string[];
+  typographyStyles: string[];
   /** 图片填充数量 */
-imageCount: number;
+  imageCount: number;
   /** 文本节点数量 */
-textNodeCount: number;
+  textNodeCount: number;
   /** 扩展字段（满足 MCP structuredContent 索引签名） */
-[key: string]: unknown;
+  [key: string]: unknown;
 }
 
 /**
@@ -497,17 +497,17 @@ textNodeCount: number;
  */
 export interface TextNodeSummary {
   /** 文本节点 ID */
-id: string;
+  id: string;
   /** 文本内容 */
-content: string;
+  content: string;
   /** 文本样式 Token */
-style: TypographyToken;
+  style: TypographyToken;
   /** 文本颜色（hex 格式） */
-color: CssColorValue;
+  color: CssColorValue;
   /** 字号 */
-fontSize: number;
+  fontSize: number;
   /** 字重 */
-fontWeight: number;
+  fontWeight: number;
 }
 
 /**
@@ -515,13 +515,13 @@ fontWeight: number;
  */
 export interface ComponentUsage {
   /** 组件 ID */
-id: string;
+  id: string;
   /** 组件名称 */
-name: string;
+  name: string;
   /** 组件 Key */
-key?: string;
+  key?: string;
   /** 实例使用次数 */
-instanceCount: number;
+  instanceCount: number;
 }
 
 /**
@@ -538,23 +538,23 @@ instanceCount: number;
  */
 export interface DesignContext {
   /** 精简后的节点树 */
-node: ProcessedNode;
+  node: ProcessedNode;
   /** 该节点下使用的颜色 Token 列表 */
-colors: ColorToken[];
+  colors: ColorToken[];
   /** 使用的间距值（去重升序排列） */
-spacing: number[];
+  spacing: number[];
   /** 使用的圆角值（去重升序排列） */
-radii: number[];
+  radii: number[];
   /** 使用的阴影效果列表 */
-shadows: ProcessedShadow[];
+  shadows: ProcessedShadow[];
   /** 资源列表 */
-assets: ProcessedAsset[];
+  assets: ProcessedAsset[];
   /** 文本节点摘要列表 */
-textNodes: TextNodeSummary[];
+  textNodes: TextNodeSummary[];
   /** 使用到的 Figma Component 统计 */
-componentsUsed: ComponentUsage[];
+  componentsUsed: ComponentUsage[];
   /** 扩展字段（满足 MCP structuredContent 索引签名） */
-[key: string]: unknown;
+  [key: string]: unknown;
 }
 
 // ============================================================
@@ -569,19 +569,19 @@ componentsUsed: ComponentUsage[];
  */
 export interface ComponentMapEntry {
   /** 导入来源路径 */
-import: string;
+  import: string;
   /** 组件名称 */
-component: string;
+  component: string;
   /** variant 属性值（如 Button 的 variant="primary"） */
-variant?: string;
+  variant?: string;
   /** size 属性值 */
-size?: string;
+  size?: string;
   /** 是否使用内联代码（而非 import，适用于小型工具函数） */
-inline?: boolean;
+  inline?: boolean;
   /** 内联代码字符串 */
-code?: string;
+  code?: string;
   /** 是否为默认导入（default import） */
-defaultImport?: boolean;
+  defaultImport?: boolean;
 }
 
 /**
@@ -589,13 +589,13 @@ defaultImport?: boolean;
  */
 export interface ComponentPathConfig {
   /** UI 基础组件路径 */
-ui: string;
+  ui: string;
   /** Web 官方组件路径 */
-webOfficial: string;
+  webOfficial: string;
   /** 体验共享组件路径 */
-experienceShared: string;
+  experienceShared: string;
   /** 图标组件路径 */
-icons: string;
+  icons: string;
 }
 
 /**
@@ -606,11 +606,11 @@ icons: string;
  */
 export interface ComponentMap {
   /** Figma Component 名称 → 项目组件映射 */
-components: Record<string, ComponentMapEntry>;
+  components: Record<string, ComponentMapEntry>;
   /** 场景目录映射（场景名 → 路径） */
-scenes: Record<string, string>;
+  scenes: Record<string, string>;
   /** 项目公共组件路径前缀 */
-componentPaths?: ComponentPathConfig;
+  componentPaths?: ComponentPathConfig;
 }
 
 // ============================================================
@@ -625,21 +625,21 @@ componentPaths?: ComponentPathConfig;
  */
 export interface ProcessingStats {
   /** 原始节点数（处理前） */
-originalNodeCount: number;
+  originalNodeCount: number;
   /** 精简后节点数（处理后） */
-processedNodeCount: number;
+  processedNodeCount: number;
   /** 移除的冗余 GROUP 节点数 */
-flattenedGroupCount: number;
+  flattenedGroupCount: number;
   /** 跳过的不可见节点数 */
-skippedInvisibleCount: number;
+  skippedInvisibleCount: number;
   /** 跳过的零尺寸节点数 */
-skippedZeroSizeCount: number;
+  skippedZeroSizeCount: number;
   /** 识别出的资源数 */
-assetCount: number;
+  assetCount: number;
   /** 识别出的组件实例数 */
-componentInstanceCount: number;
+  componentInstanceCount: number;
   /** 处理耗时（毫秒） */
-durationMs: number;
+  durationMs: number;
 }
 
 /**
@@ -647,7 +647,7 @@ durationMs: number;
  */
 export interface ProcessingResult {
   /** 处理后的精简节点树 */
-node: ProcessedNode;
+  node: ProcessedNode;
   /** 处理统计信息 */
-stats: ProcessingStats;
+  stats: ProcessingStats;
 }

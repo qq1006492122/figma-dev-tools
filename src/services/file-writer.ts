@@ -27,6 +27,7 @@
 import path from 'node:path';
 
 import fs from 'fs-extra';
+
 import type { DesignTokens, GeneratedComponent, FigmaDevConfig } from '../types.js';
 
 // ============ 类型定义 ============

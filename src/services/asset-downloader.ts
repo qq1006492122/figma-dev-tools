@@ -40,8 +40,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import type { ProcessedAsset, ProcessedNode } from '../types/nodes.js';
 import type { FigmaExportFormat } from '../types.js';
+import type { ProcessedAsset, ProcessedNode } from '../types/nodes.js';
 import type { FigmaClient } from './figma-client.js';
 
 // ============ 类型定义 ============
@@ -134,11 +134,7 @@ function sanitizeFileName(name: string): string {
  * @param svgFormat - SVG 节点的导出格式偏好
  * @returns Figma API 导出格式枚举值
  */
-function inferExportFormat(
-  nodeType: string,
-  hasImageFill: boolean,
-  svgFormat: 'svg' | 'png',
-): FigmaExportFormat {
+function inferExportFormat(nodeType: string, hasImageFill: boolean, svgFormat: 'svg' | 'png'): FigmaExportFormat {
   if (nodeType === 'VECTOR' || nodeType === 'BOOLEAN_OPERATION') {
     return svgFormat.toUpperCase() as FigmaExportFormat;
   }

@@ -768,7 +768,11 @@ export class TailwindMapper {
    * @param classes - 类名数组（输出参数）
    * @param extensions - 待扩展 token 列表（输出参数）
    */
-  private _mapText(style: ProcessedTextStyle, classes: string[], extensions: TailwindMapping['extensionsNeeded']): void {
+  private _mapText(
+    style: ProcessedTextStyle,
+    classes: string[],
+    extensions: TailwindMapping['extensionsNeeded'],
+  ): void {
     // ============ 字重（font-weight） ============
     if (style.fontWeight !== undefined) {
       const weightMatch = this._matcher.matchFontWeight(style.fontWeight);

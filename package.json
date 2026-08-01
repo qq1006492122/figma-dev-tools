@@ -1,6 +1,6 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, component generation (React+Tailwind), asset downloads, and one-click installation across Trae, VS Code, Cursor, Windsurf, and Claude Desktop.",
   "type": "module",
   "main": "dist/index.js",
