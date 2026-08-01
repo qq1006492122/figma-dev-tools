@@ -23,6 +23,7 @@ import { createFigmaClient, type FigmaClient } from './services/figma-client.js'
 import { createFileWriter } from './services/file-writer.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
 import type { DesignTokens } from './types.js';
+import type { ProcessedNode, StructuredNode } from './types/nodes.js';
 import { parseFigmaUrl, extractFileKey, extractNodeId } from './utils/figma-url.js';
 
 // 加载环境变量
@@ -56,7 +57,7 @@ function getFigmaClient(token?: string): FigmaClient {
  */
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.0.0',
+  version: '1.1.0',
 });
 
 // ============= 工具注册 =============
@@ -1011,7 +1012,7 @@ server.registerTool(
   },
 );
 
-// ============= 工具 5: figma_generate_jsx（一键生成增强版 JSX）=============
+// ============= 工具 13: figma_generate_jsx（一键生成增强版 JSX）=============
 
 server.registerTool(
   'figma_generate_jsx',
@@ -1143,6 +1144,102 @@ server.registerTool(
     }
   },
 );
+
+/**
+ * 工具 14: 获取框架无关的结构化数据
+ */
+server.registerTool(
+  'figma_get_structured_data',
+  {
+    title: '获取框架无关结构化数据',
+    description: `从 design context 转换为框架无关的描述性 JSON 结构，包含每个节点的 id/name/role/type/size/layout/styles/text/asset/children 信息。
+不输出 React 代码，适用于 Vue、Svelte、HTML、Angular、Solid 等任意框架的代码生成。
+输出结构包含完整的精简节点树，可直接遍历渲染任意框架组件。`,
+    inputSchema: z.object({
+      fileKey: z.string().describe('Figma 文件 Key'),
+      nodeId: z.string().describe('节点 ID（必需）'),
+      figmaUrl: z.string().optional().describe('Figma URL（自动解析 fileKey/nodeId）'),
+      maxDepth: z.number().min(1).max(10).default(8).describe('最大节点树深度（默认8）'),
+      accessToken: z.string().optional().describe('Figma Access Token'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ fileKey, nodeId, figmaUrl, maxDepth, accessToken }) => {
+    try {
+      const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
+      const nId = figmaUrl ? extractNodeId(figmaUrl) || nodeId : nodeId;
+      if (!key || !nId) return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId' }], isError: true };
+
+      const client = getFigmaClient(accessToken);
+      const ctxService = createDesignContextService(client);
+      const context = await ctxService.getDesignContext(key, nId, maxDepth);
+
+      let preview = `# 框架无关结构化数据: ${context.node.name}\n\n`;
+      preview += `- **语义角色**: ${context.node.role}\n`;
+      preview += `- **节点类型**: ${context.node.originalType}\n`;
+      preview += `- **尺寸**: ${context.node.size ? Math.round(context.node.size.width) + '×' + Math.round(context.node.size.height) : 'N/A'}\n`;
+      preview += `- **总节点数**: ${countNodes(context.node)}\n`;
+      preview += `- **颜色数**: ${context.colors.length}\n`;
+      preview += `- **资源数**: ${context.assets.length}\n`;
+      preview += `- **文本节点**: ${context.textNodes.length}\n\n`;
+      preview += `> 完整结构化节点树（含 id/name/role/type/size/layout/styles/text/asset/children）已在 structuredContent 中，可用于任意框架代码生成。\n`;
+
+      return {
+        content: [{ type: 'text', text: preview }],
+        structuredContent: toStructuredNode(context.node),
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: 'text', text: `获取结构化数据失败: ${error instanceof Error ? error.message : String(error)}` },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+/**
+ * 将 ProcessedNode 转换为框架无关的 StructuredNode
+ */
+function toStructuredNode(node: ProcessedNode): StructuredNode {
+  const result: StructuredNode = {
+    id: node.id,
+    name: node.name,
+    type: node.originalType,
+    role: node.role,
+    visible: node.visible,
+    figmaId: node.figmaId,
+    clipsContent: node.clipsContent,
+  };
+  if (node.opacity !== undefined) result.opacity = node.opacity;
+  if (node.rotation !== undefined) result.rotation = node.rotation;
+  if (node.size) result.size = node.size;
+  if (node.position) result.position = node.position;
+  if (node.absolutePosition) result.absolutePosition = node.absolutePosition;
+  if (node.layout) result.layout = node.layout;
+  if (node.alignSelf) result.alignSelf = node.alignSelf;
+  if (node.flexGrow !== undefined) result.flexGrow = node.flexGrow;
+  if (node.fills) result.fills = node.fills;
+  if (node.strokes) result.strokes = node.strokes;
+  if (node.cornerRadius) result.cornerRadius = node.cornerRadius;
+  if (node.effects) result.effects = node.effects;
+  if (node.textContent) result.textContent = node.textContent;
+  if (node.textStyle) result.textStyle = node.textStyle;
+  if (node.componentId) result.componentId = node.componentId;
+  if (node.componentKey) result.componentKey = node.componentKey;
+  if (node.componentName) result.componentName = node.componentName;
+  if (node.asset) result.asset = node.asset;
+  if (node.children && node.children.length > 0) {
+    result.children = node.children.map(toStructuredNode);
+  }
+  return result;
+}
 
 /**
  * 统计节点树中节点总数

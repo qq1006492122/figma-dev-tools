@@ -8,8 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const packageRoot = path.resolve(__dirname, '..');
 
-const [, , ...args] = process.argv;
-const command = args[0];
+let [, , ...args] = process.argv;
 
 const colors = {
   reset: '\x1b[0m',
@@ -41,6 +40,41 @@ function runNodeScript(scriptPath, scriptArgs) {
 }
 
 async function runCli() {
+  // Parse --figma-api-key/-t/--token parameters to set environment variable
+  // and filter them out from args so they don't get passed to CLI (which uses commander)
+  const filteredArgs = [];
+  let i = 0;
+  while (i < args.length) {
+    const arg = args[i];
+    
+    // Handle --figma-api-key=xxx or --token=xxx format
+    if (arg.startsWith('--figma-api-key=') || arg.startsWith('--figma-api_key=')) {
+      process.env.FIGMA_ACCESS_TOKEN = arg.split('=')[1];
+      i++;
+      continue;
+    }
+    if (arg.startsWith('--token=')) {
+      process.env.FIGMA_ACCESS_TOKEN = arg.split('=')[1];
+      i++;
+      continue;
+    }
+    
+    // Handle --figma-api-key <value> or -t <value> or --token <value> format
+    if (arg === '--figma-api-key' || arg === '--figma-api_key' || arg === '-t' || arg === '--token') {
+      if (i + 1 < args.length) {
+        process.env.FIGMA_ACCESS_TOKEN = args[i + 1];
+        i += 2;
+        continue;
+      }
+    }
+    
+    filteredArgs.push(arg);
+    i++;
+  }
+  
+  args = filteredArgs;
+  const command = args[0];
+
   const distCli = path.join(packageRoot, 'dist', 'cli', 'index.js');
   const hasDist = fs.existsSync(distCli);
   const isInstallOrUninstall = command === 'install' || command === 'uninstall';
@@ -112,6 +146,7 @@ ${c('cyan', c('bold', 'Figma Dev Tools'))} ${c('dim', 'v' + pkg.version)}
 ${c('bold', 'Usage:')}
   figma-dev <command> [options]
   npx figma-dev-tools <command> [options]
+  npx -y figma-dev-tools@latest mcp --figma-api-key=your_token
 
 ${c('bold', 'Setup Commands:')}
   install               Install MCP server config for detected AI editors
@@ -124,6 +159,7 @@ ${c('bold', 'Core Commands:')}
   sync <url>            Sync design tokens to local project
   component <url>       Generate React component code
   jsx <url>             One-click React+Tailwind TSX generation (enhanced)
+  structured <url>      Get framework-agnostic structured data (Vue/Svelte/HTML)
   metadata <url>        Get high-level design structure overview
   screenshot <url>      Get node screenshot
   assets <url>          Download design assets to public/portal/<scene>/
@@ -133,11 +169,15 @@ ${c('bold', 'MCP Server:')}
 
 ${c('bold', 'Options:')}
   -t, --token <token>   Figma Access Token
+      --figma-api-key <token>  Figma Access Token (alias)
   -o, --output <dir>    Output directory (default: ./src/styles/figma)
   -h, --help            Show this help message
   -V, --version         Show version number
 
 ${c('bold', 'Examples:')}
+  ${c('dim', '# Zero-config npx MCP server')}
+  npx -y figma-dev-tools@latest mcp --figma-api-key=your_token
+
   ${c('dim', '# Install MCP for all detected editors')}
   figma-dev install
 
@@ -149,6 +189,9 @@ ${c('bold', 'Examples:')}
 
   ${c('dim', '# Generate JSX for a node')}
   figma-dev jsx https://www.figma.com/design/FILE_KEY/Name?node-id=1-2 --scene homepage
+
+  ${c('dim', '# Get framework-agnostic structured data')}
+  figma-dev structured https://www.figma.com/design/FILE_KEY/Name?node-id=1-2
 
 ${c('dim', 'Get your Figma token: https://www.figma.com/developers/api#access-tokens')}
 `);

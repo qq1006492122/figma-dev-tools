@@ -17,7 +17,7 @@ import { createDesignContextService } from '../services/design-context.js';
 import { createFigmaClient } from '../services/figma-client.js';
 import { createFileWriter } from '../services/file-writer.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
-import type { ProcessedAsset } from '../types/nodes.js';
+import type { ProcessedAsset, ProcessedFill, ProcessedNode, ProcessedSolidFill } from '../types/nodes.js';
 import { parseFigmaUrl } from '../utils/figma-url.js';
 
 // 加载环境变量
@@ -26,7 +26,7 @@ dotenv.config();
 const program = new Command();
 
 // 版本和描述
-program.name('figma-dev').description('Figma 开发工具 - 设计稿与代码的桥接工具').version('1.0.0');
+program.name('figma-dev').description('Figma 开发工具 - 设计稿与代码的桥接工具').version('1.1.0');
 
 // 全局选项
 program
@@ -384,6 +384,165 @@ program
       process.exit(1);
     }
   });
+
+// ============= 命令: 获取框架无关结构化数据 (v1.1.0) =============
+
+program
+  .command('structured <url-or-filekey>')
+  .description('获取框架无关的结构化设计数据（适用于 Vue/Svelte/HTML 等任意框架）')
+  .option('-n, --node <nodeId>', '节点 ID')
+  .option('--depth <depth>', '最大节点树深度', '8')
+  .option('--format <format>', '输出格式 (pretty/json)', 'pretty')
+  .option('--output <file>', '输出到文件（默认输出到控制台）')
+  .action(async (target, cmdOptions) => {
+    const opts = program.opts();
+    const { fileKey, nodeId: urlNodeId } = parseTarget(target);
+    const nodeId = cmdOptions.node || urlNodeId;
+    const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 8;
+
+    if (!nodeId) {
+      console.error(chalk.red('错误: 请提供节点 ID (URL 中 ?node-id= 参数或 --node 选项)'));
+      process.exit(1);
+    }
+
+    console.log(chalk.blue(`正在获取框架无关结构化数据...`));
+    console.log(chalk.gray(`文件: ${fileKey}, 节点: ${nodeId}, 深度: ${maxDepth}`));
+
+    const startTime = Date.now();
+
+    try {
+      const client = getClient(opts.token);
+      const ctxService = createDesignContextService(client);
+
+      console.log(chalk.gray('  ↳ 获取设计上下文...'));
+      const context = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
+
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+      function countNodes(n: { children?: unknown[] }): number {
+        let c = 1;
+        if (n.children) for (const child of n.children as Array<{ children?: unknown[] }>) c += countNodes(child);
+        return c;
+      }
+
+      const nodeCount = countNodes(context.node);
+      const output = cmdOptions.format === 'json' ? JSON.stringify(toStructuredNode(context.node), null, 2) : formatStructuredPretty(context.node);
+
+      if (cmdOptions.output) {
+        const outPath = path.resolve(cmdOptions.output);
+        await fs.ensureDir(path.dirname(outPath));
+        await fs.writeFile(outPath, output, 'utf-8');
+        console.log(chalk.green(`\n✅ 结构化数据已保存 (${duration}s): ${outPath}`));
+        console.log(chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`));
+      } else {
+        console.log(chalk.green(`\n✅ 获取完成 (${duration}s): ${context.node.name}`));
+        console.log(chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`));
+        console.log('');
+        console.log(chalk.cyan('─'.repeat(70)));
+        console.log(output);
+        console.log(chalk.cyan('─'.repeat(70)));
+      }
+    } catch (error) {
+      console.error(chalk.red(`获取结构化数据失败: ${error instanceof Error ? error.message : String(error)}`));
+      process.exit(1);
+    }
+  });
+
+function formatStructuredPretty(node: ProcessedNode, indent: number = 0): string {
+  const pad = '  '.repeat(indent);
+  const lines: string[] = [];
+  const sizeStr = node.size ? `${Math.round(node.size.width)}×${Math.round(node.size.height)}` : 'N/A';
+  const tag = (node.originalType || node.type || 'unknown').toLowerCase();
+  lines.push(`${pad}[${node.role}] <${tag}> "${node.name}" (${sizeStr})`);
+
+  if (node.textContent) {
+    lines.push(`${pad}  text: "${node.textContent.slice(0, 60)}${node.textContent.length > 60 ? '...' : ''}"`);
+  }
+
+  if (node.layout) {
+    const l = node.layout;
+    const layoutParts: string[] = [];
+    if (l.mode) layoutParts.push(l.mode);
+    if (l.itemSpacing !== undefined) layoutParts.push(`gap=${l.itemSpacing}`);
+    if (l.padding) {
+      const p = l.padding;
+      if (p.top || p.right || p.bottom || p.left) {
+        layoutParts.push(`p=${p.top}/${p.right}/${p.bottom}/${p.left}`);
+      }
+    }
+    if (layoutParts.length > 0) {
+      lines.push(`${pad}  layout: ${layoutParts.join(', ')}`);
+    }
+  }
+
+  const styleParts: string[] = [];
+  if (node.fills && node.fills.length > 0) {
+    const solidFill = node.fills.find((f: ProcessedFill): f is ProcessedSolidFill => f.type === 'solid');
+    if (solidFill?.color) {
+      const c = solidFill.color;
+      const r = Math.round((c.r ?? 0) * 255);
+      const g = Math.round((c.g ?? 0) * 255);
+      const b = Math.round((c.b ?? 0) * 255);
+      styleParts.push(`bg=#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`);
+    }
+  }
+  if (node.cornerRadius?.uniform && node.cornerRadius.topLeft > 0) {
+    styleParts.push(`radius=${Math.round(node.cornerRadius.topLeft)}px`);
+  }
+  if (node.textStyle) {
+    if (node.textStyle.fontSize) styleParts.push(`font=${Math.round(node.textStyle.fontSize)}px`);
+    if (node.textStyle.fontWeight) styleParts.push(`weight=${node.textStyle.fontWeight}`);
+  }
+  if (styleParts.length > 0) {
+    lines.push(`${pad}  styles: ${styleParts.join(', ')}`);
+  }
+
+  if (node.asset) {
+    lines.push(`${pad}  asset: ${node.asset.name} (${node.asset.type}/${node.asset.format}, ${node.asset.width}×${node.asset.height})`);
+  }
+
+  if (node.children && node.children.length > 0) {
+    for (const child of node.children) {
+      lines.push(formatStructuredPretty(child, indent + 1));
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function toStructuredNode(node: ProcessedNode): any {
+  const result: any = {
+    id: node.id,
+    name: node.name,
+    type: node.originalType,
+    role: node.role,
+    visible: node.visible,
+    figmaId: node.figmaId,
+    clipsContent: node.clipsContent,
+  };
+  if (node.opacity !== undefined) result.opacity = node.opacity;
+  if (node.rotation !== undefined) result.rotation = node.rotation;
+  if (node.size) result.size = node.size;
+  if (node.position) result.position = node.position;
+  if (node.absolutePosition) result.absolutePosition = node.absolutePosition;
+  if (node.layout) result.layout = node.layout;
+  if (node.alignSelf) result.alignSelf = node.alignSelf;
+  if (node.flexGrow !== undefined) result.flexGrow = node.flexGrow;
+  if (node.fills) result.fills = node.fills;
+  if (node.strokes) result.strokes = node.strokes;
+  if (node.cornerRadius) result.cornerRadius = node.cornerRadius;
+  if (node.effects) result.effects = node.effects;
+  if (node.textContent) result.textContent = node.textContent;
+  if (node.textStyle) result.textStyle = node.textStyle;
+  if (node.componentId) result.componentId = node.componentId;
+  if (node.componentKey) result.componentKey = node.componentKey;
+  if (node.componentName) result.componentName = node.componentName;
+  if (node.asset) result.asset = node.asset;
+  if (node.children && node.children.length > 0) {
+    result.children = node.children.map(toStructuredNode);
+  }
+  return result;
+}
 
 // ============= 命令: 一键生成 JSX (v2.0) =============
 

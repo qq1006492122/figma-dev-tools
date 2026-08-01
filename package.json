@@ -1,7 +1,7 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.0.1",
-  "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, component generation (React+Tailwind), asset downloads, and one-click installation across Trae, VS Code, Cursor, Windsurf, and Claude Desktop.",
+  "version": "1.1.0",
+  "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, and one-click installation across 10+ editors. Zero-config npx mode with --figma-api-key.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -34,7 +34,18 @@
     "cursor",
     "trae",
     "vscode",
-    "windsurf"
+    "windsurf",
+    "pnpm",
+    "vue",
+    "svelte",
+    "html",
+    "zed",
+    "cline",
+    "roo-code",
+    "framework-agnostic",
+    "zero-config",
+    "yarn",
+    "bun"
   ],
   "author": "Youcha",
   "license": "MIT",
@@ -52,7 +63,8 @@
     "mcp-config.schema.json",
     ".env.example",
     "README.md",
-    "SKILL.md"
+    "SKILL.md",
+    "mcp-standalone.mjs"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",

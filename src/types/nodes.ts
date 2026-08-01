@@ -345,6 +345,67 @@ export interface ProcessedAsset {
 // ============================================================
 
 /**
+ * 框架无关的结构化节点（用于 figma_get_structured_data 输出）
+ * 包含 type 字段（originalType 的别名），适用于任意框架
+ */
+export interface StructuredNode {
+  /** 节点唯一 ID */
+  id: string;
+  /** 节点名称 */
+  name: string;
+  /** 节点类型（originalType 的别名，框架无关） */
+  type: FigmaNodeType;
+  /** 语义角色（决定代码生成策略） */
+  role: NodeSemanticRole;
+  /** 是否可见 */
+  visible: boolean;
+  /** 透明度，范围 0-1 */
+  opacity?: number;
+  /** 旋转角度（度） */
+  rotation?: number;
+  /** 是否裁剪子节点溢出内容 */
+  clipsContent: boolean;
+  /** 尺寸信息 */
+  size?: ProcessedSize;
+  /** 相对父节点的位置 */
+  position?: ProcessedPosition;
+  /** 绝对定位信息（layoutMode=NONE 时存在） */
+  absolutePosition?: ProcessedAbsolutePosition;
+  /** 自动布局属性 */
+  layout?: ProcessedAutoLayout;
+  /** align-self 属性（layoutAlign） */
+  alignSelf?: AlignSelf;
+  /** flex-grow 拉伸因子（layoutGrow，Figma 中为 0 或 1） */
+  flexGrow?: number;
+  /** 填充（背景）列表 */
+  fills?: ProcessedFill[];
+  /** 描边列表 */
+  strokes?: ProcessedStroke[];
+  /** 圆角信息 */
+  cornerRadius?: ProcessedCornerRadius;
+  /** 阴影/模糊效果列表 */
+  effects?: ProcessedShadow[];
+  /** 文本内容（TEXT 节点存在） */
+  textContent?: string;
+  /** 文本样式（TEXT 节点存在） */
+  textStyle?: ProcessedTextStyle;
+  /** 关联的 Figma Component ID（COMPONENT/INSTANCE 节点） */
+  componentId?: string;
+  /** Component Key（用于组件映射查找） */
+  componentKey?: string;
+  /** Component 名称 */
+  componentName?: string;
+  /** 资源引用（图片/图标节点） */
+  asset?: ProcessedAsset;
+  /** 子节点列表 */
+  children?: StructuredNode[];
+  /** 节点原始 Figma ID（用于溯源和 API 调用） */
+  figmaId: string;
+  /** 扩展字段 */
+  [key: string]: unknown;
+}
+
+/**
  * 精简后的 Figma 节点
  *
  * 这是 node-processor 输出的核心数据结构。
@@ -421,6 +482,8 @@ export interface ProcessedNode {
   figmaId: string;
   /** 扁平化原因标记（调试用，记录该节点为何被保留/扁平化） */
   flattenReason?: string;
+  /** 扩展字段（满足 MCP structuredContent 索引签名） */
+  [key: string]: unknown;
 }
 
 // ============================================================
