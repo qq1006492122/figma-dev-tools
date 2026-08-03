@@ -46,7 +46,7 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.2.1');
+  .version('1.3.0');
 
 // 全局选项
 program
@@ -1249,9 +1249,26 @@ program
   .command('wizard')
   .alias('init')
   .description(i18n.t('cli.commands.wizard.description') as string)
-  .action(async () => {
+  .option('--gui', i18n.t('gui.guiOption') as string)
+  .action(async (cmdOptions) => {
+    if (cmdOptions.gui) {
+      const { startGuiServer } = await import('../services/gui-server.js');
+      try {
+        const server = await startGuiServer();
+        process.on('SIGINT', () => {
+          server.close();
+          console.log('');
+          console.log(chalk.gray(i18n.t('gui.serverStopped') as string));
+          process.exit(0);
+        });
+        return;
+      } catch (error) {
+        console.error(chalk.red((i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error))));
+        process.exit(1);
+      }
+    }
     console.log(
-      boxen(chalk.cyan.bold('🎨 ' + i18n.t('cli.commands.wizard.title') as string + ' v1.2.0\n\n') + chalk.white(i18n.t('cli.commands.wizard.subtitle') as string), {
+      boxen(chalk.cyan.bold('🎨 ' + i18n.t('cli.commands.wizard.title') as string + ' v1.3.0\n\n') + chalk.white(i18n.t('cli.commands.wizard.subtitle') as string), {
         padding: 1,
         borderColor: 'cyan',
         margin: { top: 1, bottom: 1 },
@@ -1422,6 +1439,28 @@ program
     );
   });
 
+
+// ============= 命令: GUI 配置向导 (v1.3.0) =============
+
+program
+  .command('gui')
+  .description(i18n.t('gui.cmdDescription') as string)
+  .action(async () => {
+    const { startGuiServer } = await import('../services/gui-server.js');
+    try {
+      const server = await startGuiServer();
+      process.on('SIGINT', () => {
+        server.close();
+        console.log('');
+        console.log(chalk.gray(i18n.t('gui.serverStopped') as string));
+        process.exit(0);
+      });
+    } catch (error) {
+      console.error(chalk.red((i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error))));
+      process.exit(1);
+    }
+  });
+
 // ============= Shell 自动补全 =============
 
 program.addHelpText(
@@ -1455,7 +1494,8 @@ program
       compLog(`_figma_dev_completion() {`);
       compLog(`  local -a commands`);
       compLog(`  commands=(`);
-      compLog(`    'wizard:交互式配置向导'`);
+      compLog(`    'wizard:交互式配置向导'
+      'gui:GUI 可视化配置向导'`);
       compLog(`    'lang:语言设置'`);
       compLog(`    'validate:验证 Figma Token'`);
       compLog(`    'token:管理 Access Token（set/get/list/delete/default）'`);

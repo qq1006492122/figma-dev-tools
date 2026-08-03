@@ -469,6 +469,17 @@ export const zhCN = {
       xl: 'xl: (1280px+)',
     },
   },
+  gui: {
+    title: 'GUI 配置向导',
+    serverStarted: 'GUI 配置服务器已启动',
+    serverStopped: 'GUI 服务器已停止',
+    openingBrowser: '正在打开浏览器...',
+    portInUse: (port: number) => `端口 ${port} 已被占用，尝试下一个端口`,
+    serverUrl: (url: string) => `访问地址: ${url}`,
+    pressCtrlC: '按 Ctrl+C 停止服务器',
+    cmdDescription: '启动 GUI 可视化配置面板',
+    guiOption: '启动 GUI 配置向导（浏览器界面）',
+  },
 } as const;
 
 export type ZhCN = typeof zhCN;

@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.2.1
+# 🎨 Figma Dev Tools v1.3.0
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -598,7 +598,7 @@ Token 读取优先级：
                                           │ stdio MCP
                                           ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                    figma-dev-tools MCP Server v1.2.1                     │
+│                    figma-dev-tools MCP Server v1.3.0                     │
 │                    🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive        │
 │                                                                           │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────┐ │
@@ -705,7 +705,7 @@ figma-dev-tools/
 ├── FIGMA-DESIGN-GUIDELINES.md # 📖 v1.2.0 新：Figma 设计规范指南
 ├── DEVELOPMENT.md             # 开发文档
 ├── OPTIMIZATION-ANALYSIS.md   # 优化分析
-├── package.json               # v1.2.1
+├── package.json               # v1.3.0
 ├── tsconfig.json
 ├── README.md                  # 本文件
 ├── LICENSE                    # MIT 许可证
@@ -881,7 +881,7 @@ Token 会保存在系统安全存储中：
 
 ### vs 官方 Figma MCP (Framelink)
 
-| 特性 | Framelink (官方 Figma MCP) | figma-dev-tools v1.0 | figma-dev-tools v1.1.4 | figma-dev-tools v1.2.1 |
+| 特性 | Framelink (官方 Figma MCP) | figma-dev-tools v1.0 | figma-dev-tools v1.1.4 | figma-dev-tools v1.3.0 |
 |------|---------------------------|---------------------|-----------------------|-----------------------|
 | 设计上下文获取 | ✅ 全量拉取 | ✅ | ✅ **渐进式（~4KB 概览，防爆炸）** | ✅ |
 | 节点截图 | ✅ | ✅ | ✅ | ✅ |

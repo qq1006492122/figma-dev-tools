@@ -469,6 +469,17 @@ export const enUS = {
       xl: 'xl: (1280px+)',
     },
   },
+  gui: {
+    title: 'GUI Setup Wizard',
+    serverStarted: 'GUI configuration server started',
+    serverStopped: 'GUI server stopped',
+    openingBrowser: 'Opening browser...',
+    portInUse: (port: number) => `Port ${port} is in use, trying next port`,
+    serverUrl: (url: string) => `Access URL: ${url}`,
+    pressCtrlC: 'Press Ctrl+C to stop the server',
+    cmdDescription: 'Launch GUI visual configuration panel',
+    guiOption: 'Launch GUI setup wizard (browser interface)',
+  },
 } as const;
 
 export type EnUS = typeof enUS;

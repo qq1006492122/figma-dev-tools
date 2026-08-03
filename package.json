@@ -1,6 +1,6 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, and one-click installation across 10+ editors. Features i18n, a11y (accessibility), responsive design inference, design system alignment, flex layout fixes, zero-config npx mode with --figma-api-key, secure token storage, interactive wizard CLI, Prettier auto-formatting, SVG sprite generation, Tailwind class merging with tailwind-merge",
   "type": "module",
   "main": "dist/index.js",
@@ -74,7 +74,8 @@
     "SKILL.md",
     "FIGMA-DESIGN-GUIDELINES.md",
     "mcp-standalone.mjs",
-    "LICENSE"
+    "LICENSE",
+    "gui"
   ],
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
