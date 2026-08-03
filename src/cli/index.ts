@@ -46,7 +46,7 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.3.0');
+  .version('1.3.1');
 
 // 全局选项
 program
@@ -1268,7 +1268,7 @@ program
       }
     }
     console.log(
-      boxen(chalk.cyan.bold('🎨 ' + i18n.t('cli.commands.wizard.title') as string + ' v1.3.0\n\n') + chalk.white(i18n.t('cli.commands.wizard.subtitle') as string), {
+      boxen(chalk.cyan.bold('🎨 ' + i18n.t('cli.commands.wizard.title') as string + ' v1.3.1\n\n') + chalk.white(i18n.t('cli.commands.wizard.subtitle') as string), {
         padding: 1,
         borderColor: 'cyan',
         margin: { top: 1, bottom: 1 },
@@ -1440,7 +1440,7 @@ program
   });
 
 
-// ============= 命令: GUI 配置向导 (v1.3.0) =============
+// ============= 命令: GUI 配置向导 (v1.3.1) =============
 
 program
   .command('gui')

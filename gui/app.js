@@ -2,8 +2,8 @@ const I18N = {
   'zh-CN': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: '配置向导 v1.3.0',
-      footer: 'Figma Dev Tools v1.3.0 — 在 AI 编辑器中直接调用 MCP 工具'
+      subtitle: '配置向导 v1.3.1',
+      footer: 'Figma Dev Tools v1.3.1 — 在 AI 编辑器中直接调用 MCP 工具'
     },
     steps: {
       welcome: '欢迎',
@@ -105,8 +105,8 @@ const I18N = {
   'en-US': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: 'Setup Wizard v1.3.0',
-      footer: 'Figma Dev Tools v1.3.0 — Use MCP tools directly in AI editors'
+      subtitle: 'Setup Wizard v1.3.1',
+      footer: 'Figma Dev Tools v1.3.1 — Use MCP tools directly in AI editors'
     },
     steps: {
       welcome: 'Welcome',
@@ -357,7 +357,7 @@ class App {
     const step = this.steps[this.currentStep];
     const isFirst = this.currentStep === 0;
 
-    let leftHtml = isFirst ? '<div></div>' : '<button class="btn-secondary" id="btn-back">' + this.t('common.back') + '</button>';
+    const leftHtml = isFirst ? '<div></div>' : '<button class="btn-secondary" id="btn-back">' + this.t('common.back') + '</button>';
     let rightHtml = '';
 
     if (step === 'welcome') {
@@ -750,5 +750,5 @@ class App {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  new App();
+  window.figmaDevGui = new App();
 });
