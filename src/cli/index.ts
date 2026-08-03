@@ -6,15 +6,17 @@
 
 import path from 'node:path';
 
+import { input, password, select, confirm } from '@inquirer/prompts';
+import boxen from 'boxen';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import dotenv from 'dotenv';
 import fs from 'fs-extra';
-import { input, password, select, confirm } from '@inquirer/prompts';
-import boxen from 'boxen';
-import ora from 'ora';
 import open from 'open';
+import ora from 'ora';
 
+import { initI18nSync } from '../i18n/index.js';
+import type { Language } from '../i18n/index.js';
 import { createAssetDownloader } from '../services/asset-downloader.js';
 import { createCodeGenerator } from '../services/code-generator.js';
 import { createDesignContextService } from '../services/design-context.js';
@@ -31,8 +33,6 @@ import type {
   StructuredNode,
 } from '../types/nodes.js';
 import { parseFigmaUrl } from '../utils/figma-url.js';
-import { initI18nSync } from '../i18n/index.js';
-import type { Language } from '../i18n/index.js';
 
 // 加载环境变量
 dotenv.config();
@@ -46,7 +46,7 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.3.1');
+  .version('1.3.2');
 
 // 全局选项
 program
@@ -77,16 +77,16 @@ async function getClient(token?: string) {
   if (!accessToken) {
     console.error(
       boxen(
-        chalk.red.bold(i18n.t('cli.errors.noToken.title') as string + '\n\n') +
-          chalk.white(i18n.t('cli.errors.noToken.howTo') as string + '\n\n') +
+        chalk.red.bold((i18n.t('cli.errors.noToken.title') as string) + '\n\n') +
+          chalk.white((i18n.t('cli.errors.noToken.howTo') as string) + '\n\n') +
           chalk.cyan(i18n.t('cli.errors.noToken.recommended') as string) +
-          chalk.gray(i18n.t('cli.errors.noToken.wizard') as string + '\n') +
+          chalk.gray((i18n.t('cli.errors.noToken.wizard') as string) + '\n') +
           chalk.cyan(i18n.t('cli.errors.noToken.quick') as string) +
-          chalk.gray(i18n.t('cli.errors.noToken.tokenSet') as string + '\n') +
+          chalk.gray((i18n.t('cli.errors.noToken.tokenSet') as string) + '\n') +
           chalk.cyan(i18n.t('cli.errors.noToken.temp') as string) +
-          chalk.gray(i18n.t('cli.errors.noToken.tempDesc') as string + '\n') +
+          chalk.gray((i18n.t('cli.errors.noToken.tempDesc') as string) + '\n') +
           chalk.cyan(i18n.t('cli.errors.noToken.env') as string) +
-          chalk.gray(i18n.t('cli.errors.noToken.envDesc') as string + '\n\n') +
+          chalk.gray((i18n.t('cli.errors.noToken.envDesc') as string) + '\n\n') +
           chalk.yellow(i18n.t('cli.errors.noToken.getToken') as string),
         { padding: 1, borderColor: 'red', margin: { top: 1 } },
       ),
@@ -121,7 +121,7 @@ langCmd
   .action(async (language: string) => {
     const supportedLangs = ['zh-CN', 'en-US'];
     if (!supportedLangs.includes(language)) {
-      console.error(chalk.red(i18n.t('cli.commands.lang.invalid') as string + ': ' + supportedLangs.join(', ')));
+      console.error(chalk.red((i18n.t('cli.commands.lang.invalid') as string) + ': ' + supportedLangs.join(', ')));
       process.exit(1);
     }
     await i18n.setLanguage(language as Language);
@@ -129,7 +129,7 @@ langCmd
       'zh-CN': i18n.t('config.languageZhCN') as string,
       'en-US': i18n.t('config.languageEnUS') as string,
     };
-    console.log(chalk.green(i18n.t('cli.commands.lang.success') as string + ': ' + langNames[language as Language]));
+    console.log(chalk.green((i18n.t('cli.commands.lang.success') as string) + ': ' + langNames[language as Language]));
   });
 
 langCmd
@@ -139,9 +139,10 @@ langCmd
   .action(() => {
     const currentLang = i18n.getLanguage();
     const languages = i18n.getSupportedLanguages();
-    console.log(chalk.cyan(i18n.t('cli.commands.lang.current') as string + ':\n'));
+    console.log(chalk.cyan((i18n.t('cli.commands.lang.current') as string) + ':\n'));
     languages.forEach((lang) => {
-      const marker = lang.code === currentLang ? chalk.green('★ ' + i18n.t('cli.commands.lang.currentMarker') as string) : '  ';
+      const marker =
+        lang.code === currentLang ? chalk.green(('★ ' + i18n.t('cli.commands.lang.currentMarker')) as string) : '  ';
       console.log(`  ${marker} ${chalk.bold(lang.name)} (${lang.code})`);
     });
     console.log('');
@@ -158,7 +159,10 @@ langCmd
     const selected = await select({
       message: i18n.t('cli.commands.lang.selectPrompt') as string,
       choices: languages.map((lang) => ({
-        name: lang.code === currentLang ? `${lang.name} (${i18n.t('cli.commands.lang.currentMarker') as string})` : lang.name,
+        name:
+          lang.code === currentLang
+            ? `${lang.name} (${i18n.t('cli.commands.lang.currentMarker') as string})`
+            : lang.name,
         value: lang.code,
       })),
       default: currentLang,
@@ -169,7 +173,7 @@ langCmd
       'zh-CN': i18n.t('config.languageZhCN') as string,
       'en-US': i18n.t('config.languageEnUS') as string,
     };
-    console.log(chalk.green(i18n.t('cli.commands.lang.success') as string + ': ' + langNames[selected]));
+    console.log(chalk.green((i18n.t('cli.commands.lang.success') as string) + ': ' + langNames[selected]));
   });
 
 // ============= 命令: 验证 Token =============
@@ -192,7 +196,11 @@ program
         process.exit(1);
       }
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('common.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -213,11 +221,11 @@ tokenCmd
     if (!tokenValue) {
       console.log(
         boxen(
-          chalk.cyan(i18n.t('cli.commands.token.secureStorage') as string + '\n\n') +
-            chalk.white(i18n.t('cli.commands.token.storageLocation') as string + ':\n') +
+          chalk.cyan((i18n.t('cli.commands.token.secureStorage') as string) + '\n\n') +
+            chalk.white((i18n.t('cli.commands.token.storageLocation') as string) + ':\n') +
             chalk.gray('- macOS: Keychain\n') +
             chalk.gray('- Windows: Credential Manager\n') +
-            chalk.gray('- Linux: libsecret (' + i18n.t('cli.commands.token.linuxFallback') as string + ')\n\n') +
+            chalk.gray((('- Linux: libsecret (' + i18n.t('cli.commands.token.linuxFallback')) as string) + ')\n\n') +
             chalk.yellow(i18n.t('cli.commands.token.privacyNotice') as string),
           { padding: 1, borderColor: 'cyan', margin: { top: 1, bottom: 1 } },
         ),
@@ -239,7 +247,10 @@ tokenCmd
       await tokenStore.setDefault(name);
       const backend = await tokenStore.getBackend();
       spinner.succeed(
-        chalk.green(i18n.t('cli.commands.token.saved') as string + ` (${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string})`),
+        chalk.green(
+          (i18n.t('cli.commands.token.saved') as string) +
+            ` (${backend === 'keytar' ? (i18n.t('cli.commands.token.keychain') as string) : (i18n.t('cli.commands.token.encryptedFile') as string)})`,
+        ),
       );
 
       // 验证 Token
@@ -252,7 +263,11 @@ tokenCmd
         spinner.warn(chalk.yellow(i18n.t('cli.commands.token.validateFailed') as string));
       }
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('common.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -266,28 +281,34 @@ tokenCmd
     const info = await tokenStore.getTokenInfo(name);
 
     if (!info) {
-      console.log(chalk.yellow(i18n.t('cli.commands.token.notFound') as string + ` "${name}"`));
+      console.log(chalk.yellow((i18n.t('cli.commands.token.notFound') as string) + ` "${name}"`));
       const list = await tokenStore.listTokens();
       if (list.length > 0) {
-        console.log(chalk.gray(i18n.t('cli.commands.token.savedTokens') as string + ': ' + list.join(', ')));
+        console.log(chalk.gray((i18n.t('cli.commands.token.savedTokens') as string) + ': ' + list.join(', ')));
       } else {
         console.log(chalk.gray(i18n.t('cli.commands.token.noTokens') as string));
       }
       return;
     }
 
-    const maskedToken = cmdOptions.showFull
-      ? info.value
-      : `${info.value.slice(0, 8)}****${info.value.slice(-4)}`;
+    const maskedToken = cmdOptions.showFull ? info.value : `${info.value.slice(0, 8)}****${info.value.slice(-4)}`;
     const backend = await tokenStore.getBackend();
 
     console.log(
       boxen(
         chalk.cyan(`🔐 Token: ${info.name}\n\n`) +
           chalk.white(`值: ${maskedToken}\n`) +
-          chalk.gray(`存储方式: ${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string}\n`) +
-          chalk.gray(`保存时间: ${new Date(info.createdAt).toLocaleString(i18n.getLanguage() === 'zh-CN' ? 'zh-CN' : 'en-US')}\n`) +
-          (info.lastUsedAt ? chalk.gray(`最后使用: ${new Date(info.lastUsedAt).toLocaleString(i18n.getLanguage() === 'zh-CN' ? 'zh-CN' : 'en-US')}\n`) : '') +
+          chalk.gray(
+            `存储方式: ${backend === 'keytar' ? (i18n.t('cli.commands.token.keychain') as string) : (i18n.t('cli.commands.token.encryptedFile') as string)}\n`,
+          ) +
+          chalk.gray(
+            `保存时间: ${new Date(info.createdAt).toLocaleString(i18n.getLanguage() === 'zh-CN' ? 'zh-CN' : 'en-US')}\n`,
+          ) +
+          (info.lastUsedAt
+            ? chalk.gray(
+                `最后使用: ${new Date(info.lastUsedAt).toLocaleString(i18n.getLanguage() === 'zh-CN' ? 'zh-CN' : 'en-US')}\n`,
+              )
+            : '') +
           (info.note ? chalk.gray(`备注: ${info.note}\n`) : ''),
         { padding: 1, borderColor: 'green', margin: { top: 1 } },
       ),
@@ -310,13 +331,19 @@ tokenCmd
       return;
     }
 
-    console.log(chalk.cyan(`🔐 ${i18n.t('cli.commands.token.savedTokensList') as string} (${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string}):\n`));
+    console.log(
+      chalk.cyan(
+        `🔐 ${i18n.t('cli.commands.token.savedTokensList') as string} (${backend === 'keytar' ? (i18n.t('cli.commands.token.keychain') as string) : (i18n.t('cli.commands.token.encryptedFile') as string)}):\n`,
+      ),
+    );
     for (const name of list) {
       const info = await tokenStore.getTokenInfo(name);
       const isDefault = name === defaultName;
       const marker = isDefault ? chalk.green('★') : ' ';
       const note = info?.note ? chalk.gray(` (${info.note})`) : '';
-      console.log(`  ${marker} ${chalk.bold(name)}${isDefault ? chalk.green(' [' + i18n.t('cli.commands.token.default') as string + ']') : ''}${note}`);
+      console.log(
+        `  ${marker} ${chalk.bold(name)}${isDefault ? chalk.green(((' [' + i18n.t('cli.commands.token.default')) as string) + ']') : ''}${note}`,
+      );
     }
     console.log('');
   });
@@ -331,7 +358,7 @@ tokenCmd
 
     if (!cmdOptions.force) {
       const confirmed = await confirm({
-        message: i18n.t('cli.commands.token.confirmDelete') as string + ` "${name}"?`,
+        message: (i18n.t('cli.commands.token.confirmDelete') as string) + ` "${name}"?`,
         default: false,
       });
       if (!confirmed) {
@@ -342,9 +369,9 @@ tokenCmd
 
     const ok = await tokenStore.deleteToken(name);
     if (ok) {
-      console.log(chalk.green(i18n.t('cli.commands.token.deleted') as string + ` "${name}"`));
+      console.log(chalk.green((i18n.t('cli.commands.token.deleted') as string) + ` "${name}"`));
     } else {
-      console.log(chalk.yellow(i18n.t('cli.commands.token.notExist') as string + ` "${name}"`));
+      console.log(chalk.yellow((i18n.t('cli.commands.token.notExist') as string) + ` "${name}"`));
     }
   });
 
@@ -355,11 +382,11 @@ tokenCmd
     const tokenStore = createTokenStore();
     const list = await tokenStore.listTokens();
     if (!list.includes(name)) {
-      console.log(chalk.red(i18n.t('cli.commands.token.notExist') as string + ` "${name}"`));
+      console.log(chalk.red((i18n.t('cli.commands.token.notExist') as string) + ` "${name}"`));
       process.exit(1);
     }
     await tokenStore.setDefault(name);
-    console.log(chalk.green(i18n.t('cli.commands.token.defaultSet') as string + ': ' + name));
+    console.log(chalk.green((i18n.t('cli.commands.token.defaultSet') as string) + ': ' + name));
   });
 
 // ============= 命令: 查看文件信息 =============
@@ -371,7 +398,7 @@ program
     const opts = program.opts();
     const { fileKey } = parseTarget(target);
 
-    console.log(chalk.blue(i18n.t('cli.commands.info.fetching') as string + ': ' + fileKey));
+    console.log(chalk.blue((i18n.t('cli.commands.info.fetching') as string) + ': ' + fileKey));
 
     try {
       const client = await getClient(opts.token);
@@ -383,19 +410,29 @@ program
       console.log('');
 
       const pages = file.document.children || [];
-      console.log(chalk.cyan(i18n.t('cli.commands.info.pages') as string + ` (${pages.length}):`));
+      console.log(chalk.cyan((i18n.t('cli.commands.info.pages') as string) + ` (${pages.length}):`));
       pages.forEach((page, i) => {
-        console.log(`  ${i + 1}. ${chalk.bold(page.name)} (${page.children?.length || 0} ${i18n.t('cli.commands.info.children') as string})`);
+        console.log(
+          `  ${i + 1}. ${chalk.bold(page.name)} (${page.children?.length || 0} ${i18n.t('cli.commands.info.children') as string})`,
+        );
         console.log(chalk.gray(`     ID: ${page.id}`));
       });
 
       console.log('');
-      console.log(chalk.cyan(i18n.t('cli.commands.info.stats') as string + ':'));
+      console.log(chalk.cyan((i18n.t('cli.commands.info.stats') as string) + ':'));
       console.log(`  ${i18n.t('cli.commands.info.components') as string}: ${Object.keys(file.components).length}`);
-      console.log(`  ${i18n.t('cli.commands.info.componentSets') as string}: ${Object.keys(file.componentSets).length}`);
+      console.log(
+        `  ${i18n.t('cli.commands.info.componentSets') as string}: ${Object.keys(file.componentSets).length}`,
+      );
       console.log(`  ${i18n.t('cli.commands.info.styles') as string}: ${Object.keys(file.styles).length}`);
     } catch (error) {
-      console.error(chalk.red(i18n.t('cli.commands.info.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      console.error(
+        chalk.red(
+          (i18n.t('cli.commands.info.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -462,22 +499,28 @@ program
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
-      spinner.succeed(chalk.green(i18n.t('cli.commands.sync.completed') as string + ` (${duration}s)`));
+      spinner.succeed(chalk.green((i18n.t('cli.commands.sync.completed') as string) + ` (${duration}s)`));
       console.log('');
-      console.log(chalk.cyan(i18n.t('cli.commands.sync.stats') as string + ':'));
+      console.log(chalk.cyan((i18n.t('cli.commands.sync.stats') as string) + ':'));
       console.log(`  ${i18n.t('cli.commands.sync.colors') as string}: ${Object.keys(tokens.colors).length}`);
       console.log(`  ${i18n.t('cli.commands.sync.spacing') as string}: ${Object.keys(tokens.spacing).length}`);
       console.log(`  ${i18n.t('cli.commands.sync.radius') as string}: ${Object.keys(tokens.radius).length}`);
       console.log(`  ${i18n.t('cli.commands.sync.shadows') as string}: ${Object.keys(tokens.shadows).length}`);
       console.log(`  ${i18n.t('cli.commands.sync.typography') as string}: ${Object.keys(tokens.typography).length}`);
       console.log('');
-      console.log(chalk.cyan(i18n.t('cli.commands.sync.outputFiles') as string + ':'));
+      console.log(chalk.cyan((i18n.t('cli.commands.sync.outputFiles') as string) + ':'));
       files.forEach((f) => console.log(`  ${chalk.gray(f)}`));
 
       console.log('');
       console.log(chalk.yellow(i18n.t('cli.commands.sync.importHint') as string));
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('cli.commands.sync.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('cli.commands.sync.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -527,19 +570,25 @@ program
 
         console.log(chalk.green(`\n✅ ${i18n.t('cli.commands.component.completed') as string}: ${component.name}`));
         console.log('');
-        console.log(chalk.cyan(i18n.t('cli.commands.sync.outputFiles') as string + ':'));
+        console.log(chalk.cyan((i18n.t('cli.commands.sync.outputFiles') as string) + ':'));
         files.forEach((f) => console.log(`  ${chalk.gray(f)}`));
       } else {
         // 输出到控制台
         console.log(chalk.green(`\n✅ ${i18n.t('cli.commands.component.completed') as string}: ${component.name}`));
         console.log('');
-        console.log(chalk.cyan(i18n.t('cli.commands.component.code') as string + ':'));
+        console.log(chalk.cyan((i18n.t('cli.commands.component.code') as string) + ':'));
         console.log(chalk.gray('─'.repeat(60)));
         console.log(component.code);
         console.log(chalk.gray('─'.repeat(60)));
       }
     } catch (error) {
-      console.error(chalk.red(i18n.t('cli.commands.component.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      console.error(
+        chalk.red(
+          (i18n.t('cli.commands.component.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -580,7 +629,7 @@ program
         process.exit(1);
       }
 
-      spinner.succeed(chalk.green(i18n.t('cli.commands.screenshot.url') as string + ':'));
+      spinner.succeed(chalk.green((i18n.t('cli.commands.screenshot.url') as string) + ':'));
       console.log(chalk.cyan(imageUrl));
 
       if (cmdOptions.download) {
@@ -593,10 +642,16 @@ program
         const filePath = path.join(downloadDir, fileName);
         await fs.writeFile(filePath, imageBuffer);
 
-        downloadSpinner.succeed(chalk.green(i18n.t('cli.commands.screenshot.saved') as string + `: ${filePath}`));
+        downloadSpinner.succeed(chalk.green((i18n.t('cli.commands.screenshot.saved') as string) + `: ${filePath}`));
       }
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('cli.commands.screenshot.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('cli.commands.screenshot.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -615,7 +670,11 @@ program
     const depth = Number.parseInt(cmdOptions.depth, 10) || 1;
 
     const spinner = ora(chalk.blue(i18n.t('cli.commands.metadata.fetching') as string)).start();
-    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}${nodeId ? `, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}` : ''}, ${i18n.t('cli.commands.metadata.depth') as string}: ${depth}`));
+    console.log(
+      chalk.gray(
+        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}${nodeId ? `, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}` : ''}, ${i18n.t('cli.commands.metadata.depth') as string}: ${depth}`,
+      ),
+    );
 
     try {
       const client = await getClient(opts.token);
@@ -624,16 +683,34 @@ program
 
       spinner.succeed(chalk.green(`📋 ${metadata.name}`));
       console.log(chalk.gray(`   ${i18n.t('cli.commands.info.type') as string}: ${metadata.type}`));
-      console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.size') as string}: ${Math.round(metadata.size.width)} × ${Math.round(metadata.size.height)}`));
+      console.log(
+        chalk.gray(
+          `   ${i18n.t('cli.commands.metadata.size') as string}: ${Math.round(metadata.size.width)} × ${Math.round(metadata.size.height)}`,
+        ),
+      );
       console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.directChildren') as string}: ${metadata.childCount}`));
-      console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.colorsUsed') as string}: ${metadata.colorsUsed.length}`));
+      console.log(
+        chalk.gray(`   ${i18n.t('cli.commands.metadata.colorsUsed') as string}: ${metadata.colorsUsed.length}`),
+      );
       console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.textNodes') as string}: ${metadata.textNodeCount}`));
       console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.images') as string}: ${metadata.imageCount}`));
       console.log('');
 
       if (metadata.children.length > 0) {
         console.log(chalk.cyan(`${i18n.t('cli.commands.metadata.sections') as string} (${metadata.children.length}):`));
-        console.log('   #  ' + i18n.t('cli.commands.metadata.nameHeader') as string + '  ' + i18n.t('cli.commands.metadata.typeHeader') as string + '  ' + i18n.t('cli.commands.metadata.semanticHeader') as string + '  ' + i18n.t('cli.commands.metadata.sizeHeader') as string + '  ' + i18n.t('cli.commands.metadata.childrenHeader') as string + '  ' + i18n.t('cli.commands.metadata.componentHeader') as string);
+        console.log(
+          ((((((((((('   #  ' + i18n.t('cli.commands.metadata.nameHeader')) as string) +
+            '  ' +
+            i18n.t('cli.commands.metadata.typeHeader')) as string) +
+            '  ' +
+            i18n.t('cli.commands.metadata.semanticHeader')) as string) +
+            '  ' +
+            i18n.t('cli.commands.metadata.sizeHeader')) as string) +
+            '  ' +
+            i18n.t('cli.commands.metadata.childrenHeader')) as string) +
+            '  ' +
+            i18n.t('cli.commands.metadata.componentHeader')) as string,
+        );
         console.log('   ─  ────────────────────────  ─────────  ───────────  ────────────  ─────  ────');
         metadata.children.forEach((c, i) => {
           const num = String(i + 1).padStart(2, ' ');
@@ -649,12 +726,27 @@ program
       }
 
       if (metadata.colorsUsed.length > 0) {
-        console.log(chalk.cyan(`${i18n.t('cli.commands.metadata.colorsUsed') as string} (${metadata.colorsUsed.length}, ${i18n.t('cli.commands.metadata.top15') as string}):`));
+        console.log(
+          chalk.cyan(
+            `${i18n.t('cli.commands.metadata.colorsUsed') as string} (${metadata.colorsUsed.length}, ${i18n.t('cli.commands.metadata.top15') as string}):`,
+          ),
+        );
         metadata.colorsUsed.slice(0, 15).forEach((c) => console.log(`  - ${c}`));
-        if (metadata.colorsUsed.length > 15) console.log(chalk.gray(`  ... ${i18n.t('cli.commands.metadata.totalPrefix') as string} ${metadata.colorsUsed.length} ${i18n.t('cli.commands.metadata.totalSuffix') as string}`));
+        if (metadata.colorsUsed.length > 15)
+          console.log(
+            chalk.gray(
+              `  ... ${i18n.t('cli.commands.metadata.totalPrefix') as string} ${metadata.colorsUsed.length} ${i18n.t('cli.commands.metadata.totalSuffix') as string}`,
+            ),
+          );
       }
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('cli.commands.metadata.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('cli.commands.metadata.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -675,7 +767,11 @@ program
     const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 8;
 
     const spinner = ora(chalk.blue(i18n.t('cli.commands.lint.checking') as string)).start();
-    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}${nodeId ? `, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}` : ''}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`));
+    console.log(
+      chalk.gray(
+        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}${nodeId ? `, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}` : ''}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`,
+      ),
+    );
 
     const startTime = Date.now();
 
@@ -686,7 +782,7 @@ program
 
       let nodesToLint: ProcessedNode[] = [];
 
-      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.lint.getContext') as string));
+      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.lint.getContext')) as string));
       if (nodeId) {
         const context = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
         nodesToLint = [context.node];
@@ -697,16 +793,15 @@ program
           try {
             const context = await ctxService.getDesignContext(fileKey, page.id, maxDepth);
             nodesToLint.push(context.node);
-          } catch {
-          }
+          } catch {}
         }
       }
 
-      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.lint.running') as string));
+      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.lint.running')) as string));
       const result = linter.lint(nodesToLint);
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
-      spinner.succeed(chalk.green(i18n.t('cli.commands.lint.completed') as string + ` (${duration}s)`));
+      spinner.succeed(chalk.green((i18n.t('cli.commands.lint.completed') as string) + ` (${duration}s)`));
       console.log('');
 
       function getScoreEmoji(score: number): string {
@@ -728,7 +823,11 @@ program
       const scoreEmoji = getScoreEmoji(result.score);
       const rating = getScoreRating(result.score);
 
-      console.log(chalk.cyan(`${scoreEmoji} ${i18n.t('cli.commands.lint.score') as string}: ${chalk.bold(result.score)}/100 (${rating})`));
+      console.log(
+        chalk.cyan(
+          `${scoreEmoji} ${i18n.t('cli.commands.lint.score') as string}: ${chalk.bold(result.score)}/100 (${rating})`,
+        ),
+      );
       console.log('');
       console.log(chalk.gray(`   ${i18n.t('cli.commands.sync.file') as string}: ${result.totalNodes} 个节点`));
       console.log(chalk.gray(`   ${i18n.t('cli.commands.lint.errors') as string}: ${result.errorCount}`));
@@ -757,7 +856,13 @@ program
         console.log(chalk.cyan('─'.repeat(70)));
       }
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('cli.commands.lint.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('cli.commands.lint.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -783,7 +888,11 @@ program
     }
 
     const spinner = ora(chalk.blue(i18n.t('cli.commands.structured.fetching') as string)).start();
-    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`));
+    console.log(
+      chalk.gray(
+        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`,
+      ),
+    );
 
     const startTime = Date.now();
 
@@ -791,7 +900,7 @@ program
       const client = await getClient(opts.token);
       const ctxService = createDesignContextService(client);
 
-      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.structured.getContext') as string));
+      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.structured.getContext')) as string));
       const context = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -811,14 +920,24 @@ program
         const outPath = path.resolve(cmdOptions.output);
         await fs.ensureDir(path.dirname(outPath));
         await fs.writeFile(outPath, output, 'utf-8');
-        spinner.succeed(chalk.green(i18n.t('cli.commands.structured.saved') as string + ` (${duration}s): ${outPath}`));
+        spinner.succeed(
+          chalk.green((i18n.t('cli.commands.structured.saved') as string) + ` (${duration}s): ${outPath}`),
+        );
         console.log(
-          chalk.gray(`   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`),
+          chalk.gray(
+            `   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`,
+          ),
         );
       } else {
-        spinner.succeed(chalk.green(i18n.t('cli.commands.structured.completed') as string + ` (${duration}s): ${context.node.name}`));
+        spinner.succeed(
+          chalk.green(
+            (i18n.t('cli.commands.structured.completed') as string) + ` (${duration}s): ${context.node.name}`,
+          ),
+        );
         console.log(
-          chalk.gray(`   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`),
+          chalk.gray(
+            `   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`,
+          ),
         );
         console.log('');
         console.log(chalk.cyan('─'.repeat(70)));
@@ -826,7 +945,13 @@ program
         console.log(chalk.cyan('─'.repeat(70)));
       }
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('cli.commands.structured.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('cli.commands.structured.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -959,7 +1084,11 @@ program
     }
 
     const spinner = ora(chalk.blue(i18n.t('cli.commands.jsx.generating') as string)).start();
-    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`));
+    console.log(
+      chalk.gray(
+        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`,
+      ),
+    );
 
     const startTime = Date.now();
 
@@ -969,7 +1098,7 @@ program
       const codeGen = createCodeGenerator(client);
 
       // 1. 获取精简设计上下文
-      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.jsx.getContext') as string));
+      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.jsx.getContext')) as string));
       const ctx = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
 
       // 2. 可选：设计规范检查
@@ -980,17 +1109,20 @@ program
           const lintResult = linter.lint(ctx.node);
           if (lintResult.errorCount > 0 || lintResult.warningCount > 3) {
             const scoreEmoji = lintResult.score >= 75 ? '✅' : lintResult.score >= 60 ? '⚠️' : '❌';
-            console.log(chalk.yellow(`  ${scoreEmoji} 代码还原质量评分: ${lintResult.score}/100，发现 ${lintResult.errorCount} 个错误、${lintResult.warningCount} 个警告`));
+            console.log(
+              chalk.yellow(
+                `  ${scoreEmoji} 代码还原质量评分: ${lintResult.score}/100，发现 ${lintResult.errorCount} 个错误、${lintResult.warningCount} 个警告`,
+              ),
+            );
             if (lintResult.score < 80) {
               console.log(chalk.gray('     💡 建议先运行 figma-dev lint 查看详细报告，修复问题后再生成代码'));
             }
           }
-        } catch {
-        }
+        } catch {}
       }
 
       // 3. 生成 JSX
-      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.jsx.generateCode') as string));
+      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.jsx.generateCode')) as string));
       const result = await codeGen.generateJsxFromContext(ctx, {
         componentName: cmdOptions.name,
         sceneName: cmdOptions.scene,
@@ -1006,9 +1138,13 @@ program
         return c;
       }
 
-      spinner.succeed(chalk.green(i18n.t('cli.commands.jsx.completed') as string + ` (${duration}s): ${result.componentName}`));
+      spinner.succeed(
+        chalk.green((i18n.t('cli.commands.jsx.completed') as string) + ` (${duration}s): ${result.componentName}`),
+      );
       console.log(
-        chalk.gray(`   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${countNodes(ctx.node)}, ${i18n.t('cli.commands.structured.assets') as string}: ${ctx.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${ctx.textNodes.length}`),
+        chalk.gray(
+          `   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${countNodes(ctx.node)}, ${i18n.t('cli.commands.structured.assets') as string}: ${ctx.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${ctx.textNodes.length}`,
+        ),
       );
 
       if (result.reports) {
@@ -1017,33 +1153,61 @@ program
         const flexFixes = reports.flexFixes;
         if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes) > 0) {
           const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes;
-          console.log(chalk.green(`\n🔧 ${i18n.t('reports.flex.title') as string}: ${flexCount} ${i18n.t('reports.flex.fixesApplied') as string}`));
+          console.log(
+            chalk.green(
+              `\n🔧 ${i18n.t('reports.flex.title') as string}: ${flexCount} ${i18n.t('reports.flex.fixesApplied') as string}`,
+            ),
+          );
         }
         const a11y = reports.a11y;
         if (a11y) {
-          const a11yCount = a11y.enhancementsCount ?? (a11y.semanticTagsCount + a11y.buttonsIdentifiedCount + a11y.ariaAddedCount);
+          const a11yCount =
+            a11y.enhancementsCount ?? a11y.semanticTagsCount + a11y.buttonsIdentifiedCount + a11y.ariaAddedCount;
           if (a11yCount > 0) {
-            console.log(chalk.green(`♿ ${i18n.t('reports.a11y.title') as string}: ${a11yCount} ${i18n.t('reports.a11y.enhancementsApplied') as string}`));
+            console.log(
+              chalk.green(
+                `♿ ${i18n.t('reports.a11y.title') as string}: ${a11yCount} ${i18n.t('reports.a11y.enhancementsApplied') as string}`,
+              ),
+            );
           }
         }
         const ds = reports.designSystem;
         if (ds) {
-          const dsCount = ds.suggestionsCount ?? (ds.colorSuggestions.length + ds.spacingTokens.length + ds.radiusTokens.length + ds.typographySuggestions.length);
+          const dsCount =
+            ds.suggestionsCount ??
+            ds.colorSuggestions.length +
+              ds.spacingTokens.length +
+              ds.radiusTokens.length +
+              ds.typographySuggestions.length;
           if (dsCount > 0) {
-            console.log(chalk.cyan(`\n🎨 ${i18n.t('reports.design.title') as string}: ${dsCount} ${i18n.t('reports.design.suggestions') as string}`));
+            console.log(
+              chalk.cyan(
+                `\n🎨 ${i18n.t('reports.design.title') as string}: ${dsCount} ${i18n.t('reports.design.suggestions') as string}`,
+              ),
+            );
           }
         }
         const resp = reports.responsive;
         if (resp) {
-          const respCount = resp.suggestionsCount ?? (resp.recommendations.length + resp.classSuggestions.length + resp.layoutSuggestions.length);
+          const respCount =
+            resp.suggestionsCount ??
+            resp.recommendations.length + resp.classSuggestions.length + resp.layoutSuggestions.length;
           if (respCount > 0) {
-            console.log(chalk.cyan(`📱 ${i18n.t('reports.responsive.title') as string}: ${respCount} ${i18n.t('reports.responsive.suggestions') as string}`));
+            console.log(
+              chalk.cyan(
+                `📱 ${i18n.t('reports.responsive.title') as string}: ${respCount} ${i18n.t('reports.responsive.suggestions') as string}`,
+              ),
+            );
           }
         }
       }
 
       if (result.extensionsNeeded.length > 0) {
-        console.log(chalk.yellow(`\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${result.extensionsNeeded.length}):`));
+        console.log(
+          chalk.yellow(
+            `\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${result.extensionsNeeded.length}):`,
+          ),
+        );
         const unique = result.extensionsNeeded.filter(
           (v, i, a) => a.findIndex((x) => x.originalValue === v.originalValue) === i,
         );
@@ -1059,7 +1223,9 @@ program
           console.log(`  - ${a.nodeId}: ${a.name} (${a.type})`);
         });
         console.log(
-          chalk.gray(`   ${i18n.t('cli.commands.jsx.downloadHint') as string} figma-dev assets <url> --scene ${cmdOptions.scene || '<scene>'} --nodes <nodeIds>`),
+          chalk.gray(
+            `   ${i18n.t('cli.commands.jsx.downloadHint') as string} figma-dev assets <url> --scene ${cmdOptions.scene || '<scene>'} --nodes <nodeIds>`,
+          ),
         );
       }
 
@@ -1067,7 +1233,9 @@ program
       if (reusableComponents.length > 0) {
         console.log(chalk.magenta(`\n🧩 ${i18n.t('cli.commands.jsx.reusableComponents') as string}:`));
         reusableComponents.forEach((c) => {
-          console.log(`  - ${c.name} (${i18n.t('cli.commands.jsx.usedTimes') as string} ${c.instanceCount} ${i18n.t('cli.commands.jsx.times') as string}) → @/components/web-official/`);
+          console.log(
+            `  - ${c.name} (${i18n.t('cli.commands.jsx.usedTimes') as string} ${c.instanceCount} ${i18n.t('cli.commands.jsx.times') as string}) → @/components/web-official/`,
+          );
         });
       }
 
@@ -1079,13 +1247,19 @@ program
         const outPath = path.resolve(cmdOptions.output);
         await fs.ensureDir(path.dirname(outPath));
         await fs.writeFile(outPath, result.code, 'utf-8');
-        console.log(chalk.green(i18n.t('cli.commands.jsx.codeSaved') as string + `: ${outPath}`));
+        console.log(chalk.green((i18n.t('cli.commands.jsx.codeSaved') as string) + `: ${outPath}`));
       } else {
         console.log(result.code);
       }
       console.log(chalk.cyan('─'.repeat(70)));
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('cli.commands.jsx.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('cli.commands.jsx.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -1120,7 +1294,11 @@ program
     const sceneName = cmdOptions.scene || 'default';
 
     const spinner = ora(chalk.blue(i18n.t('cli.commands.assets.downloading') as string)).start();
-    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.assets.sceneName') as string}: ${sceneName}, ${i18n.t('cli.commands.assets.nodeCount') as string}: ${nodeIds.length}, ${i18n.t('cli.commands.screenshot.scale') as string}: ${scale}x`));
+    console.log(
+      chalk.gray(
+        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.assets.sceneName') as string}: ${sceneName}, ${i18n.t('cli.commands.assets.nodeCount') as string}: ${nodeIds.length}, ${i18n.t('cli.commands.screenshot.scale') as string}: ${scale}x`,
+      ),
+    );
 
     try {
       const client = await getClient(opts.token);
@@ -1172,7 +1350,11 @@ program
         return;
       }
 
-      console.log(chalk.gray(`${i18n.t('cli.commands.assets.foundAssets') as string} ${uniqueAssets.length} ${i18n.t('cli.commands.assets.assets') as string}`));
+      console.log(
+        chalk.gray(
+          `${i18n.t('cli.commands.assets.foundAssets') as string} ${uniqueAssets.length} ${i18n.t('cli.commands.assets.assets') as string}`,
+        ),
+      );
 
       const downloader = createAssetDownloader(client, {
         projectRoot,
@@ -1182,7 +1364,7 @@ program
 
       const results = await downloader.downloadAssets(fileKey, sceneName, uniqueAssets);
 
-      spinner.succeed(chalk.green(i18n.t('cli.commands.assets.completed') as string + ':'));
+      spinner.succeed(chalk.green((i18n.t('cli.commands.assets.completed') as string) + ':'));
       let successCount = 0;
       results.forEach((r) => {
         if (r.success) {
@@ -1193,9 +1375,17 @@ program
           console.log(`  ✗ ${r.asset.nodeId}: ${r.error}`);
         }
       });
-      console.log(chalk.gray(`\n   ${i18n.t('cli.commands.assets.success') as string}: ${successCount}/${results.length}`));
+      console.log(
+        chalk.gray(`\n   ${i18n.t('cli.commands.assets.success') as string}: ${successCount}/${results.length}`),
+      );
     } catch (error) {
-      spinner.fail(chalk.red(i18n.t('cli.commands.assets.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      spinner.fail(
+        chalk.red(
+          (i18n.t('cli.commands.assets.failed') as string) +
+            ': ' +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -1213,16 +1403,16 @@ program
 
     console.log(
       boxen(
-        chalk.cyan.bold('📚 ' + i18n.t('cli.commands.tutorial.title') as string + '\n\n') +
-          chalk.white('📖 ' + i18n.t('cli.commands.tutorial.docs') as string + ':\n') +
+        chalk.cyan.bold((('📚 ' + i18n.t('cli.commands.tutorial.title')) as string) + '\n\n') +
+          chalk.white((('📖 ' + i18n.t('cli.commands.tutorial.docs')) as string) + ':\n') +
           chalk.cyan(`  ${docsUrl}\n\n`) +
-          chalk.white('🔑 ' + i18n.t('cli.commands.tutorial.getToken') as string + ':\n') +
+          chalk.white((('🔑 ' + i18n.t('cli.commands.tutorial.getToken')) as string) + ':\n') +
           chalk.cyan(`  ${tokenUrl}\n\n`) +
-          chalk.white('💡 ' + i18n.t('cli.commands.tutorial.quickStart') as string + ':\n') +
-          chalk.gray('  1. figma-dev wizard      ' + i18n.t('cli.commands.tutorial.step1') as string + '\n') +
-          chalk.gray('  2. figma-dev validate    ' + i18n.t('cli.commands.tutorial.step2') as string + '\n') +
-          chalk.gray('  3. figma-dev lint <url>  ' + i18n.t('cli.commands.wizard.cmdLint') as string + '\n') +
-          chalk.gray('  4. figma-dev jsx <url>   ' + i18n.t('cli.commands.tutorial.step3') as string),
+          chalk.white((('💡 ' + i18n.t('cli.commands.tutorial.quickStart')) as string) + ':\n') +
+          chalk.gray((('  1. figma-dev wizard      ' + i18n.t('cli.commands.tutorial.step1')) as string) + '\n') +
+          chalk.gray((('  2. figma-dev validate    ' + i18n.t('cli.commands.tutorial.step2')) as string) + '\n') +
+          chalk.gray((('  3. figma-dev lint <url>  ' + i18n.t('cli.commands.wizard.cmdLint')) as string) + '\n') +
+          chalk.gray(('  4. figma-dev jsx <url>   ' + i18n.t('cli.commands.tutorial.step3')) as string),
         { padding: 1, borderColor: 'cyan', margin: { top: 1 } },
       ),
     );
@@ -1263,23 +1453,32 @@ program
         });
         return;
       } catch (error) {
-        console.error(chalk.red((i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error))));
+        console.error(
+          chalk.red(
+            (i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error)),
+          ),
+        );
         process.exit(1);
       }
     }
     console.log(
-      boxen(chalk.cyan.bold('🎨 ' + i18n.t('cli.commands.wizard.title') as string + ' v1.3.1\n\n') + chalk.white(i18n.t('cli.commands.wizard.subtitle') as string), {
-        padding: 1,
-        borderColor: 'cyan',
-        margin: { top: 1, bottom: 1 },
-      }),
+      boxen(
+        chalk.cyan.bold((('🎨 ' + i18n.t('cli.commands.wizard.title')) as string) + ' v1.3.2\n\n') +
+          chalk.white(i18n.t('cli.commands.wizard.subtitle') as string),
+        {
+          padding: 1,
+          borderColor: 'cyan',
+          margin: { top: 1, bottom: 1 },
+        },
+      ),
     );
 
     // 步骤 0: 语言选择（v1.2.0 新增）
     const currentLang = i18n.getLanguage();
     const languages = i18n.getSupportedLanguages();
     const langChoices = languages.map((lang) => ({
-      name: lang.code === currentLang ? `${lang.name} (${i18n.t('cli.commands.lang.currentMarker') as string})` : lang.name,
+      name:
+        lang.code === currentLang ? `${lang.name} (${i18n.t('cli.commands.lang.currentMarker') as string})` : lang.name,
       value: lang.code,
     }));
 
@@ -1291,7 +1490,7 @@ program
 
     if (selectedLang !== currentLang) {
       await i18n.setLanguage(selectedLang);
-      console.log(chalk.green(i18n.t('cli.commands.lang.success') as string + '\n'));
+      console.log(chalk.green((i18n.t('cli.commands.lang.success') as string) + '\n'));
     }
 
     const tokenStore = createTokenStore();
@@ -1305,7 +1504,9 @@ program
 
     if (existingTokens.length > 0) {
       const useExisting = await confirm({
-        message: i18n.t('cli.commands.wizard.existingToken') as string + ` (${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string})?`,
+        message:
+          (i18n.t('cli.commands.wizard.existingToken') as string) +
+          ` (${backend === 'keytar' ? (i18n.t('cli.commands.token.keychain') as string) : (i18n.t('cli.commands.token.encryptedFile') as string)})?`,
         default: true,
       });
 
@@ -1324,14 +1525,14 @@ program
 
     if (!selectedToken) {
       console.log('');
-      console.log(chalk.cyan('📝 ' + i18n.t('cli.commands.wizard.howToGetToken') as string + ':'));
-      console.log(chalk.gray('   1. ' + i18n.t('cli.commands.wizard.tokenStep1') as string));
-      console.log(chalk.gray('   2. ' + i18n.t('cli.commands.wizard.tokenStep2') as string));
-      console.log(chalk.gray('   3. ' + i18n.t('cli.commands.wizard.tokenStep3') as string));
+      console.log(chalk.cyan((('📝 ' + i18n.t('cli.commands.wizard.howToGetToken')) as string) + ':'));
+      console.log(chalk.gray(('   1. ' + i18n.t('cli.commands.wizard.tokenStep1')) as string));
+      console.log(chalk.gray(('   2. ' + i18n.t('cli.commands.wizard.tokenStep2')) as string));
+      console.log(chalk.gray(('   3. ' + i18n.t('cli.commands.wizard.tokenStep3')) as string));
       console.log('');
 
       const openBrowser = await confirm({
-        message: i18n.t('cli.commands.wizard.openTokenPage') as string + '?',
+        message: (i18n.t('cli.commands.wizard.openTokenPage') as string) + '?',
         default: true,
       });
       if (openBrowser) {
@@ -1377,9 +1578,16 @@ program
     const framework = await select({
       message: i18n.t('cli.commands.wizard.selectFramework') as string,
       choices: [
-        { name: 'React + TypeScript + Tailwind CSS (' + i18n.t('cli.commands.wizard.recommended') as string + ')', value: 'react' },
-        { name: 'Vue 3 (' + i18n.t('cli.commands.wizard.comingSoon') as string + ')', value: 'vue', disabled: '(' + i18n.t('cli.commands.wizard.stayTuned') as string + ')' },
-        { name: 'HTML/CSS (' + i18n.t('cli.commands.wizard.noFramework') as string + ')', value: 'html' },
+        {
+          name: (('React + TypeScript + Tailwind CSS (' + i18n.t('cli.commands.wizard.recommended')) as string) + ')',
+          value: 'react',
+        },
+        {
+          name: (('Vue 3 (' + i18n.t('cli.commands.wizard.comingSoon')) as string) + ')',
+          value: 'vue',
+          disabled: (('(' + i18n.t('cli.commands.wizard.stayTuned')) as string) + ')',
+        },
+        { name: (('HTML/CSS (' + i18n.t('cli.commands.wizard.noFramework')) as string) + ')', value: 'html' },
       ],
       default: 'react',
     });
@@ -1423,24 +1631,31 @@ program
     // 显示成功信息和下一步指引
     console.log(
       boxen(
-        chalk.green.bold('🎉 ' + i18n.t('cli.commands.wizard.setupComplete') as string + '\n\n') +
-          chalk.white(i18n.t('cli.commands.wizard.commonCommands') as string + ':\n') +
-          chalk.cyan('  figma-dev validate') + chalk.gray('        ' + i18n.t('cli.commands.wizard.cmdValidate') as string + '\n') +
-          chalk.cyan('  figma-dev sync <url>') + chalk.gray('      ' + i18n.t('cli.commands.wizard.cmdSync') as string + '\n') +
-          chalk.cyan('  figma-dev lint <url>') + chalk.gray('      ' + i18n.t('cli.commands.wizard.cmdLint') as string + '\n') +
-          chalk.cyan('  figma-dev jsx <url>') + chalk.gray('       ' + i18n.t('cli.commands.wizard.cmdJsx') as string + '\n') +
-          chalk.cyan('  figma-dev assets <url>') + chalk.gray('    ' + i18n.t('cli.commands.wizard.cmdAssets') as string + '\n') +
-          chalk.cyan('  figma-dev metadata <url>') + chalk.gray('  ' + i18n.t('cli.commands.wizard.cmdMetadata') as string + '\n') +
-          chalk.cyan('  figma-dev lang switch') + chalk.gray('    ' + i18n.t('cli.commands.wizard.cmdLang') as string + '\n') +
-          chalk.cyan('  figma-dev tutorial') + chalk.gray('      ' + i18n.t('cli.commands.wizard.cmdTutorial') as string + '\n\n') +
-          chalk.yellow('💡 ' + i18n.t('cli.commands.wizard.mcpHint') as string),
+        chalk.green.bold((('🎉 ' + i18n.t('cli.commands.wizard.setupComplete')) as string) + '\n\n') +
+          chalk.white((i18n.t('cli.commands.wizard.commonCommands') as string) + ':\n') +
+          chalk.cyan('  figma-dev validate') +
+          chalk.gray((('        ' + i18n.t('cli.commands.wizard.cmdValidate')) as string) + '\n') +
+          chalk.cyan('  figma-dev sync <url>') +
+          chalk.gray((('      ' + i18n.t('cli.commands.wizard.cmdSync')) as string) + '\n') +
+          chalk.cyan('  figma-dev lint <url>') +
+          chalk.gray((('      ' + i18n.t('cli.commands.wizard.cmdLint')) as string) + '\n') +
+          chalk.cyan('  figma-dev jsx <url>') +
+          chalk.gray((('       ' + i18n.t('cli.commands.wizard.cmdJsx')) as string) + '\n') +
+          chalk.cyan('  figma-dev assets <url>') +
+          chalk.gray((('    ' + i18n.t('cli.commands.wizard.cmdAssets')) as string) + '\n') +
+          chalk.cyan('  figma-dev metadata <url>') +
+          chalk.gray((('  ' + i18n.t('cli.commands.wizard.cmdMetadata')) as string) + '\n') +
+          chalk.cyan('  figma-dev lang switch') +
+          chalk.gray((('    ' + i18n.t('cli.commands.wizard.cmdLang')) as string) + '\n') +
+          chalk.cyan('  figma-dev tutorial') +
+          chalk.gray((('      ' + i18n.t('cli.commands.wizard.cmdTutorial')) as string) + '\n\n') +
+          chalk.yellow(('💡 ' + i18n.t('cli.commands.wizard.mcpHint')) as string),
         { padding: 1, borderColor: 'green', margin: { top: 1 } },
       ),
     );
   });
 
-
-// ============= 命令: GUI 配置向导 (v1.3.1) =============
+// ============= 命令: GUI 配置向导 (v1.3.2) =============
 
 program
   .command('gui')
@@ -1456,7 +1671,11 @@ program
         process.exit(0);
       });
     } catch (error) {
-      console.error(chalk.red((i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error))));
+      console.error(
+        chalk.red(
+          (i18n.t('common.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error)),
+        ),
+      );
       process.exit(1);
     }
   });
@@ -1522,7 +1741,9 @@ program
       compLog(`  COMPREPLY=()`);
       compLog(`  cur="\${COMP_WORDS[COMP_CWORD]}"`);
       compLog(`  prev="\${COMP_WORDS[COMP_CWORD-1]}"`);
-      compLog(`  commands="wizard lang validate token sync lint jsx component assets metadata structured screenshot info mcp tutorial completion"`);
+      compLog(
+        `  commands="wizard lang validate token sync lint jsx component assets metadata structured screenshot info mcp tutorial completion"`,
+      );
       compLog(`  COMPREPLY=( $(compgen -W "\${commands}" -- \${cur}) )`);
       compLog(`  return 0`);
       compLog(`}`);
@@ -1534,7 +1755,9 @@ program
       compLog(`#   figma-dev completion >> $PROFILE`);
       compLog(`Register-ArgumentCompleter -Native -CommandName figma-dev,figma-dev-tools -ScriptBlock {`);
       compLog(`  param($wordToComplete, $commandAst, $cursorPosition)`);
-      compLog(`  @('wizard','lang','validate','token','sync','lint','jsx','component','assets','metadata','structured','screenshot','info','mcp','tutorial') | Where-Object { $_ -like "$wordToComplete*" }`);
+      compLog(
+        `  @('wizard','lang','validate','token','sync','lint','jsx','component','assets','metadata','structured','screenshot','info','mcp','tutorial') | Where-Object { $_ -like "$wordToComplete*" }`,
+      );
       compLog(`}`);
     }
   });

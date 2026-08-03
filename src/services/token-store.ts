@@ -10,9 +10,9 @@
  */
 
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
 
 // ============ 类型定义 ============
 
@@ -146,8 +146,15 @@ const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 /** 密钥派生盐值（固定值，配合机器信息派生唯一密钥） */
 const KEY_DERIVATION_SALT = 'figma-dev-tools-token-store-v1-salt';
 
-/** 密钥派生迭代次数 */
-const KEY_DERIVATION_ITERATIONS = 65536;
+/**
+ * PBKDF2 迭代次数（100000次）
+ *
+ * 选择 PBKDF2 而非 scrypt 的原因：
+ * 1. 内存友好：PBKDF2 内存使用极小，不会触发 OpenSSL 内存限制错误
+ * 2. 跨平台稳定：在 Windows/macOS/Linux 各种受限环境下都能正常工作
+ * 3. 安全性足够：对于本地文件加密场景，100000次 SHA-256 迭代已足够保护 Token
+ */
+const PBKDF2_ITERATIONS = 100000;
 
 /** 派生密钥长度（字节） */
 const KEY_LENGTH = 32;
@@ -166,16 +173,15 @@ const DEFAULT_TOKEN_NAME = 'default';
 /**
  * 派生加密密钥
  *
- * 使用机器唯一信息（主机名 + 用户名）+ 固定盐通过 scrypt 派生密钥
+ * 使用机器唯一信息（主机名 + 用户名）+ 固定盐通过 PBKDF2 派生密钥
  * 确保同一台机器上的数据可以解密，跨机器无法解密
+ *
+ * PBKDF2 相比 scrypt 内存使用极小，不会出现内存限制问题，
+ * 对于本地文件加密场景安全性完全足够。
  */
 function deriveEncryptionKey(): Buffer {
   const machineInfo = `${os.hostname()}:${os.userInfo().username}`;
-  return crypto.scryptSync(machineInfo, KEY_DERIVATION_SALT, KEY_LENGTH, {
-    N: KEY_DERIVATION_ITERATIONS,
-    r: 8,
-    p: 1,
-  });
+  return crypto.pbkdf2Sync(machineInfo, KEY_DERIVATION_SALT, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256');
 }
 
 /**
@@ -273,9 +279,8 @@ class TokenStoreImpl implements TokenStore {
 
     this.keytarCheckPromise = (async (): Promise<Keytar | null> => {
       try {
-        // keytar 是可选依赖，通过 Function 构造器动态导入以避免编译时依赖检查
         const dynamicImport = new Function('specifier', 'return import(specifier)') as (
-          specifier: string
+          specifier: string,
         ) => Promise<{ default: Keytar }>;
         const keytarModule = await dynamicImport('keytar');
         this.keytarInstance = keytarModule.default;
@@ -410,7 +415,6 @@ class TokenStoreImpl implements TokenStore {
         return stored;
       }
     } catch {
-      // 读取失败时回退到默认值
     }
     return DEFAULT_TOKEN_NAME;
   }

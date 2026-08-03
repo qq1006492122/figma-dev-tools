@@ -9,7 +9,7 @@
  * - 资源下载与 SVG Sprite 生成
  * - 设计规范检查
  *
- * @version 1.3.1
+ * @version 1.3.2
  */
 
 import * as fs from 'node:fs';
@@ -20,21 +20,21 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
+import { initI18nSync } from './i18n/index.js';
+import type { A11yReportEntry } from './services/a11y-enhancer.js';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
 import { createCodeGenerator } from './services/code-generator.js';
 import { createDesignContextService } from './services/design-context.js';
 import { createDesignLinter } from './services/design-linter.js';
+import type { DesignSystemSuggestion } from './services/design-system.js';
 import { createFigmaClient, type FigmaClient } from './services/figma-client.js';
 import { createFileWriter } from './services/file-writer.js';
-import { createTokensExtractor } from './services/tokens-extractor.js';
+import type { FlexFixEntry } from './services/flex-fixer.js';
+import type { ResponsiveSuggestion } from './services/responsive-inferrer.js';
 import { generateSvgSprite, generateSpriteTypes } from './services/svg-sprite-generator.js';
-import { initI18nSync } from './i18n/index.js';
+import { createTokensExtractor } from './services/tokens-extractor.js';
 import type { DesignTokens } from './types.js';
 import type { ProcessedNode, StructuredNode } from './types/nodes.js';
-import type { FlexFixEntry } from './services/flex-fixer.js';
-import type { A11yReportEntry } from './services/a11y-enhancer.js';
-import type { DesignSystemSuggestion } from './services/design-system.js';
-import type { ResponsiveSuggestion } from './services/responsive-inferrer.js';
 import { parseFigmaUrl, extractFileKey, extractNodeId } from './utils/figma-url.js';
 
 dotenv.config();
@@ -63,7 +63,7 @@ function getFigmaClient(token?: string): FigmaClient {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.3.1',
+  version: '1.3.2',
 });
 
 server.registerTool(
@@ -339,7 +339,17 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, componentName, typescript, styleFormat, includeChildren, skipEnhancements, accessToken }) => {
+  async ({
+    fileKey,
+    nodeId,
+    figmaUrl,
+    componentName,
+    typescript,
+    styleFormat,
+    includeChildren,
+    skipEnhancements,
+    accessToken,
+  }) => {
     try {
       let key = fileKey;
       let nId = nodeId;
@@ -879,8 +889,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
             if (n.children) n.children.forEach(collectAssets);
           }
           collectAssets(ctx.node);
-        } catch {
-        }
+        } catch {}
       }
 
       const seen = new Set<string>();
@@ -990,9 +999,11 @@ server.registerTool(
 
       if (failCount > 0) {
         preview += `\n## 处理失败的文件\n\n`;
-        results.filter((r) => !r.success).forEach((r) => {
-          preview += `- ${r.name}: ${r.error}\n`;
-        });
+        results
+          .filter((r) => !r.success)
+          .forEach((r) => {
+            preview += `- ${r.name}: ${r.error}\n`;
+          });
       }
 
       return {
@@ -1008,7 +1019,9 @@ server.registerTool(
       };
     } catch (error) {
       return {
-        content: [{ type: 'text', text: `生成 SVG Sprite 失败: ${error instanceof Error ? error.message : String(error)}` }],
+        content: [
+          { type: 'text', text: `生成 SVG Sprite 失败: ${error instanceof Error ? error.message : String(error)}` },
+        ],
         isError: true,
       };
     }
@@ -1119,8 +1132,7 @@ server.registerTool(
           try {
             const context = await ctxService.getDesignContext(key, page.id, maxDepth);
             nodesToLint.push(context.node);
-          } catch {
-          }
+          } catch {}
         }
       }
 
@@ -1141,7 +1153,9 @@ server.registerTool(
       };
     } catch (error) {
       return {
-        content: [{ type: 'text', text: `代码还原质量预检失败: ${error instanceof Error ? error.message : String(error)}` }],
+        content: [
+          { type: 'text', text: `代码还原质量预检失败: ${error instanceof Error ? error.message : String(error)}` },
+        ],
         isError: true,
       };
     }
@@ -1185,7 +1199,17 @@ v1.2.0 新增强化功能：
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, componentName, sceneName, maxDepth, skipEnhancements, skipLintCheck, accessToken }) => {
+  async ({
+    fileKey,
+    nodeId,
+    figmaUrl,
+    componentName,
+    sceneName,
+    maxDepth,
+    skipEnhancements,
+    skipLintCheck,
+    accessToken,
+  }) => {
     try {
       let resolvedKey = fileKey;
       let resolvedNode = nodeId;
@@ -1209,8 +1233,7 @@ v1.2.0 新增强化功能：
         try {
           const linter = createDesignLinter();
           lintReport = linter.lint(ctx.node);
-        } catch {
-        }
+        } catch {}
       }
 
       const result = await codeGen.generateJsxFromContext(ctx, {
@@ -1226,7 +1249,9 @@ v1.2.0 新增强化功能：
       if (lintReport && (lintReport.errorCount > 0 || lintReport.warningCount > 3)) {
         lines.push(`## ⚠️ 设计规范提示\n`);
         const scoreEmoji = lintReport.score >= 75 ? '✅' : lintReport.score >= 60 ? '⚠️' : '❌';
-        lines.push(`${scoreEmoji} 当前设计规范评分: **${lintReport.score}/100**，发现 ${lintReport.errorCount} 个错误、${lintReport.warningCount} 个警告`);
+        lines.push(
+          `${scoreEmoji} 当前设计规范评分: **${lintReport.score}/100**，发现 ${lintReport.errorCount} 个错误、${lintReport.warningCount} 个警告`,
+        );
         if (lintReport.score < 80) {
           lines.push('');
           lines.push('💡 建议先修复设计规范问题再生成代码，可以获得更高质量的还原结果。');
@@ -1249,7 +1274,9 @@ v1.2.0 新增强化功能：
         }
         const a11yReport = reports.a11y;
         if (a11yReport) {
-          const a11yCount = a11yReport.enhancementsCount ?? (a11yReport.semanticTagsCount + a11yReport.buttonsIdentifiedCount + a11yReport.ariaAddedCount);
+          const a11yCount =
+            a11yReport.enhancementsCount ??
+            a11yReport.semanticTagsCount + a11yReport.buttonsIdentifiedCount + a11yReport.ariaAddedCount;
           if (a11yCount > 0) {
             lines.push(`## ♿ 无障碍增强 (${a11yCount} 处)\n`);
             a11yReport.report.slice(0, 10).forEach((enh: A11yReportEntry) => {
@@ -1260,7 +1287,12 @@ v1.2.0 新增强化功能：
         }
         const dsReport = reports.designSystem;
         if (dsReport) {
-          const dsCount = dsReport.suggestionsCount ?? (dsReport.colorSuggestions.length + dsReport.spacingTokens.length + dsReport.radiusTokens.length + dsReport.typographySuggestions.length);
+          const dsCount =
+            dsReport.suggestionsCount ??
+            dsReport.colorSuggestions.length +
+              dsReport.spacingTokens.length +
+              dsReport.radiusTokens.length +
+              dsReport.typographySuggestions.length;
           if (dsCount > 0) {
             lines.push(`## 🎨 设计系统建议 (${dsCount} 条)\n`);
             dsReport.suggestions.slice(0, 10).forEach((sug: DesignSystemSuggestion) => {
@@ -1271,7 +1303,11 @@ v1.2.0 新增强化功能：
         }
         const respReport = reports.responsive;
         if (respReport) {
-          const respCount = respReport.suggestionsCount ?? (respReport.recommendations.length + respReport.classSuggestions.length + respReport.layoutSuggestions.length);
+          const respCount =
+            respReport.suggestionsCount ??
+            respReport.recommendations.length +
+              respReport.classSuggestions.length +
+              respReport.layoutSuggestions.length;
           if (respCount > 0) {
             lines.push(`## 📱 响应式建议 (${respCount} 条)\n`);
             respReport.suggestions.slice(0, 10).forEach((sug: ResponsiveSuggestion) => {
@@ -1461,5 +1497,5 @@ function countNodes(node: { children?: unknown[] }): number {
 export async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Figma Dev Tools MCP Server v1.3.1 running via stdio');
+  console.error('Figma Dev Tools MCP Server v1.3.2 running via stdio');
 }

@@ -14,19 +14,19 @@
  *   POST /api/config/complete - Complete configuration and save settings
  */
 
-import http from 'node:http';
 import fs from 'node:fs';
-import path from 'node:path';
+import http from 'node:http';
 import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import open from 'open';
 import chalk from 'chalk';
+import open from 'open';
 
-import { createTokenStore } from './token-store.js';
-import { createFigmaClient } from './figma-client.js';
 import { initI18nSync } from '../i18n/index.js';
 import type { Language } from '../i18n/index.js';
+import { createFigmaClient } from './figma-client.js';
+import { createTokenStore } from './token-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,6 +34,7 @@ const GUI_DIR = path.resolve(__dirname, '../../gui');
 
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
+const VERSION = '1.3.2';
 
 interface EditorInfo {
   name: string;
@@ -66,10 +67,7 @@ function getVSCodePaths(): string[] {
   const home = getHomeDir();
   const appData = getAppDataDir();
   if (platform === 'win32') {
-    return [
-      path.join(appData, 'Code', 'User', 'mcp.json'),
-      path.join(appData, 'Code - Insiders', 'User', 'mcp.json'),
-    ];
+    return [path.join(appData, 'Code', 'User', 'mcp.json'), path.join(appData, 'Code - Insiders', 'User', 'mcp.json')];
   }
   if (platform === 'darwin') {
     return [
@@ -133,7 +131,8 @@ function getClaudeDesktopPaths(): string[] {
   const platform = os.platform();
   const home = getHomeDir();
   if (platform === 'win32') return [path.join(getAppDataDir(), 'Claude', 'claude_desktop_config.json')];
-  if (platform === 'darwin') return [path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')];
+  if (platform === 'darwin')
+    return [path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')];
   return [path.join(home, '.config', 'Claude', 'claude_desktop_config.json')];
 }
 
@@ -147,19 +146,73 @@ function getClinePaths(): string[] {
   const appData = getAppDataDir();
   if (platform === 'win32') {
     return [
-      path.join(appData, 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
-      path.join(appData, 'Cursor', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
+      path.join(
+        appData,
+        'Code',
+        'User',
+        'globalStorage',
+        'saoudrizwan.claude-dev',
+        'settings',
+        'cline_mcp_settings.json',
+      ),
+      path.join(
+        appData,
+        'Cursor',
+        'User',
+        'globalStorage',
+        'saoudrizwan.claude-dev',
+        'settings',
+        'cline_mcp_settings.json',
+      ),
     ];
   }
   if (platform === 'darwin') {
     return [
-      path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
-      path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Code',
+        'User',
+        'globalStorage',
+        'saoudrizwan.claude-dev',
+        'settings',
+        'cline_mcp_settings.json',
+      ),
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Cursor',
+        'User',
+        'globalStorage',
+        'saoudrizwan.claude-dev',
+        'settings',
+        'cline_mcp_settings.json',
+      ),
     ];
   }
   return [
-    path.join(home, '.config', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
-    path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
+    path.join(
+      home,
+      '.config',
+      'Code',
+      'User',
+      'globalStorage',
+      'saoudrizwan.claude-dev',
+      'settings',
+      'cline_mcp_settings.json',
+    ),
+    path.join(
+      home,
+      '.config',
+      'Cursor',
+      'User',
+      'globalStorage',
+      'saoudrizwan.claude-dev',
+      'settings',
+      'cline_mcp_settings.json',
+    ),
   ];
 }
 
@@ -169,19 +222,73 @@ function getRooCodePaths(): string[] {
   const appData = getAppDataDir();
   if (platform === 'win32') {
     return [
-      path.join(appData, 'Code', 'User', 'globalStorage', 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json'),
-      path.join(appData, 'Cursor', 'User', 'globalStorage', 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json'),
+      path.join(
+        appData,
+        'Code',
+        'User',
+        'globalStorage',
+        'rooveterinaryinc.roo-cline',
+        'settings',
+        'mcp_settings.json',
+      ),
+      path.join(
+        appData,
+        'Cursor',
+        'User',
+        'globalStorage',
+        'rooveterinaryinc.roo-cline',
+        'settings',
+        'mcp_settings.json',
+      ),
     ];
   }
   if (platform === 'darwin') {
     return [
-      path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json'),
-      path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json'),
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Code',
+        'User',
+        'globalStorage',
+        'rooveterinaryinc.roo-cline',
+        'settings',
+        'mcp_settings.json',
+      ),
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Cursor',
+        'User',
+        'globalStorage',
+        'rooveterinaryinc.roo-cline',
+        'settings',
+        'mcp_settings.json',
+      ),
     ];
   }
   return [
-    path.join(home, '.config', 'Code', 'User', 'globalStorage', 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json'),
-    path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json'),
+    path.join(
+      home,
+      '.config',
+      'Code',
+      'User',
+      'globalStorage',
+      'rooveterinaryinc.roo-cline',
+      'settings',
+      'mcp_settings.json',
+    ),
+    path.join(
+      home,
+      '.config',
+      'Cursor',
+      'User',
+      'globalStorage',
+      'rooveterinaryinc.roo-cline',
+      'settings',
+      'mcp_settings.json',
+    ),
   ];
 }
 
@@ -235,7 +342,11 @@ function hasMcpConfig(config: Record<string, unknown>, zedFormat: boolean): bool
   return !!(servers && servers['figma-dev-tools']);
 }
 
-function mergeMcpConfig(config: Record<string, unknown>, serverEntry: { command: string; args: string[] }, zedFormat: boolean): Record<string, unknown> {
+function mergeMcpConfig(
+  config: Record<string, unknown>,
+  serverEntry: { command: string; args: string[] },
+  zedFormat: boolean,
+): Record<string, unknown> {
   if (zedFormat) {
     if (!config.mcp_servers) config.mcp_servers = {};
     (config.mcp_servers as Record<string, unknown>)['figma-dev-tools'] = serverEntry;
@@ -309,6 +420,13 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 }
 
 export async function startGuiServer(): Promise<http.Server> {
+  console.log('[GUI] Starting GUI server...');
+  console.log('[GUI] Version:', VERSION);
+  console.log('[GUI] Platform:', os.platform());
+  console.log('[GUI] Node.js version:', process.version);
+  console.log('[GUI] GUI directory:', GUI_DIR);
+  console.log('[GUI] Base port:', BASE_PORT);
+
   const i18n = initI18nSync();
   const tokenStore = createTokenStore();
 
@@ -320,14 +438,22 @@ export async function startGuiServer(): Promise<http.Server> {
     outputDir: './src/styles/figma',
   };
 
-  const existingToken = await tokenStore.getToken();
-  state.tokenConfigured = !!existingToken;
+  try {
+    console.log('[GUI] Checking for existing token...');
+    const existingToken = await tokenStore.getToken();
+    state.tokenConfigured = !!existingToken;
+    console.log('[GUI] Existing token found:', state.tokenConfigured);
+  } catch (error) {
+    console.error('[GUI] Error checking existing token:', error);
+    state.tokenConfigured = false;
+  }
 
   const configPath = path.resolve(process.cwd(), 'figma-dev.config.json');
   const existingConfig = readJsonSafe(configPath);
   if (existingConfig) {
     if (typeof existingConfig.framework === 'string') state.framework = existingConfig.framework;
     if (typeof existingConfig.outputDir === 'string') state.outputDir = existingConfig.outputDir;
+    console.log('[GUI] Loaded existing config:', { framework: state.framework, outputDir: state.outputDir });
   }
 
   let port = BASE_PORT;
@@ -335,6 +461,7 @@ export async function startGuiServer(): Promise<http.Server> {
 
   for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
     port = BASE_PORT + attempt;
+    console.log('[GUI] Trying port:', port);
     try {
       server = http.createServer(async (req, res) => {
         const reqUrl = req.url || '/';
@@ -353,7 +480,15 @@ export async function startGuiServer(): Promise<http.Server> {
 
         try {
           if (pathname === '/api/status') {
-            const hasToken = !!(await tokenStore.getToken());
+            console.log('[GUI] /api/status request received');
+            let hasToken = false;
+            try {
+              hasToken = !!(await tokenStore.getToken());
+              console.log('[GUI] /api/status: token check result:', hasToken);
+            } catch (error) {
+              console.error('[GUI] /api/status: error checking token:', error);
+              hasToken = false;
+            }
             sendJson(res, 200, {
               success: true,
               language: state.language,
@@ -363,47 +498,60 @@ export async function startGuiServer(): Promise<http.Server> {
                 outputDir: state.outputDir,
               },
               configuredEditors: Array.from(state.configuredEditors),
-              version: '1.3.0',
+              version: VERSION,
             });
             return;
           }
 
           if (pathname === '/api/language' && req.method === 'POST') {
+            console.log('[GUI] /api/language request received');
             const body = await readBody(req);
             const data = JSON.parse(body) as { language?: Language };
             if (data.language && (data.language === 'zh-CN' || data.language === 'en-US')) {
               state.language = data.language;
               await i18n.setLanguage(data.language);
+              console.log('[GUI] Language set to:', data.language);
               sendJson(res, 200, { success: true, language: data.language });
             } else {
+              console.log('[GUI] Invalid language:', data.language);
               sendJson(res, 400, { success: false, error: 'Invalid language' });
             }
             return;
           }
 
           if (pathname === '/api/token' && req.method === 'POST') {
+            console.log('[GUI] /api/token request received');
             const body = await readBody(req);
             const data = JSON.parse(body) as { token?: string };
             const token = data.token;
 
+            console.log('[GUI] Received token validation request, token length:', token?.length);
+
             if (!token || token.length < 20 || !token.startsWith('figd_')) {
+              console.log('[GUI] Invalid token format');
               sendJson(res, 400, { success: false, valid: false, error: 'Invalid token format' });
               return;
             }
 
             try {
+              console.log('[GUI] Validating token with Figma API...');
               const client = createFigmaClient({ accessToken: token });
               const isValid = await client.validateToken();
+              console.log('[GUI] Figma API validation result:', isValid);
 
               if (isValid) {
+                console.log('[GUI] Saving token to secure storage...');
                 await tokenStore.saveToken('default', token);
                 await tokenStore.setDefault('default');
                 state.tokenConfigured = true;
+                console.log('[GUI] Token saved successfully');
                 sendJson(res, 200, { success: true, valid: true });
               } else {
+                console.log('[GUI] Token validation failed');
                 sendJson(res, 200, { success: false, valid: false, error: 'Token validation failed' });
               }
             } catch (error) {
+              console.error('[GUI] Token error:', error);
               sendJson(res, 200, {
                 success: false,
                 valid: false,
@@ -414,6 +562,7 @@ export async function startGuiServer(): Promise<http.Server> {
           }
 
           if (pathname === '/api/editors') {
+            console.log('[GUI] /api/editors request received');
             const editorConfigs = getEditorConfigs();
             const editors: EditorInfo[] = editorConfigs.map((ec) => {
               const result = detectEditor(ec);
@@ -429,6 +578,7 @@ export async function startGuiServer(): Promise<http.Server> {
           }
 
           if (pathname === '/api/editors/install' && req.method === 'POST') {
+            console.log('[GUI] /api/editors/install request received');
             const body = await readBody(req);
             const data = JSON.parse(body) as { editor?: string };
             const editorName = data.editor;
@@ -445,11 +595,14 @@ export async function startGuiServer(): Promise<http.Server> {
             }
 
             try {
+              console.log('[GUI] Installing for editor:', editorName);
               const success = installForEditor(editorConfig);
               if (success) {
                 state.configuredEditors.add(editorName);
+                console.log('[GUI] Editor installed successfully:', editorName);
                 sendJson(res, 200, { success: true, editor: editorName });
               } else {
+                console.log('[GUI] Editor config directory not found:', editorName);
                 sendJson(res, 200, {
                   success: false,
                   error: 'Editor config directory not found',
@@ -457,6 +610,7 @@ export async function startGuiServer(): Promise<http.Server> {
                 });
               }
             } catch (error) {
+              console.error('[GUI] Editor install error:', error);
               sendJson(res, 500, {
                 success: false,
                 error: error instanceof Error ? error.message : String(error),
@@ -466,11 +620,14 @@ export async function startGuiServer(): Promise<http.Server> {
           }
 
           if (pathname === '/api/config/complete' && req.method === 'POST') {
+            console.log('[GUI] /api/config/complete request received');
             const body = await readBody(req);
             const data = JSON.parse(body) as { framework?: string; outputDir?: string };
 
             if (data.framework) state.framework = data.framework;
             if (data.outputDir) state.outputDir = data.outputDir;
+
+            console.log('[GUI] Saving config:', { framework: state.framework, outputDir: state.outputDir });
 
             const config = {
               $schema: 'https://schema.figma-dev-tools.com/config.json',
@@ -492,11 +649,12 @@ export async function startGuiServer(): Promise<http.Server> {
               fs.writeFileSync(
                 envPath,
                 '# Figma Dev Tools Configuration\n' +
-                '# Token is securely stored in system keychain/encrypted file\n' +
-                '# Set FIGMA_ACCESS_TOKEN environment variable to override\n',
+                  '# Token is securely stored in system keychain/encrypted file\n' +
+                  '# Set FIGMA_ACCESS_TOKEN environment variable to override\n',
               );
             }
 
+            console.log('[GUI] Config saved successfully');
             sendJson(res, 200, { success: true, config });
             return;
           }
@@ -521,18 +679,23 @@ export async function startGuiServer(): Promise<http.Server> {
           res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
           res.end('Not Found');
         } catch (error) {
-          console.error('Server error:', error);
+          console.error('[GUI] Server error:', error);
           sendJson(res, 500, { success: false, error: 'Internal server error' });
         }
       });
 
       await new Promise<void>((resolve, reject) => {
-        server.listen(port, () => resolve());
+        server.listen(port, () => {
+          console.log('[GUI] Server listening on port:', port);
+          resolve();
+        });
         server.on('error', (err: NodeJS.ErrnoException) => {
           if (err.code === 'EADDRINUSE') {
+            console.log('[GUI] Port', port, 'is in use');
             server.close();
             reject(new Error('EADDRINUSE'));
           } else {
+            console.error('[GUI] Server error:', err);
             reject(err);
           }
         });
@@ -545,6 +708,8 @@ export async function startGuiServer(): Promise<http.Server> {
       console.log('');
       console.log(chalk.white('   🌐 Access URL: ') + chalk.cyan(`http://localhost:${port}`));
       console.log(chalk.white('   📂 GUI directory: ') + chalk.gray(GUI_DIR));
+      console.log(chalk.white('   🔢 Version: ') + chalk.gray(VERSION));
+      console.log(chalk.white('   🖥️  Platform: ') + chalk.gray(os.platform()));
       console.log('');
       console.log(chalk.yellow('   💡 The browser will open automatically.'));
       console.log(chalk.gray('      Press Ctrl+C to stop the server.'));
@@ -562,6 +727,7 @@ export async function startGuiServer(): Promise<http.Server> {
         console.log(chalk.yellow(`   ⚠️  Port ${port} is in use, trying next port...`));
         continue;
       }
+      console.error('[GUI] Failed to start server:', err);
       throw err;
     }
   }

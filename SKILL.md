@@ -1,9 +1,9 @@
 ---
 name: "figma-dev-tools"
-description: "Figma 设计到代码增强工具集 v1.3.1 - 14个MCP工具，智能层级解析、多级Token映射、资源自动下载、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div soup、上下文爆炸、hex写死、资源路径处理等问题。支持Trae/VS Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。"
+description: "Figma 设计到代码增强工具集 v1.3.2 - 14个MCP工具，智能层级解析、多级Token映射、资源自动下载、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div soup、上下文爆炸、hex写死、资源路径处理等问题。支持Trae/VS Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。"
 ---
 
-# Figma Dev Tools v1.3.1 - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.3.2 - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 
@@ -44,7 +44,7 @@ description: "Figma 设计到代码增强工具集 v1.3.1 - 14个MCP工具，智
 
 ---
 
-## 🚀 标准工作流（v1.3.1）
+## 🚀 标准工作流（v1.3.2）
 
 > **根据目标框架选择对应工作流，严格按步骤调用工具，不要跳步！**
 
@@ -66,7 +66,7 @@ Step 6: 人工微调               ← 处理TODO、复用组件、加交互
 Step 7: 高保真检查             ← 对照下方检查清单逐项验证
 ```
 
-### 工作流 B：Vue/Svelte/HTML/Angular/Solid 等任意框架（v1.3.1 新）
+### 工作流 B：Vue/Svelte/HTML/Angular/Solid 等任意框架（v1.3.2 新）
 
 ```
 Step 1: figma_get_metadata        ← 高层概览（~4KB，了解结构）
@@ -219,7 +219,7 @@ Step 7: 人工微调 + 还原度检查
 
 同工作流 A Step 1，使用 `figma_get_metadata`。
 
-### Step 2: 获取框架无关结构化数据（⭐ v1.3.1 核心）
+### Step 2: 获取框架无关结构化数据（⭐ v1.3.2 核心）
 
 **工具**: `figma_get_structured_data`
 
@@ -458,7 +458,7 @@ function TrafficLights() {
 | `figma_generate_jsx` | ⭐ 一键生成React TSX | `{ figmaUrl: "...", componentName: "Xxx", sceneName: "xxx" }` |
 | `figma_download_assets` | 下载图片/SVG到public | `{ fileKey: "...", sceneName: "xxx", assetNodeIds: ["..."] }` |
 
-**多框架支持（v1.3.1 新）：**
+**多框架支持（v1.3.2 新）：**
 
 | 工具 | 一句话用途 | 最小调用示例 |
 |------|----------|-------------|
