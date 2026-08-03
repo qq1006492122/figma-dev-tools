@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.1.3
+# 🎨 Figma Dev Tools v1.1.4
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -478,7 +478,7 @@ Token 读取优先级：
                                           │ stdio MCP
                                           ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.1.3                   │
+│                      figma-dev-tools MCP Server v1.1.4                   │
 │                                                                           │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────┐ │
 │  │  figma-url  │───▶│figma-client  │───▶│       Figma REST API        │ │
@@ -657,7 +657,7 @@ Zed 使用 `mcp_servers` 字段（下划线），不是 `mcpServers`（驼峰）
 
 ### vs 官方 Figma MCP (Framelink)
 
-| 特性 | Framelink (官方 Figma MCP) | figma-dev-tools v1.0 | figma-dev-tools v1.1.2 |
+| 特性 | Framelink (官方 Figma MCP) | figma-dev-tools v1.0 | figma-dev-tools v1.1.4 |
 |------|---------------------------|---------------------|-----------------------|
 | 设计上下文获取 | ✅ 全量拉取 | ✅ | ✅ **渐进式（~4KB 概览，防爆炸）** |
 | 节点截图 | ✅ | ✅ | ✅ |
