@@ -1,6 +1,6 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, and one-click installation across 10+ editors. Zero-config npx mode with --figma-api-key.",
   "type": "module",
   "main": "dist/index.js",

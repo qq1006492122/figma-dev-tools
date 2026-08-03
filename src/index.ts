@@ -57,7 +57,7 @@ function getFigmaClient(token?: string): FigmaClient {
  */
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.1.0',
+  version: '1.1.3',
 });
 
 // ============= 工具注册 =============

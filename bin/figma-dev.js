@@ -46,7 +46,7 @@ async function runCli() {
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
-    
+
     // Handle --figma-api-key=xxx or --token=xxx format
     if (arg.startsWith('--figma-api-key=') || arg.startsWith('--figma-api_key=')) {
       process.env.FIGMA_ACCESS_TOKEN = arg.split('=')[1];
@@ -58,7 +58,7 @@ async function runCli() {
       i++;
       continue;
     }
-    
+
     // Handle --figma-api-key <value> or -t <value> or --token <value> format
     if (arg === '--figma-api-key' || arg === '--figma-api_key' || arg === '-t' || arg === '--token') {
       if (i + 1 < args.length) {
@@ -67,11 +67,11 @@ async function runCli() {
         continue;
       }
     }
-    
+
     filteredArgs.push(arg);
     i++;
   }
-  
+
   args = filteredArgs;
   const command = args[0];
 

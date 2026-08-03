@@ -17,7 +17,13 @@ import { createDesignContextService } from '../services/design-context.js';
 import { createFigmaClient } from '../services/figma-client.js';
 import { createFileWriter } from '../services/file-writer.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
-import type { ProcessedAsset, ProcessedFill, ProcessedNode, ProcessedSolidFill, StructuredNode } from '../types/nodes.js';
+import type {
+  ProcessedAsset,
+  ProcessedFill,
+  ProcessedNode,
+  ProcessedSolidFill,
+  StructuredNode,
+} from '../types/nodes.js';
 import { parseFigmaUrl } from '../utils/figma-url.js';
 
 // 加载环境变量
@@ -427,17 +433,22 @@ program
 
       const nodeCount = countNodes(context.node);
       const structuredNode = toStructuredNode(context.node);
-      const output = cmdOptions.format === 'json' ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
+      const output =
+        cmdOptions.format === 'json' ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
 
       if (cmdOptions.output) {
         const outPath = path.resolve(cmdOptions.output);
         await fs.ensureDir(path.dirname(outPath));
         await fs.writeFile(outPath, output, 'utf-8');
         console.log(chalk.green(`\n✅ 结构化数据已保存 (${duration}s): ${outPath}`));
-        console.log(chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`));
+        console.log(
+          chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`),
+        );
       } else {
         console.log(chalk.green(`\n✅ 获取完成 (${duration}s): ${context.node.name}`));
-        console.log(chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`));
+        console.log(
+          chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`),
+        );
         console.log('');
         console.log(chalk.cyan('─'.repeat(70)));
         console.log(output);
@@ -484,7 +495,9 @@ function formatStructuredPretty(node: StructuredNode, indent: number = 0): strin
       const r = Math.round((c.r ?? 0) * 255);
       const g = Math.round((c.g ?? 0) * 255);
       const b = Math.round((c.b ?? 0) * 255);
-      styleParts.push(`bg=#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`);
+      styleParts.push(
+        `bg=#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`,
+      );
     }
   }
   if (node.cornerRadius?.uniform && node.cornerRadius.topLeft > 0) {
@@ -499,7 +512,9 @@ function formatStructuredPretty(node: StructuredNode, indent: number = 0): strin
   }
 
   if (node.asset) {
-    lines.push(`${pad}  asset: ${node.asset.name} (${node.asset.type}/${node.asset.format}, ${node.asset.width}×${node.asset.height})`);
+    lines.push(
+      `${pad}  asset: ${node.asset.name} (${node.asset.type}/${node.asset.format}, ${node.asset.width}×${node.asset.height})`,
+    );
   }
 
   if (node.children && node.children.length > 0) {
