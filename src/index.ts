@@ -9,7 +9,7 @@
  * - 资源下载与 SVG Sprite 生成
  * - 设计规范检查
  *
- * @version 1.2.0
+ * @version 1.2.1
  */
 
 import * as fs from 'node:fs';
@@ -63,7 +63,7 @@ function getFigmaClient(token?: string): FigmaClient {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.2.0',
+  version: '1.2.1',
 });
 
 server.registerTool(
