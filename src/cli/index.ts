@@ -17,7 +17,7 @@ import { createDesignContextService } from '../services/design-context.js';
 import { createFigmaClient } from '../services/figma-client.js';
 import { createFileWriter } from '../services/file-writer.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
-import type { ProcessedAsset, ProcessedFill, ProcessedNode, ProcessedSolidFill } from '../types/nodes.js';
+import type { ProcessedAsset, ProcessedFill, ProcessedNode, ProcessedSolidFill, StructuredNode } from '../types/nodes.js';
 import { parseFigmaUrl } from '../utils/figma-url.js';
 
 // 加载环境变量
@@ -426,7 +426,8 @@ program
       }
 
       const nodeCount = countNodes(context.node);
-      const output = cmdOptions.format === 'json' ? JSON.stringify(toStructuredNode(context.node), null, 2) : formatStructuredPretty(context.node);
+      const structuredNode = toStructuredNode(context.node);
+      const output = cmdOptions.format === 'json' ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
 
       if (cmdOptions.output) {
         const outPath = path.resolve(cmdOptions.output);
@@ -448,11 +449,11 @@ program
     }
   });
 
-function formatStructuredPretty(node: ProcessedNode, indent: number = 0): string {
+function formatStructuredPretty(node: StructuredNode, indent: number = 0): string {
   const pad = '  '.repeat(indent);
   const lines: string[] = [];
   const sizeStr = node.size ? `${Math.round(node.size.width)}×${Math.round(node.size.height)}` : 'N/A';
-  const tag = (node.originalType || node.type || 'unknown').toLowerCase();
+  const tag = (node.type || 'unknown').toLowerCase();
   lines.push(`${pad}[${node.role}] <${tag}> "${node.name}" (${sizeStr})`);
 
   if (node.textContent) {
@@ -510,8 +511,13 @@ function formatStructuredPretty(node: ProcessedNode, indent: number = 0): string
   return lines.join('\n');
 }
 
-function toStructuredNode(node: ProcessedNode): any {
-  const result: any = {
+/**
+ * 将 ProcessedNode 转换为 StructuredNode
+ * StructuredNode 使用 type 字段替代 originalType，保持框架无关性，与 MCP 工具输出一致
+ */
+function toStructuredNode(node: ProcessedNode): StructuredNode {
+  // 构造 StructuredNode，所有必需字段都已包含
+  const result: StructuredNode = {
     id: node.id,
     name: node.name,
     type: node.originalType,

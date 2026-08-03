@@ -1,0 +1,11 @@
+feat: v1.1.0 - 框架无关结构化数据、多编辑器兼容、pnpm支持、零配置npx模式
+
+- 新增 figma_get_structured_data MCP工具：输出框架无关JSON，支持Vue/Svelte/HTML等
+- 新增 structured CLI命令：获取框架无关结构化数据
+- 新增 mcp-standalone.mjs：支持 npx -y figma-dev-tools --figma-api-key=xxx 零配置运行
+- 支持 --figma-api-key/-t 参数直接注入Token，无需.env
+- install.mjs 支持包管理器自动检测（pnpm/yarn/bun/npm）
+- install.mjs 新增Zed、Cline、Roo Code编辑器支持（共10+编辑器）
+- Zed使用mcp_servers字段（下划线格式）
+- 修复ProcessedNode→StructuredNode类型转换
+- 更新README和SKILL.md文档
