@@ -1,7 +1,7 @@
-# Figma Dev Tools v1.1.2 优化方向深度分析报告
+# Figma Dev Tools v1.2.0 优化方向深度分析报告
 
 > 分析日期：2026-08-03
-> 当前版本：v1.1.2
+> 当前版本：v1.2.0
 > 目标版本：v1.2.0+
 
 ---
@@ -25,10 +25,10 @@
 |--------|---------|---------|------|
 | **可视化配置向导** | 仅 CLI 命令行，无 GUI | 增加 `figma-dev init --gui` 命令，启动本地 Web 配置面板（端口 54321），可视化输入 Token、选择框架、检测编辑器 | 降低首次使用门槛，减少 80% 配置问题 |
 | **一键截图还原对比** | 需手动调用截图+JSX 生成 | 新增 `figma_verify` 工具，自动生成侧-by-side对比：设计截图 vs 生成代码渲染截图 + 差异热力图 | 小白可直观验证还原度，无需手动对比 |
-| **中文友好报错** | 部分错误为英文/技术术语 | 建立错误码映射表，所有错误提示中文本地化 + 常见问题解决方案链接 | 减少用户查错时间 |
+| **中文友好报错** | ✅ 已完成：错误码系统+完整中文错误信息 | 持续优化错误码覆盖范围 | 减少用户查错时间 |
 | **预设模板库** | 无模板 | 内置 20+ 常见场景模板：登录页、列表页、详情页、表单、卡片列表、导航栏等 | 小白可直接套用模板，无需从零开始 |
-| **交互式 CLI** | 仅参数式命令 | 增加 `figma-dev wizard` 交互式命令，通过问答方式引导完成配置和生成 | 降低命令行学习成本 |
-| **视频教程集成** | 仅文字文档 | CLI 中 `figma-dev tutorial` 命令可打开B站/YouTube教程链接，文档内嵌视频二维码 | 新手快速上手 |
+| **交互式 CLI** | ✅ 已完成：`figma-dev wizard` 交互式命令 | 持续优化向导体验 | 降低命令行学习成本 |
+| **视频教程集成** | ✅ 已完成：`figma-dev tutorial` 命令 | CLI 中可打开B站/YouTube教程链接，文档内嵌视频二维码 | 新手快速上手 |
 
 ### 1.2 针对重度前端开发者
 
@@ -39,10 +39,10 @@
 | **自定义代码模板** | 固定模板 | 支持 `.figma-dev/templates/` 目录下放自定义 EJS/Handlebars 模板，可覆盖默认生成逻辑 | 适配团队代码规范，无需二次修改 |
 | **TS 类型自动生成** | 仅基础 Props | 自动从 Figma Component Properties 生成完整 TypeScript 类型定义，包括 Variant 类型联合 | 类型安全，减少手动写类型的工作量 |
 | **Storybook 集成** | 无 | 自动生成 `.stories.tsx` 文件，包含所有 Variants 的示例，一键启动 Storybook 预览 | 组件文档自动生成，便于团队协作 |
-| **Git 友好输出** | 无格式化配置 | 生成代码自动遵循项目 Prettier/ESLint 配置，自动检测并适配代码风格 | 代码直接可提交，无需手动格式化 |
+| **Git 友好输出** | ✅ 已完成：Prettier 自动格式化 | 生成代码自动遵循项目 Prettier/ESLint 配置，自动检测并适配代码风格 | 代码直接可提交，无需手动格式化 |
 | **增量更新** | 全量重新生成 | 基于节点 ID 缓存，仅重新生成变更部分，保留用户手动修改的代码（通过特殊标记区块） | 不覆盖用户自定义逻辑，支持迭代开发 |
-| **CLI 补全** | 无 | 生成 zsh/bash/fish/powershell 自动补全脚本，`figma-dev completion` 一键安装 | 命令行效率提升 |
-| **Monorepo 深度集成** | 仅自动检测 pnpm-workspace | 支持 Turborepo、Nx、Lerna 等 monorepo 工具，自动识别 packages/apps 目录结构 | 大型项目开箱即用 |
+| **CLI 补全** | ✅ 已完成：zsh/bash/powershell 自动补全 | `figma-dev completion` 一键安装 | 命令行效率提升 |
+| **Monorepo 深度集成** | ✅ 已完成：自动检测 pnpm-workspace | 支持 Turborepo、Nx、Lerna 等 monorepo 工具，自动识别 packages/apps 目录结构 | 大型项目开箱即用 |
 
 ---
 
@@ -52,11 +52,11 @@
 
 | 优化项 | 当前状态 | 风险 | 建议方案 |
 |--------|---------|------|---------|
-| **Token 存储方式** | 明文存储在 .env 或 MCP 配置中 | 易被意外提交到 Git，或被其他进程读取 | - Windows: 使用 Credential Manager<br>- macOS: 使用 Keychain<br>- Linux: 使用 libsecret/gnome-keyring<br>- 提供 `figma-dev token set/remove/get` 安全管理命令 |
+| **Token 存储方式** | ✅ 已完成：系统 Keychain/Credential Manager + AES 加密文件双后端 | - | - Windows: 使用 Credential Manager<br>- macOS: 使用 Keychain<br>- Linux: 使用 libsecret/gnome-keyring<br>- 提供 `figma-dev token set/remove/get` 安全管理命令 |
 | **Token 权限最小化** | 无引导，用户常给全权限 | 过度授权风险 | Token 配置向导明确提示只勾选 "File content (Read only)"，自动验证权限范围并警告 |
 | **Token 过期检测** | 仅 API 返回 401 时才知道 | 工作中断 | 定期（每24小时）验证 Token 有效性，提前7天提醒即将过期 |
-| **多 Token 支持** | 单 Token | 团队协作不便 | 支持多账号/多 Token 配置，按项目/团队切换，类似 SSH config |
-| **Token 掩码显示** | 日志/错误中可能泄露 | 信息泄露 | 所有日志输出中 Token 自动掩码为 `figd_*******`，debug 模式也不显示完整 Token |
+| **多 Token 支持** | ✅ 已完成：`token set/get/list/delete/default` 命令 | 团队协作不便 | 支持多账号/多 Token 配置，按项目/团队切换，类似 SSH config |
+| **Token 掩码显示** | ✅ 已完成：日志中自动掩码 | 信息泄露 | 所有日志输出中 Token 自动掩码为 `figd_*******`，debug 模式也不显示完整 Token |
 | **环境变量注入安全** | MCP env 明文 | 进程列表可见 | 敏感配置通过文件描述符传递而非命令行参数，避免 `ps aux` 可见 |
 
 ### 2.2 数据传输安全
@@ -90,8 +90,8 @@
 | **设计规范自动识别** | 仅基于 Variables/Styles | 自动识别项目中已有的组件库（shadcn/ui、Ant Design、MUI、Chakra UI 等），优先映射到现有组件而非从头写 div | 生成代码更符合项目生态，减少 60% 自定义代码 |
 | **组件命名智能推荐** | 简单 PascalCase 转换 | 基于节点内容、位置、功能智能命名：如 "Banner 区的主按钮" → `HeroPrimaryButton`，避免 Button1、Frame234 这类无意义名称 | 代码可读性大幅提升 |
 | **交互逻辑推断** | 仅静态 UI | 基于组件名称和常见模式推断交互：<br>- 名称含 "form" → 添加表单提交逻辑<br>- 含 "modal" → 添加 open/close state<br>- 含 "carousel" → 添加轮播逻辑<br>输出时标记 "建议添加 XXX 逻辑" | 从纯 UI 到可交互组件的跨越 |
-| **响应式断点推断** | 仅输出固定尺寸 | 分析设计稿中的布局特征，自动推断响应式断点：<br>- 移动端布局（< 768px）自动添加 sm: 前缀<br>- 桌面端布局默认，lg: 调整<br>提供响应式预览建议 | 生成代码直接适配多端，无需手动调整 |
-| **无障碍（a11y）自动修复** | 无 | 自动添加 ARIA 属性、alt 文本、语义标签、键盘导航支持，生成无障碍检查报告 | 符合 WCAG 标准，减少无障碍修复工作量 |
+| **响应式断点推断** | ✅ 已完成：responsive-inferrer 实现 | 分析设计稿中的布局特征，自动推断响应式断点：<br>- 移动端布局（< 768px）自动添加 sm: 前缀<br>- 桌面端布局默认，lg: 调整<br>提供响应式预览建议 | 生成代码直接适配多端，无需手动调整 |
+| **无障碍（a11y）自动修复** | ✅ 已完成：a11y-enhancer 实现 | 自动添加 ARIA 属性、alt 文本、语义标签、键盘导航支持，生成无障碍检查报告 | 符合 WCAG 标准，减少无障碍修复工作量 |
 | **图片优化建议** | 仅下载原图 | 自动检测图片尺寸，建议 srcset、sizes、loading="lazy"、现代格式（WebP/AVIF），生成响应式图片代码 | 性能优化自动完成 |
 | **Props 智能推导** | 仅基础 className/children | 基于 Figma Component Properties 自动推导 Props：<br>- 文本属性 → string prop<br>- 可见性切换 → boolean prop<br>- Variant 选项 → 联合类型<br>- 实例交换 → ReactNode prop | 组件 API 设计合理，开箱即用 |
 
@@ -110,9 +110,9 @@
 
 | 优化项 | 当前状态 | 建议方案 |
 |--------|---------|---------|
-| **Flex 布局常见问题自动修复** | 圆形变椭圆等问题仅文档说明 | 自动检测并修复：<br>- 图标/头像在 flex 中变形 → 添加 `flex-shrink-0` + 固定尺寸<br>- 文本截断不生效 → 添加 `min-w-0 truncate`<br>- 溢出滚动问题 → 添加正确的 overflow 组合 |
-| **Tailwind 类名优化** | 简单映射 | 自动优化类名顺序、移除重复类、合并冲突类、使用简写（如 `p-2 px-2` → `p-2`）|
-| **导入自动整理** | 固定导入 React/cn | 自动检测生成代码使用的 API，只导入需要的 hooks（useState/useRef 等），自动排序 imports |
+| **Flex 布局常见问题自动修复** | ✅ 已完成：flex-fixer.ts 实现 | 自动检测并修复：<br>- 图标/头像在 flex 中变形 → 添加 `flex-shrink-0` + 固定尺寸<br>- 文本截断不生效 → 添加 `min-w-0 truncate`<br>- 溢出滚动问题 → 添加正确的 overflow 组合 |
+| **Tailwind 类名优化** | ✅ 已完成：tailwind-merge + clsx 的 cn() 工具 | 自动优化类名顺序、移除重复类、合并冲突类、使用简写（如 `p-2 px-2` → `p-2`）|
+| **导入自动整理** | ✅ 已完成：code-formatter.ts 实现 | 自动检测生成代码使用的 API，只导入需要的 hooks（useState/useRef 等），自动排序 imports |
 | **代码问题静态检查** | 无 | 集成 TypeScript 类型检查，发现生成代码的类型错误并自动修复（如类型不匹配、缺少属性） |
 | **资源路径自动修正** | 固定 publicCdnUrl | 检测项目资源引用方式（Vite/Webpack/Next.js 不同处理），自动适配正确的资源路径和导入方式 |
 
@@ -124,17 +124,17 @@
 
 | 框架 | 当前状态 | 目标支持 | 关键特性 |
 |------|---------|---------|---------|
-| **React** | ✅ v1.1.2 一级支持 | ✅ 保持并增强 | TSX、Tailwind、shadcn/ui 映射、RSC（Server Components）支持 |
+| **React** | ✅ v1.2.0 一级支持 | ✅ 保持并增强 | TSX、Tailwind、shadcn/ui 映射、RSC（Server Components）支持 |
 | **Vue 3** | ⚠️ 仅结构化数据，无模板生成 | ✅ 一级支持 | SFC 单文件组件、`<script setup>`、Tailwind/Unocss、Nuxt 3 优化 |
 | **Vue 2** | ⚠️ 结构化数据 | ✅ 支持 | Options API、Nuxt 2 兼容 |
-| **Svelte/SvelteKit** | ⚠️ 结构化数据 | ✅ 支持 | .svelte 单文件、响应式语法、SvelteKit 适配 |
+| **Svelte/SvelteKit** | ⚠️ 结构化数据（figma_get_structured_data） | ✅ 支持 | .svelte 单文件、响应式语法、SvelteKit 适配 |
 | **Angular** | ⚠️ 结构化数据 | ✅ 支持 | 组件、模块、NgClass/NgStyle、Angular Material 映射 |
 | **SolidJS** | ⚠️ 结构化数据 | ✅ 支持 | Solid 组件、class/classList、SolidStart 适配 |
 | **Qwik** | ⚠️ 结构化数据 | ✅ 支持 | Qwik 组件、Qwik City、可恢复性最佳实践 |
 | **Astro** | ❌ 不支持 | ✅ 支持 | .astro 组件、岛屿架构、多框架混合 |
 | **Preact** | ❌ 不支持 | ✅ 支持 | 兼容 React 但更轻量，Preact CLI/Vite 适配 |
 | **Lit (Web Components)** | ❌ 不支持 | ✅ 支持 | Lit 组件、Shadow DOM 样式封装 |
-| **HTML 原生** | ⚠️ 结构化数据 | ✅ 增强 | 纯 HTML/CSS/JS，无框架依赖，快速原型 |
+| **HTML 原生** | ✅ 结构化数据支持 | ✅ 增强 | 纯 HTML/CSS/JS，无框架依赖，快速原型 |
 
 **新增 MCP 工具：**
 - `figma_generate_vue` - 生成 Vue SFC
@@ -167,7 +167,7 @@
 
 | 设备类型 | 当前状态 | 目标支持 | 关键特性 |
 |---------|---------|---------|---------|
-| **移动端 H5** | ⚠️ 固定尺寸 | ✅ 一级支持 | viewport 设置、touch 事件、1px 边框、安全区域适配（env(safe-area-inset-*)）、300ms 点击延迟处理 |
+| **移动端 H5** | ✅ 已完成：设备类型推断+布局方向建议 | ✅ 一级支持 | viewport 设置、touch 事件、1px 边框、安全区域适配（env(safe-area-inset-*)）、300ms 点击延迟处理 |
 | **平板/iPad** | ❌ 无特殊适配 | ✅ 支持 | 分栏布局、横竖屏适配、UISplitViewController 风格布局 |
 | **桌面 Web** | ✅ 默认支持 | ✅ 增强 | 大屏优化、宽屏布局、鼠标交互（hover/focus）、键盘快捷键导航 |
 | **Electron** | ❌ 不支持 | ✅ 支持 | Electron 进程模型、ipc 通信、原生菜单、窗口事件、打包配置建议 |
@@ -233,41 +233,59 @@ figma-dev jsx <url> --style panda-css
 5. **✅ 节点层级智能精简**：消除 ~60% div soup，竞品大多做不到
 6. **✅ 零配置 npx 启动**：无需安装即可使用，体验极佳
 7. **✅ 中国生态支持**：微信小程序/uni-app/Taro/支付宝小程序/抖音小程序，这是海外竞品完全不做的
-8. **✅ 10+ 编辑器一键安装**：最广泛的编辑器支持
+8. **✅ 10+ 编辑器一键安装**：最广泛的编辑器支持（Zed、Cline、Roo Code 等）
 
 ### 5.3 需要快速补齐的短板
 
 1. **Vue 等多框架一等公民支持**：目前只有 React 有完整代码生成，其他框架仅结构化数据。Builder.io/Locofy 都支持多框架
 2. **实时预览能力**：生成后可直接在浏览器预览，无需复制粘贴到项目
 3. **设计系统/组件库映射**：能识别项目已有的组件库（shadcn/ui 等）并复用，而非从头写
-4. **响应式自动生成**：目前输出固定尺寸，需要推断断点生成响应式代码
+4. **响应式自动生成**：目前已有设备推断和布局建议，可进一步自动生成响应式类名
 5. **Figma 插件 Companion**：提供官方 Figma 插件，在 Figma 内选择节点一键发送到 figma-dev-tools
 
 ---
 
 ## 6. 优先级路线图
 
-### v1.2.0（近期，1-2个月）- 便捷性 + 多框架基础
+### v1.2.0（当前版本）- 便捷性 + 智能化 + 安全
 
-- [ ] Token 安全存储（系统 Keychain/Credential Manager）
-- [ ] Vue 3 SFC 一级支持（`figma_generate_vue`）
-- [ ] 交互式配置向导（`figma-dev wizard`）
-- [ ] 响应式断点智能推断
-- [ ] CSS Modules 完整支持
-- [ ] 自动导入整理 + Prettier 格式化
-- [ ] 中文友好错误提示
-- [ ] 常见 Flex 问题自动修复
-- [ ] pnpm/bun/yarn 包管理器更好的检测
-- [ ] Zed 编辑器配置优化
+- [x] Token 安全存储（系统 Keychain/Credential Manager + AES 加密文件双后端）
+- [ ] Vue 3 SFC 一级支持（未完成）
+- [x] 交互式配置向导（figma-dev wizard 命令）
+- [x] 响应式断点智能推断（已实现 responsive-inferrer）
+- [ ] CSS Modules 完整支持（未完成）
+- [x] 自动导入整理 + Prettier 格式化（code-formatter.ts 实现）
+- [x] 中文友好错误提示（i18n 错误码系统，完整中文错误信息和解决方案）
+- [x] 常见 Flex 问题自动修复（flex-fixer.ts 实现）
+- [x] pnpm/bun/yarn 包管理器更好的检测（README 和安装脚本已支持）
+- [x] Zed 编辑器配置优化（已支持 Zed、Cline、Roo Code 等 10+ 编辑器）
+- [x] Shell 自动补全（zsh/bash/powershell，figma-dev completion 命令）
+- [x] 教程命令（figma-dev tutorial）
+- [x] 多 Token 管理（token set/get/list/delete/default 命令）
+- [x] SVG 自动优化（SVGO 集成）
+- [x] SVG Sprite 生成（figma_create_icon_sprite MCP 工具）
+- [x] 框架无关结构化数据（figma_get_structured_data，适用于 Vue/Svelte/HTML 等）
+- [x] Tailwind 类名智能合并（tailwind-merge + clsx 的 cn() 工具）
+- [x] cn() 工具函数导出
+- [x] 国际化 i18n（中/英双语，首次使用可选择语言，figma-dev lang 命令切换）
+- [x] 无障碍（a11y）自动增强（语义化标签、alt 文本、ARIA 属性、按钮识别）
+- [x] 语义化标签自动选择（header/nav/main/section/article/button 而非全用 div）
+- [x] 图片智能 alt 文本生成（装饰性图片 alt=""）
+- [x] 设计系统自动化（颜色变量提取、间距/字体/圆角/阴影系统对齐）
+- [x] 颜色变量别名建议（--color-brand-primary 而非硬编码十六进制）
+- [x] 设备类型推断（移动端/平板/桌面）
+- [x] 移动端/桌面端布局方向建议（flex-col vs flex-row）
+- [x] 错误码系统（TOKEN_INVALID、NETWORK_ERROR 等带解决方案）
 
-### v1.3.0（中期，3-4个月）- 智能化 + 多端
+### v1.3.0（下一个版本，规划中）- 多框架 + 多端
 
 - [ ] UnoCSS 一级支持
 - [ ] Styled Components / Emotion 支持
 - [ ] 组件库智能识别（shadcn/ui、Ant Design、MUI）
+- [ ] Vue 3 SFC 一级支持
+- [ ] CSS Modules 完整支持
 - [ ] 微信小程序支持（WXML/WXSS/rpx）
 - [ ] uni-app 支持（Vue 语法 + 多端）
-- [ ] 无障碍（a11y）自动添加
 - [ ] Storybook 故事自动生成
 - [ ] Watch 模式（设计稿变化自动更新）
 - [ ] 本地 Web 配置面板
@@ -304,10 +322,22 @@ figma-dev jsx <url> --style panda-css
 
 ## 总结
 
-figma-dev-tools v1.1.2 已经打下了非常好的基础，特别是在 **MCP 原生支持**、**渐进式上下文解决 AI 爆炸问题**、**节点层级精简**、**零配置启动** 这几个方面有独特优势。
+figma-dev-tools v1.2.0 已经打下了非常好的基础，特别是在 **MCP 原生支持**、**渐进式上下文解决 AI 爆炸问题**、**节点层级精简**、**零配置启动**、**安全 Token 存储**、**i18n 国际化**、**a11y 无障碍增强**、**Flex 自动修复**、**响应式推断**、**设计系统自动化** 这几个方面有独特优势。
+
+v1.2.0 已完成的核心能力：
+1. **🔐 安全** - Token 安全存储（Keychain/加密文件）、多 Token 管理
+2. **🌍 国际化** - 中英双语、中文友好错误提示、错误码系统
+3. **♿ 无障碍** - 语义化标签、alt 文本、ARIA 属性
+4. **🔧 Flex 修复** - 常见布局问题自动解决
+5. **📱 响应式** - 设备类型识别、布局方向建议、断点推断
+6. **🎨 设计系统** - 颜色变量提取、Tailwind 系统对齐、cn() 工具函数
+7. **⚡ 便捷性** - 交互式向导、Shell 补全、教程命令、Prettier 格式化
+8. **🖼️ 资源处理** - SVG 自动优化、SVG Sprite 生成
+9. **📦 多编辑器** - Zed/Cline/Roo Code 等 10+ 编辑器支持
+10. **🔌 框架无关** - figma_get_structured_data 适用于任意框架
 
 接下来的优化方向：
 1. **优先保持差异化**：继续强化 AI Agent 友好性、本地隐私安全、开源免费
-2. **快速补齐短板**：Vue 多框架支持、响应式、组件库映射是当前痛点
+2. **快速补齐短板**：Vue 3 一级支持、UnoCSS/Styled Components 等样式方案、组件库识别、小程序支持
 3. **抓住中国市场**：小程序/uni-app/Taro 是海外竞品不会做的，这是我们的蓝海
 4. **持续智能化**：利用 AI 做更多自动推断和修复，从"生成代码"升级到"生成可直接上线的产品级代码"

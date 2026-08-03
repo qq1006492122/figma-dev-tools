@@ -13,16 +13,24 @@
  *
  * 2. **新版管道（generateJsxFromContext）**：基于 ProcessedNode + DesignContext
  *    - 使用 TailwindMapper 自动匹配 design token（bg-primary、rounded-lg、text-sm 等）
- *    - 根据 NodeSemanticRole 选择语义化 HTML 标签
+ *    - 根据 NodeSemanticRole + a11y-enhancer 选择语义化 HTML 标签
  *    - 自动跳过 layout-only 冗余容器（消除 div soup）
- *    - 图片节点生成 &lt;img&gt; + publicCdnUrl() 引用
+ *    - 图片节点生成 <img> + publicCdnUrl() 引用 + 智能 alt 文本
  *    - 复用组件（reusable-component）标记为 import 占位
+ *    - 自动应用 Flex 布局修复（flex-fixer）
  *    - 输出需要 @theme 扩展的 token 提示
+ *    - 生成设计系统和响应式建议报告
  *    - **推荐使用此管道**
  *
- * **JSX 生成管道流程（新版）：**
+ * **JSX 生成管道流程（新版 v1.2.0）：**
  * ```
- * ProcessedNode 树
+ * ProcessedNode 树 + DesignContext
+ *   ↓
+ * 0. 应用增强器链：
+ *    - flex-fixer: 修复 Flex 布局问题
+ *    - a11y-enhancer: 添加无障碍属性
+ *    - design-system-analyzer: 生成设计 Token 建议
+ *    - responsive-inferrer: 生成响应式建议
  *   ↓
  * 1. 可见性检查 → invisible 节点返回空字符串
  *   ↓
@@ -31,17 +39,21 @@
  * 3. reusable-component 占位 → 输出 TODO 注释引导引入项目组件
  *   ↓
  * 4. TailwindMapper 映射 → className + extensionsNeeded + inlineStyle
+ *    + 合并 flex-fixer 添加的类名
  *   ↓
- * 5. 语义标签选择（_selectSemanticTag）→ h1-h6/p/button/img/span/ul/li/section 等
+ * 5. 语义标签选择（_selectSemanticTag + a11y 增强）→ header/nav/main/section/button 等
  *   ↓
  * 6. 特殊节点处理：
- *    - img → 追加 object-cover、src/alt 属性、待下载资源标记
+ *    - img → alt 文本、aria-hidden、object-cover、src/alt 属性
  *    - text → 直接渲染 textContent
- *    - button → 添加 type="button"
+ *    - button → 添加 type="button"、aria-label
+ *    - icon → aria-hidden="true"
  *   ↓
- * 7. 递归生成子节点 JSX
+ * 7. ARIA 属性添加（aria-label、role 等）
  *   ↓
- * 8. 组装为完整 TSX 组件（imports + Props 接口 + 组件函数）
+ * 8. 递归生成子节点 JSX
+ *   ↓
+ * 9. 组装为完整 TSX 组件（imports + Props 接口 + 组件函数 + 报告注释）
  * ```
  *
  * @module
@@ -55,6 +67,11 @@ import { cn } from '../utils/cn.js';
 import { convertFigmaColor } from '../utils/color.js';
 import type { FigmaClient } from './figma-client.js';
 import { createTailwindMapper, type TailwindMapping } from './tailwind-mapper.js';
+import { formatCode } from './code-formatter.js';
+import { createFlexFixer, type FlexFixResult } from './flex-fixer.js';
+import { createA11yEnhancer, type A11yEnhancerResult } from './a11y-enhancer.js';
+import { createDesignSystemAnalyzer, type DesignSystemResult } from './design-system.js';
+import { createResponsiveInferrer, type ResponsiveResult } from './responsive-inferrer.js';
 
 // ============ 类型定义 ============
 
@@ -100,6 +117,22 @@ interface ProcessedNodeContext {
   componentMap: DesignContext['componentsUsed'];
 }
 
+/**
+ * 增强报告（v1.2.0 新增）
+ *
+ * 包含代码生成后各种增强功能的统计和建议
+ */
+export interface EnhancementReports {
+  /** Flex 修复报告 */
+  flexFixes?: FlexFixResult;
+  /** 无障碍增强报告 */
+  a11y?: A11yEnhancerResult;
+  /** 设计系统分析报告 */
+  designSystem?: DesignSystemResult;
+  /** 响应式推断报告 */
+  responsive?: ResponsiveResult;
+}
+
 // ============ 常量定义 ============
 
 /**
@@ -116,6 +149,7 @@ const DEFAULT_CODE_GEN_OPTIONS: Required<CodeGenOptions> = {
   exportPath: './components',
   includeProps: true,
   includeChildren: true,
+  skipEnhancements: false,
 };
 
 // ============ CodeGenerator 类 ============
@@ -141,6 +175,7 @@ const DEFAULT_CODE_GEN_OPTIONS: Required<CodeGenOptions> = {
  * const context = await designContextService.getDesignContext(fileKey, nodeId);
  * const result = generator.generateJsxFromContext(context, { componentName: 'HeroSection' });
  * console.log(result.code);
+ * console.log(result.reports); // 增强报告
  * ```
  */
 export class CodeGenerator {
@@ -166,7 +201,7 @@ export class CodeGenerator {
    * 从 Figma 原始节点生成组件代码（旧版管道）
    *
    * @deprecated 推荐使用 {@link generateJsxFromContext} 基于 DesignContext 生成，
-   *             新版支持智能 token 匹配和语义标签选择。
+   *             新版支持智能 token 匹配、语义标签、Flex 修复、a11y 增强等功能。
    *
    * @param fileKey - Figma 文件 Key
    * @param nodeId - 节点 ID
@@ -332,20 +367,23 @@ export class CodeGenerator {
   /**
    * 从 DesignContext（经 node-processor 精简后的数据）生成 React 组件
    *
-   * **推荐使用的代码生成入口**。特点：
+   * **推荐使用的代码生成入口（v1.2.0）**。特点：
    * - 使用 TailwindMapper 自动匹配 design token（bg-primary、rounded-lg、text-sm 等）
-   * - 根据 NodeSemanticRole 选择正确的语义化 HTML 标签
+   * - 根据 NodeSemanticRole + a11y-enhancer 选择正确的语义化 HTML 标签（header/nav/main/section/button/article/aside/footer）
    * - 自动跳过 layout-only 冗余容器（消除 div soup）
-   * - 图片节点生成 &lt;img&gt; + publicCdnUrl() 引用
+   * - 图片节点生成 <img> + publicCdnUrl() 引用 + 智能 alt 文本
    * - 复用组件（reusable-component）标记为 import 占位
+   * - 自动应用 Flex 布局修复（flex-fixer）：图标变形、文本截断、溢出滚动等
+   * - 自动添加无障碍属性（aria-label、aria-hidden、role 等）
    * - 输出需要 @theme 扩展的 token 提示
    * - 标记待下载的资源列表
+   * - 生成设计系统分析报告和响应式建议报告
    *
    * @param context - 设计上下文（来自 DesignContextService.getDesignContext）
    * @param options - 生成选项
-   * @returns 生成结果，包含 TSX 代码、imports、待扩展 token、待下载资源
+   * @returns 生成结果，包含 TSX 代码、imports、待扩展 token、待下载资源、增强报告
    */
-  generateJsxFromContext(
+  async generateJsxFromContext(
     context: DesignContext,
     options: {
       /** 组件名称（默认从节点名推断） */
@@ -354,8 +392,10 @@ export class CodeGenerator {
       usePublicCdn?: boolean;
       /** 场景名称（用于资源路径组织） */
       sceneName?: string;
+      /** 是否跳过增强器（flex-fixer/a11y/design-system/responsive），默认 false */
+      skipEnhancements?: boolean;
     } = {},
-  ): {
+  ): Promise<{
     /** 组件名 */
     componentName: string;
     /** 生成的 TSX 代码 */
@@ -366,12 +406,34 @@ export class CodeGenerator {
     extensionsNeeded: Array<{ type: string; suggestedName: string; originalValue: string }>;
     /** 需要下载的资源列表（nodeId → 建议文件名） */
     pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
-  } {
+    /** 增强报告（v1.2.0 新增） */
+    reports: EnhancementReports;
+  }> {
     const componentName = options.componentName || this._generateComponentName(context.node.name);
     const twMapper = createTailwindMapper({ allowArbitrary: true });
     const imports = new Set<string>(['import React from "react";']);
     const extensionsNeeded: TailwindMapping['extensionsNeeded'] = [];
     const pendingAssets: Array<{ nodeId: string; name: string; type: string }> = [];
+    const reports: EnhancementReports = {};
+
+    // ============ 0. 应用增强器链（v1.2.0 新增） ============
+    if (!options.skipEnhancements) {
+      // Flex 布局修复
+      const flexFixer = createFlexFixer();
+      reports.flexFixes = flexFixer.applyFixes(context.node);
+
+      // 无障碍增强
+      const a11yEnhancer = createA11yEnhancer();
+      reports.a11y = a11yEnhancer.enhance(context.node);
+
+      // 设计系统分析
+      const designSystemAnalyzer = createDesignSystemAnalyzer();
+      reports.designSystem = designSystemAnalyzer.analyze(context);
+
+      // 响应式推断
+      const responsiveInferrer = createResponsiveInferrer();
+      reports.responsive = responsiveInferrer.infer(context);
+    }
 
     // ============ 递归生成 JSX 主体 ============
     const jsxBody = this._generateProcessedNodeJsx(context.node, twMapper, {
@@ -390,6 +452,14 @@ export class CodeGenerator {
     const lines: string[] = [];
     lines.push('import React from "react";');
     lines.push('import { cn } from "@/lib/utils";');
+
+    // 添加报告注释
+    const reportComments = this._generateReportComments(reports);
+    if (reportComments) {
+      lines.push('');
+      lines.push(...reportComments);
+    }
+
     lines.push('');
     lines.push(`export interface ${propsName} extends React.HTMLAttributes<HTMLDivElement> {`);
     lines.push('  children?: React.ReactNode;');
@@ -403,26 +473,101 @@ export class CodeGenerator {
     lines.push('');
     lines.push(`export default ${componentName};`);
 
+    // 添加 @theme 扩展建议
+    if (reports.designSystem?.themeExtensions) {
+      lines.push('');
+      lines.push('/*');
+      lines.push(' === Design Token Suggestions ===');
+      lines.push(' Add the following to your CSS @theme block:');
+      lines.push('');
+      lines.push(reports.designSystem.themeExtensions);
+      lines.push('*/');
+    }
+
+    const rawCode = lines.join('\n');
+    const formattedCode = await formatCode(rawCode, { filePath: `${componentName}.tsx` });
+
     return {
       componentName,
-      code: lines.join('\n'),
+      code: formattedCode,
       imports,
       extensionsNeeded,
       pendingAssets,
+      reports,
     };
   }
+
+  // ============ 私有方法：报告注释生成 ============
+
+  /**
+   * 生成增强报告的注释
+   *
+   * @param reports - 增强报告
+   * @returns 注释行数组
+   */
+  private _generateReportComments(reports: EnhancementReports): string[] {
+    const comments: string[] = [];
+    const hasContent = reports.flexFixes || reports.a11y || reports.designSystem || reports.responsive;
+
+    if (!hasContent) return comments;
+
+    comments.push('/**');
+    comments.push(' * 🤖 Generated by figma-dev-tools v1.2.0');
+    comments.push(' *');
+
+    if (reports.flexFixes && reports.flexFixes.totalFixedNodes > 0) {
+      comments.push(
+        ` * ✅ Flex fixes applied: ${reports.flexFixes.fixedCount} nodes fixed ` +
+          `(shrink: ${reports.flexFixes.shrinkFixedCount}, ` +
+          `truncate: ${reports.flexFixes.truncateFixedCount}, ` +
+          `min-width: ${reports.flexFixes.minWidthFixedCount}, ` +
+          `object-fit: ${reports.flexFixes.objectFitFixedCount})`,
+      );
+    }
+
+    if (reports.a11y) {
+      comments.push(
+        ` * ♿ Accessibility enhancements: ` +
+          `${reports.a11y.semanticTagsCount} semantic tags, ` +
+          `${reports.a11y.imagesCheckedCount} images labeled, ` +
+          `${reports.a11y.buttonsIdentifiedCount} buttons identified, ` +
+          `${reports.a11y.ariaAddedCount} ARIA attributes added`,
+      );
+    }
+
+    if (reports.designSystem) {
+      comments.push(
+        ` * 🎨 Design system: ${reports.designSystem.summary.colorsAnalyzed} colors, ` +
+          `${reports.designSystem.summary.spacingAnalyzed} spacings, ` +
+          `${reports.designSystem.summary.fontsAnalyzed} font sizes analyzed`,
+      );
+    }
+
+    if (reports.responsive) {
+      comments.push(
+        ` * 📱 Target device: ${reports.responsive.inferredDevice} (${reports.responsive.designWidth}px)`,
+      );
+    }
+
+    comments.push(' */');
+
+    return comments;
+  }
+
+  // ============ 私有方法：JSX 生成核心 ============
 
   /**
    * 递归生成 ProcessedNode 的 JSX（新版管道核心）
    *
-   * 处理流程（按顺序）：
+   * 处理流程（按顺序，v1.2.0 更新）：
    * 1. 不可见节点 → 返回空字符串
-   * 2. layout-only 节点 → 跳过当前层，直接渲染子节点
-   * 3. reusable-component → 输出 TODO 注释占位
-   * 4. TailwindMapper 映射样式
-   * 5. 语义标签选择
-   * 6. 特殊节点处理（img、text、button）
-   * 7. 递归生成子节点
+   * 2. layout-only 节点 → 扁平化，直接渲染子节点
+   * 3. reusable-component → TODO 注释占位
+   * 4. TailwindMapper 映射样式 + 合并 Flex 修复类名
+   * 5. 语义标签选择（_selectSemanticTag + a11y 增强覆盖）
+   * 6. 特殊节点处理（img、text、button、icon）
+   * 7. ARIA 属性添加
+   * 8. 递归生成子节点
    *
    * @param node - 当前精简节点
    * @param twMapper - Tailwind 映射器实例
@@ -463,8 +608,21 @@ export class CodeGenerator {
     const tw = twMapper.mapNode(node);
     ctx.extensions.push(...tw.extensionsNeeded);
 
-    // ============ 5. 语义标签选择 ============
-    const tag = this._selectSemanticTag(node);
+    // 合并 Flex 修复类名（由 flex-fixer 添加到 node._flexFixes）
+    let finalClassName = tw.className;
+    if (node._flexFixes && Array.isArray(node._flexFixes)) {
+      finalClassName = cn(finalClassName, ...(node._flexFixes as string[]));
+    }
+
+    // ============ 5. 语义标签选择（优先使用 a11y-enhancer 推荐的标签） ============
+    let tag = this._selectSemanticTag(node);
+    const a11yEnhancements = node._a11y as
+      | { semanticTag?: string; isDecorative?: boolean; ariaLabel?: string; ariaHidden?: boolean; role?: string; isButton?: boolean; altText?: string }
+      | undefined;
+
+    if (a11yEnhancements?.semanticTag) {
+      tag = a11yEnhancements.semanticTag;
+    }
 
     // ============ 6. 判断是否为自闭合标签 ============
     const selfClosing = ['img', 'input', 'br', 'hr'].includes(tag);
@@ -474,9 +632,9 @@ export class CodeGenerator {
 
     // className：根节点合并外部传入的 className，其他节点直接使用
     if (ctx.isRoot) {
-      props.push(`className={cn("${tw.className}", className)}`);
+      props.push(`className={cn("${finalClassName}", className)}`);
     } else {
-      props.push(`className="${tw.className}"`);
+      props.push(`className="${finalClassName}"`);
     }
 
     // data 属性用于调试溯源
@@ -491,17 +649,46 @@ export class CodeGenerator {
       props.push(`style={{ ${styleEntries} }}`);
     }
 
+    // ============ 8. ARIA 属性和无障碍增强（v1.2.0 新增） ============
+    if (a11yEnhancements) {
+      // aria-hidden
+      if (a11yEnhancements.ariaHidden) {
+        props.push('aria-hidden="true"');
+      }
+      // aria-label
+      if (a11yEnhancements.ariaLabel) {
+        const label = a11yEnhancements.ariaLabel.replace(/"/g, '&quot;');
+        props.push(`aria-label="${label}"`);
+      }
+      // role
+      if (a11yEnhancements.role) {
+        props.push(`role="${a11yEnhancements.role}"`);
+      }
+    }
+
+    // 图标节点默认 aria-hidden（如果没有 a11y 增强）
+    if (node.role === 'icon' && !a11yEnhancements?.ariaHidden && !a11yEnhancements?.ariaLabel) {
+      props.push('aria-hidden="true"');
+    }
+
     // 根节点展开外部传入的 rest props
     if (ctx.isRoot) {
       props.push('{...rest}');
     }
 
-    // ============ 8. 图片节点特殊处理 ============
+    // ============ 9. 图片节点特殊处理（增强版） ============
     if (tag === 'img') {
-      // 图片默认追加 object-cover 防止变形
-      const imgClassName = cn(tw.className, 'object-cover');
+      // object-cover 类（如果 flex-fixer 没加的话）
+      const hasObjectFit = finalClassName.includes('object-');
+      const imgClassName = hasObjectFit ? finalClassName : cn(finalClassName, 'object-cover');
       const classIdx = props.findIndex((p) => p.startsWith('className='));
-      if (classIdx >= 0) props[classIdx] = `className="${imgClassName}"`;
+      if (classIdx >= 0) {
+        if (ctx.isRoot) {
+          props[classIdx] = `className={cn("${imgClassName}", className)}`;
+        } else {
+          props[classIdx] = `className="${imgClassName}"`;
+        }
+      }
 
       // src 优先使用已下载的本地路径，其次是 CDN URL，最后标记为待下载
       if (node.asset?.cdnUrl) {
@@ -512,22 +699,52 @@ export class CodeGenerator {
         ctx.pendingAssets.push({ nodeId: node.figmaId, name: node.name, type: node.asset?.type || 'image' });
         props.push('src=""');
       }
-      props.push(`alt="${node.name.replace(/"/g, '&quot;')}"`);
+
+      // alt 文本（优先使用 a11y-enhancer 生成的）
+      let altText = node.name;
+      if (a11yEnhancements) {
+        if (a11yEnhancements.isDecorative) {
+          altText = '';
+        } else if (a11yEnhancements.altText !== undefined) {
+          altText = a11yEnhancements.altText;
+        }
+      }
+      props.push(`alt="${altText.replace(/"/g, '&quot;')}"`);
+
       return `${indent}<${tag} ${props.join(' ')} />`;
     }
 
-    // ============ 9. 文本节点 → 直接渲染内容 ============
+    // ============ 10. 输入框特殊处理 ============
+    if (tag === 'input') {
+      const inputType = a11yEnhancements && 'inputType' in a11yEnhancements
+        ? (a11yEnhancements as { inputType?: string }).inputType
+        : 'text';
+      props.unshift(`type="${inputType || 'text'}"`);
+      return `${indent}<${tag} ${props.join(' ')} />`;
+    }
+
+    // ============ 11. 文本节点 → 直接渲染内容 ============
     if (node.role === 'text' || node.originalType === 'TEXT') {
       const text = node.textContent || '';
       return `${indent}<${tag} ${props.join(' ')}>${text}</${tag}>`;
     }
 
-    // ============ 10. 按钮节点 → 添加 type="button" 防止表单默认提交 ============
-    if (tag === 'button') {
-      props.unshift('type="button"');
+    // ============ 12. 按钮节点 → 添加 type="button" 防止表单默认提交 ============
+    if (tag === 'button' || a11yEnhancements?.isButton) {
+      if (!props.some((p) => p.startsWith('type='))) {
+        props.unshift('type="button"');
+      }
     }
 
-    // ============ 11. 递归生成子节点 ============
+    // ============ 13. 链接节点 → 添加安全属性 ============
+    if (tag === 'a') {
+      // 如果没有 href，使用 # 占位并添加注释
+      if (!props.some((p) => p.startsWith('href='))) {
+        props.push('href="#"');
+      }
+    }
+
+    // ============ 14. 递归生成子节点 ============
     const childrenJsx =
       node.children && node.children.length > 0
         ? node.children
@@ -536,7 +753,7 @@ export class CodeGenerator {
             .join('\n')
         : '';
 
-    // ============ 12. 组装最终 JSX ============
+    // ============ 15. 组装最终 JSX ============
     if (selfClosing) {
       return `${indent}<${tag} ${props.join(' ')} />`;
     }
@@ -549,7 +766,7 @@ export class CodeGenerator {
   }
 
   /**
-   * 根据语义角色选择 HTML 标签
+   * 根据语义角色选择 HTML 标签（基础版，a11y-enhancer 可能覆盖）
    *
    * **选择规则（按优先级从高到低）：**
    *
@@ -575,18 +792,14 @@ export class CodeGenerator {
    *    - `list-item` 角色 → `<li>`（列表项）
    *
    * 5. **内联元素**：
-   *    - `icon` 角色 → `<span aria-hidden="true">`（图标占位，通常由 @repo/icons 渲染）
+   *    - `icon` 角色 → `<span aria-hidden="true">`（图标占位）
    *    - `badge` 角色 → `<span>`（徽章/标签）
    *
    * 6. **容器/区块**：
    *    - `section` 角色 → `<section>`（页面区块）
-   *    - `card` 角色 → `<div>`（卡片容器，配合 card 语义类）
-   *    - `avatar` 角色 → `<div>`（头像容器）
-   *    - `steps`/`traffic-light` 角色 → `<div>`（复杂组件占位）
+   *    - 其他 → `<div>`
    *
-   * 7. **可复用组件/兜底**：
-   *    - `reusable-component` → `<div>`（占位，后续替换为组件引用）
-   *    - `container`/其他 → `<div>`（普通容器）
+   * **注意**：a11y-enhancer 会根据节点名称进一步优化为 header/nav/main/article/aside/footer 等标签。
    *
    * @param node - 当前精简节点
    * @returns HTML 标签名（小写）

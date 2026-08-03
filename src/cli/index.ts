@@ -10,12 +10,18 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import dotenv from 'dotenv';
 import fs from 'fs-extra';
+import { input, password, select, confirm } from '@inquirer/prompts';
+import boxen from 'boxen';
+import ora from 'ora';
+import open from 'open';
 
 import { createAssetDownloader } from '../services/asset-downloader.js';
 import { createCodeGenerator } from '../services/code-generator.js';
 import { createDesignContextService } from '../services/design-context.js';
+import { createDesignLinter } from '../services/design-linter.js';
 import { createFigmaClient } from '../services/figma-client.js';
 import { createFileWriter } from '../services/file-writer.js';
+import { createTokenStore } from '../services/token-store.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
 import type {
   ProcessedAsset,
@@ -25,30 +31,66 @@ import type {
   StructuredNode,
 } from '../types/nodes.js';
 import { parseFigmaUrl } from '../utils/figma-url.js';
+import { initI18nSync } from '../i18n/index.js';
+import type { Language } from '../i18n/index.js';
 
 // 加载环境变量
 dotenv.config();
 
+// 初始化 i18n（v1.2.0 新增）
+const i18n = initI18nSync();
+
 const program = new Command();
 
 // 版本和描述
-program.name('figma-dev').description('Figma 开发工具 - 设计稿与代码的桥接工具').version('1.1.0');
+program
+  .name('figma-dev')
+  .description(i18n.t('cli.description') as string)
+  .version('1.2.0');
 
 // 全局选项
 program
-  .option('-t, --token <token>', 'Figma Access Token')
-  .option('-o, --output <dir>', '输出目录', './src/styles/figma')
-  .option('--no-backup', '不创建备份文件');
+  .option('-t, --token <token>', i18n.t('cli.options.token') as string)
+  .option('-o, --output <dir>', i18n.t('cli.options.output') as string, './src/styles/figma')
+  .option('--no-backup', i18n.t('cli.options.noBackup') as string)
+  .option('-l, --lang <lang>', i18n.t('cli.options.lang') as string);
 
 /**
  * 获取 Figma 客户端
+ * 优先顺序：--token 参数 > 安全存储的默认 Token > FIGMA_ACCESS_TOKEN 环境变量 > FIGMA_OAUTH_TOKEN 环境变量
  */
-function getClient(token?: string) {
-  const accessToken = token || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
+async function getClient(token?: string) {
+  let accessToken: string | undefined = token;
+
+  // 如果没有通过参数传入 Token，从安全存储加载
   if (!accessToken) {
-    console.error(chalk.red('错误: 未提供 Figma Access Token'));
-    console.error(chalk.yellow('请通过 --token 参数或 FIGMA_ACCESS_TOKEN 环境变量提供 Token'));
-    console.error(chalk.gray('获取 Token: https://www.figma.com/developers/api#access-tokens'));
+    const tokenStore = createTokenStore();
+    const storedToken = await tokenStore.getToken();
+    accessToken = storedToken ?? undefined;
+  }
+
+  // 回退到环境变量
+  if (!accessToken) {
+    accessToken = process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
+  }
+
+  if (!accessToken) {
+    console.error(
+      boxen(
+        chalk.red.bold(i18n.t('cli.errors.noToken.title') as string + '\n\n') +
+          chalk.white(i18n.t('cli.errors.noToken.howTo') as string + '\n\n') +
+          chalk.cyan(i18n.t('cli.errors.noToken.recommended') as string) +
+          chalk.gray(i18n.t('cli.errors.noToken.wizard') as string + '\n') +
+          chalk.cyan(i18n.t('cli.errors.noToken.quick') as string) +
+          chalk.gray(i18n.t('cli.errors.noToken.tokenSet') as string + '\n') +
+          chalk.cyan(i18n.t('cli.errors.noToken.temp') as string) +
+          chalk.gray(i18n.t('cli.errors.noToken.tempDesc') as string + '\n') +
+          chalk.cyan(i18n.t('cli.errors.noToken.env') as string) +
+          chalk.gray(i18n.t('cli.errors.noToken.envDesc') as string + '\n\n') +
+          chalk.yellow(i18n.t('cli.errors.noToken.getToken') as string),
+        { padding: 1, borderColor: 'red', margin: { top: 1 } },
+      ),
+    );
     process.exit(1);
   }
   return createFigmaClient({ accessToken });
@@ -61,7 +103,7 @@ function parseTarget(target: string): { fileKey: string; nodeId?: string } {
   if (target.startsWith('http')) {
     const parsed = parseFigmaUrl(target);
     if (!parsed.fileKey) {
-      console.error(chalk.red('错误: 无法解析 Figma URL'));
+      console.error(chalk.red(i18n.t('cli.errors.invalidUrl') as string));
       process.exit(1);
     }
     return { fileKey: parsed.fileKey, nodeId: parsed.nodeId };
@@ -69,65 +111,291 @@ function parseTarget(target: string): { fileKey: string; nodeId?: string } {
   return { fileKey: target };
 }
 
+// ============= 命令: 语言设置 (v1.2.0 新增) =============
+
+const langCmd = program.command('lang').description(i18n.t('cli.commands.lang.description') as string);
+
+langCmd
+  .command('set <language>')
+  .description(i18n.t('cli.commands.lang.set') as string)
+  .action(async (language: string) => {
+    const supportedLangs = ['zh-CN', 'en-US'];
+    if (!supportedLangs.includes(language)) {
+      console.error(chalk.red(i18n.t('cli.commands.lang.invalid') as string + ': ' + supportedLangs.join(', ')));
+      process.exit(1);
+    }
+    await i18n.setLanguage(language as Language);
+    const langNames: Record<Language, string> = {
+      'zh-CN': i18n.t('config.languageZhCN') as string,
+      'en-US': i18n.t('config.languageEnUS') as string,
+    };
+    console.log(chalk.green(i18n.t('cli.commands.lang.success') as string + ': ' + langNames[language as Language]));
+  });
+
+langCmd
+  .command('list')
+  .alias('ls')
+  .description(i18n.t('cli.commands.lang.list') as string)
+  .action(() => {
+    const currentLang = i18n.getLanguage();
+    const languages = i18n.getSupportedLanguages();
+    console.log(chalk.cyan(i18n.t('cli.commands.lang.current') as string + ':\n'));
+    languages.forEach((lang) => {
+      const marker = lang.code === currentLang ? chalk.green('★ ' + i18n.t('cli.commands.lang.currentMarker') as string) : '  ';
+      console.log(`  ${marker} ${chalk.bold(lang.name)} (${lang.code})`);
+    });
+    console.log('');
+    console.log(chalk.gray(i18n.t('cli.commands.lang.switchHint') as string));
+  });
+
+langCmd
+  .command('switch')
+  .description(i18n.t('cli.commands.lang.switch') as string)
+  .action(async () => {
+    const languages = i18n.getSupportedLanguages();
+    const currentLang = i18n.getLanguage();
+
+    const selected = await select({
+      message: i18n.t('cli.commands.lang.selectPrompt') as string,
+      choices: languages.map((lang) => ({
+        name: lang.code === currentLang ? `${lang.name} (${i18n.t('cli.commands.lang.currentMarker') as string})` : lang.name,
+        value: lang.code,
+      })),
+      default: currentLang,
+    });
+
+    await i18n.setLanguage(selected);
+    const langNames: Record<Language, string> = {
+      'zh-CN': i18n.t('config.languageZhCN') as string,
+      'en-US': i18n.t('config.languageEnUS') as string,
+    };
+    console.log(chalk.green(i18n.t('cli.commands.lang.success') as string + ': ' + langNames[selected]));
+  });
+
 // ============= 命令: 验证 Token =============
 
 program
   .command('validate')
-  .description('验证 Figma Access Token 是否有效')
+  .description(i18n.t('cli.commands.validate.description') as string)
   .action(async (_options) => {
     const opts = program.opts();
-    console.log(chalk.blue('正在验证 Figma Token...'));
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.validate.validating') as string)).start();
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const isValid = await client.validateToken();
 
       if (isValid) {
-        console.log(chalk.green('✅ Token 验证成功！'));
+        spinner.succeed(chalk.green(i18n.t('cli.commands.validate.success') as string));
       } else {
-        console.log(chalk.red('❌ Token 验证失败'));
+        spinner.fail(chalk.red(i18n.t('cli.commands.validate.failed') as string));
         process.exit(1);
       }
     } catch (error) {
-      console.error(chalk.red(`验证失败: ${error instanceof Error ? error.message : String(error)}`));
+      spinner.fail(chalk.red(i18n.t('common.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
+  });
+
+// ============= 命令组: Token 安全管理 =============
+
+const tokenCmd = program.command('token').description(i18n.t('cli.commands.token.description') as string);
+
+tokenCmd
+  .command('set [name]')
+  .description(i18n.t('cli.commands.token.set') as string)
+  .option('-t, --token <token>', i18n.t('cli.commands.token.tokenOption') as string)
+  .option('-n, --note <note>', i18n.t('cli.commands.token.note') as string)
+  .action(async (name = 'default', cmdOptions) => {
+    const tokenStore = createTokenStore();
+    let tokenValue = cmdOptions.token;
+
+    if (!tokenValue) {
+      console.log(
+        boxen(
+          chalk.cyan(i18n.t('cli.commands.token.secureStorage') as string + '\n\n') +
+            chalk.white(i18n.t('cli.commands.token.storageLocation') as string + ':\n') +
+            chalk.gray('- macOS: Keychain\n') +
+            chalk.gray('- Windows: Credential Manager\n') +
+            chalk.gray('- Linux: libsecret (' + i18n.t('cli.commands.token.linuxFallback') as string + ')\n\n') +
+            chalk.yellow(i18n.t('cli.commands.token.privacyNotice') as string),
+          { padding: 1, borderColor: 'cyan', margin: { top: 1, bottom: 1 } },
+        ),
+      );
+
+      tokenValue = await password({
+        message: i18n.t('cli.commands.token.pastePrompt') as string,
+        validate: (v: string) => {
+          if (!v || v.length < 20) return i18n.t('cli.commands.token.invalidLength') as string;
+          if (!v.startsWith('figd_')) return i18n.t('cli.commands.token.invalidPrefix') as string;
+          return true;
+        },
+      });
+    }
+
+    const spinner = ora(i18n.t('cli.commands.token.saving') as string).start();
+    try {
+      await tokenStore.saveToken(name, tokenValue, cmdOptions.note);
+      await tokenStore.setDefault(name);
+      const backend = await tokenStore.getBackend();
+      spinner.succeed(
+        chalk.green(i18n.t('cli.commands.token.saved') as string + ` (${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string})`),
+      );
+
+      // 验证 Token
+      spinner.start(i18n.t('cli.commands.token.validating') as string);
+      const client = createFigmaClient({ accessToken: tokenValue });
+      const isValid = await client.validateToken();
+      if (isValid) {
+        spinner.succeed(chalk.green(i18n.t('cli.commands.token.validateSuccess') as string));
+      } else {
+        spinner.warn(chalk.yellow(i18n.t('cli.commands.token.validateFailed') as string));
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(i18n.t('common.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      process.exit(1);
+    }
+  });
+
+tokenCmd
+  .command('get [name]')
+  .description(i18n.t('cli.commands.token.get') as string)
+  .option('--show-full', i18n.t('cli.commands.token.showFull') as string)
+  .action(async (name = 'default', cmdOptions) => {
+    const tokenStore = createTokenStore();
+    const info = await tokenStore.getTokenInfo(name);
+
+    if (!info) {
+      console.log(chalk.yellow(i18n.t('cli.commands.token.notFound') as string + ` "${name}"`));
+      const list = await tokenStore.listTokens();
+      if (list.length > 0) {
+        console.log(chalk.gray(i18n.t('cli.commands.token.savedTokens') as string + ': ' + list.join(', ')));
+      } else {
+        console.log(chalk.gray(i18n.t('cli.commands.token.noTokens') as string));
+      }
+      return;
+    }
+
+    const maskedToken = cmdOptions.showFull
+      ? info.value
+      : `${info.value.slice(0, 8)}****${info.value.slice(-4)}`;
+    const backend = await tokenStore.getBackend();
+
+    console.log(
+      boxen(
+        chalk.cyan(`🔐 Token: ${info.name}\n\n`) +
+          chalk.white(`值: ${maskedToken}\n`) +
+          chalk.gray(`存储方式: ${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string}\n`) +
+          chalk.gray(`保存时间: ${new Date(info.createdAt).toLocaleString(i18n.getLanguage() === 'zh-CN' ? 'zh-CN' : 'en-US')}\n`) +
+          (info.lastUsedAt ? chalk.gray(`最后使用: ${new Date(info.lastUsedAt).toLocaleString(i18n.getLanguage() === 'zh-CN' ? 'zh-CN' : 'en-US')}\n`) : '') +
+          (info.note ? chalk.gray(`备注: ${info.note}\n`) : ''),
+        { padding: 1, borderColor: 'green', margin: { top: 1 } },
+      ),
+    );
+  });
+
+tokenCmd
+  .command('list')
+  .alias('ls')
+  .description(i18n.t('cli.commands.token.list') as string)
+  .action(async () => {
+    const tokenStore = createTokenStore();
+    const list = await tokenStore.listTokens();
+    const defaultName = await tokenStore.getDefault();
+    const backend = await tokenStore.getBackend();
+
+    if (list.length === 0) {
+      console.log(chalk.yellow(i18n.t('cli.commands.token.noTokens') as string));
+      console.log(chalk.gray(i18n.t('cli.commands.token.runSet') as string));
+      return;
+    }
+
+    console.log(chalk.cyan(`🔐 ${i18n.t('cli.commands.token.savedTokensList') as string} (${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string}):\n`));
+    for (const name of list) {
+      const info = await tokenStore.getTokenInfo(name);
+      const isDefault = name === defaultName;
+      const marker = isDefault ? chalk.green('★') : ' ';
+      const note = info?.note ? chalk.gray(` (${info.note})`) : '';
+      console.log(`  ${marker} ${chalk.bold(name)}${isDefault ? chalk.green(' [' + i18n.t('cli.commands.token.default') as string + ']') : ''}${note}`);
+    }
+    console.log('');
+  });
+
+tokenCmd
+  .command('delete <name>')
+  .alias('rm')
+  .description(i18n.t('cli.commands.token.delete') as string)
+  .option('-f, --force', i18n.t('cli.commands.token.forceDelete') as string)
+  .action(async (name, cmdOptions) => {
+    const tokenStore = createTokenStore();
+
+    if (!cmdOptions.force) {
+      const confirmed = await confirm({
+        message: i18n.t('cli.commands.token.confirmDelete') as string + ` "${name}"?`,
+        default: false,
+      });
+      if (!confirmed) {
+        console.log(chalk.gray(i18n.t('common.cancelled') as string));
+        return;
+      }
+    }
+
+    const ok = await tokenStore.deleteToken(name);
+    if (ok) {
+      console.log(chalk.green(i18n.t('cli.commands.token.deleted') as string + ` "${name}"`));
+    } else {
+      console.log(chalk.yellow(i18n.t('cli.commands.token.notExist') as string + ` "${name}"`));
+    }
+  });
+
+tokenCmd
+  .command('default <name>')
+  .description(i18n.t('cli.commands.token.setDefault') as string)
+  .action(async (name) => {
+    const tokenStore = createTokenStore();
+    const list = await tokenStore.listTokens();
+    if (!list.includes(name)) {
+      console.log(chalk.red(i18n.t('cli.commands.token.notExist') as string + ` "${name}"`));
+      process.exit(1);
+    }
+    await tokenStore.setDefault(name);
+    console.log(chalk.green(i18n.t('cli.commands.token.defaultSet') as string + ': ' + name));
   });
 
 // ============= 命令: 查看文件信息 =============
 
 program
   .command('info <url-or-filekey>')
-  .description('查看 Figma 文件信息')
+  .description(i18n.t('cli.commands.info.description') as string)
   .action(async (target) => {
     const opts = program.opts();
     const { fileKey } = parseTarget(target);
 
-    console.log(chalk.blue(`正在获取文件信息: ${fileKey}`));
+    console.log(chalk.blue(i18n.t('cli.commands.info.fetching') as string + ': ' + fileKey));
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const file = await client.getFile(fileKey, undefined, 1);
 
       console.log(chalk.green(`\n📄 ${file.name}`));
-      console.log(chalk.gray(`   最后修改: ${file.lastModified}`));
-      console.log(chalk.gray(`   版本: ${file.version}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.info.lastModified') as string}: ${file.lastModified}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.info.version') as string}: ${file.version}`));
       console.log('');
 
       const pages = file.document.children || [];
-      console.log(chalk.cyan(`页面列表 (${pages.length}):`));
+      console.log(chalk.cyan(i18n.t('cli.commands.info.pages') as string + ` (${pages.length}):`));
       pages.forEach((page, i) => {
-        console.log(`  ${i + 1}. ${chalk.bold(page.name)} (${page.children?.length || 0} 个子元素)`);
+        console.log(`  ${i + 1}. ${chalk.bold(page.name)} (${page.children?.length || 0} ${i18n.t('cli.commands.info.children') as string})`);
         console.log(chalk.gray(`     ID: ${page.id}`));
       });
 
       console.log('');
-      console.log(chalk.cyan('组件统计:'));
-      console.log(`  组件: ${Object.keys(file.components).length}`);
-      console.log(`  组件集: ${Object.keys(file.componentSets).length}`);
-      console.log(`  样式: ${Object.keys(file.styles).length}`);
+      console.log(chalk.cyan(i18n.t('cli.commands.info.stats') as string + ':'));
+      console.log(`  ${i18n.t('cli.commands.info.components') as string}: ${Object.keys(file.components).length}`);
+      console.log(`  ${i18n.t('cli.commands.info.componentSets') as string}: ${Object.keys(file.componentSets).length}`);
+      console.log(`  ${i18n.t('cli.commands.info.styles') as string}: ${Object.keys(file.styles).length}`);
     } catch (error) {
-      console.error(chalk.red(`获取文件信息失败: ${error instanceof Error ? error.message : String(error)}`));
+      console.error(chalk.red(i18n.t('cli.commands.info.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
   });
@@ -136,26 +404,26 @@ program
 
 program
   .command('sync <url-or-filekey>')
-  .description('同步设计 Tokens 到本地项目')
-  .option('-n, --node <nodeId>', '指定节点 ID')
-  .option('--format <format>', '颜色格式 (hex/rgb/oklch/hsl)', 'oklch')
-  .option('--spacing-unit <unit>', '间距单位 (px/rem)', 'px')
-  .option('--prefix <prefix>', 'Token 名称前缀')
-  .option('--output-format <format>', '输出格式 (css/tailwind/json/all)', 'all')
-  .option('--file-name <name>', '输出文件名')
+  .description(i18n.t('cli.commands.sync.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('--format <format>', i18n.t('cli.commands.sync.format') as string, 'oklch')
+  .option('--spacing-unit <unit>', i18n.t('cli.commands.sync.spacingUnit') as string, 'px')
+  .option('--prefix <prefix>', i18n.t('cli.commands.sync.prefix') as string)
+  .option('--output-format <format>', i18n.t('cli.commands.sync.outputFormat') as string, 'all')
+  .option('--file-name <name>', i18n.t('cli.commands.sync.fileName') as string)
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
     const nodeId = cmdOptions.node || urlNodeId;
 
-    console.log(chalk.blue(`正在从 Figma 提取设计 Tokens...`));
-    console.log(chalk.gray(`文件: ${fileKey}`));
-    if (nodeId) console.log(chalk.gray(`节点: ${nodeId}`));
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.sync.syncing') as string)).start();
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}`));
+    if (nodeId) console.log(chalk.gray(`${i18n.t('cli.commands.sync.node') as string}: ${nodeId}`));
 
     const startTime = Date.now();
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const extractor = createTokensExtractor(client, {
         colorFormat: cmdOptions.format,
         spacingUnit: cmdOptions.spacingUnit,
@@ -194,22 +462,22 @@ program
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
-      console.log(chalk.green(`\n✅ Tokens 同步完成 (${duration}s)`));
+      spinner.succeed(chalk.green(i18n.t('cli.commands.sync.completed') as string + ` (${duration}s)`));
       console.log('');
-      console.log(chalk.cyan('提取统计:'));
-      console.log(`  颜色: ${Object.keys(tokens.colors).length} 个`);
-      console.log(`  间距: ${Object.keys(tokens.spacing).length} 个`);
-      console.log(`  圆角: ${Object.keys(tokens.radius).length} 个`);
-      console.log(`  阴影: ${Object.keys(tokens.shadows).length} 个`);
-      console.log(`  字体: ${Object.keys(tokens.typography).length} 个`);
+      console.log(chalk.cyan(i18n.t('cli.commands.sync.stats') as string + ':'));
+      console.log(`  ${i18n.t('cli.commands.sync.colors') as string}: ${Object.keys(tokens.colors).length}`);
+      console.log(`  ${i18n.t('cli.commands.sync.spacing') as string}: ${Object.keys(tokens.spacing).length}`);
+      console.log(`  ${i18n.t('cli.commands.sync.radius') as string}: ${Object.keys(tokens.radius).length}`);
+      console.log(`  ${i18n.t('cli.commands.sync.shadows') as string}: ${Object.keys(tokens.shadows).length}`);
+      console.log(`  ${i18n.t('cli.commands.sync.typography') as string}: ${Object.keys(tokens.typography).length}`);
       console.log('');
-      console.log(chalk.cyan('输出文件:'));
+      console.log(chalk.cyan(i18n.t('cli.commands.sync.outputFiles') as string + ':'));
       files.forEach((f) => console.log(`  ${chalk.gray(f)}`));
 
       console.log('');
-      console.log(chalk.yellow('💡 提示: 在 globals.css 中导入生成的 CSS 文件'));
+      console.log(chalk.yellow(i18n.t('cli.commands.sync.importHint') as string));
     } catch (error) {
-      console.error(chalk.red(`同步失败: ${error instanceof Error ? error.message : String(error)}`));
+      spinner.fail(chalk.red(i18n.t('cli.commands.sync.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
   });
@@ -218,28 +486,28 @@ program
 
 program
   .command('component <url-or-figma-url>')
-  .description('从 Figma 节点生成 React 组件代码')
-  .option('-n, --name <name>', '组件名称')
-  .option('--js', '生成 JavaScript 代码 (默认 TypeScript)')
-  .option('--style <format>', '样式格式 (tailwind/css-modules/inline)', 'tailwind')
-  .option('--no-children', '不包含子元素')
-  .option('--output <dir>', '输出目录')
+  .description(i18n.t('cli.commands.component.description') as string)
+  .option('-n, --name <name>', i18n.t('cli.commands.component.name') as string)
+  .option('--js', i18n.t('cli.commands.component.js') as string)
+  .option('--style <format>', i18n.t('cli.commands.component.style') as string, 'tailwind')
+  .option('--no-children', i18n.t('cli.commands.component.noChildren') as string)
+  .option('--output <dir>', i18n.t('cli.commands.component.output') as string)
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
     const nodeId = cmdOptions.node || urlNodeId;
 
     if (!nodeId) {
-      console.error(chalk.red('错误: 请提供节点 ID (在 Figma URL 中 ?node-id= 参数)'));
+      console.error(chalk.red(i18n.t('cli.commands.component.noNodeId') as string));
       process.exit(1);
     }
 
-    console.log(chalk.blue(`正在生成组件...`));
-    console.log(chalk.gray(`文件: ${fileKey}`));
-    console.log(chalk.gray(`节点: ${nodeId}`));
+    console.log(chalk.blue(i18n.t('cli.commands.component.generating') as string));
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}`));
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.node') as string}: ${nodeId}`));
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const generator = createCodeGenerator(client, {
         format: 'react',
         framework: 'react',
@@ -257,21 +525,21 @@ program
         const writer = createFileWriter({ outputDir, backup: opts.backup !== false });
         const files = await writer.writeComponent(component);
 
-        console.log(chalk.green(`\n✅ 组件生成完成: ${component.name}`));
+        console.log(chalk.green(`\n✅ ${i18n.t('cli.commands.component.completed') as string}: ${component.name}`));
         console.log('');
-        console.log(chalk.cyan('输出文件:'));
+        console.log(chalk.cyan(i18n.t('cli.commands.sync.outputFiles') as string + ':'));
         files.forEach((f) => console.log(`  ${chalk.gray(f)}`));
       } else {
         // 输出到控制台
-        console.log(chalk.green(`\n✅ 组件生成完成: ${component.name}`));
+        console.log(chalk.green(`\n✅ ${i18n.t('cli.commands.component.completed') as string}: ${component.name}`));
         console.log('');
-        console.log(chalk.cyan('组件代码:'));
+        console.log(chalk.cyan(i18n.t('cli.commands.component.code') as string + ':'));
         console.log(chalk.gray('─'.repeat(60)));
         console.log(component.code);
         console.log(chalk.gray('─'.repeat(60)));
       }
     } catch (error) {
-      console.error(chalk.red(`生成组件失败: ${error instanceof Error ? error.message : String(error)}`));
+      console.error(chalk.red(i18n.t('cli.commands.component.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
   });
@@ -280,25 +548,25 @@ program
 
 program
   .command('screenshot <url-or-filekey>')
-  .description('获取节点截图')
-  .option('-n, --node <nodeId>', '节点 ID')
-  .option('--format <format>', '图片格式 (png/jpg/svg)', 'png')
-  .option('--scale <scale>', '缩放比例 (1-4)', '2')
-  .option('--download <dir>', '下载到指定目录')
+  .description(i18n.t('cli.commands.screenshot.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('--format <format>', i18n.t('cli.commands.screenshot.format') as string, 'png')
+  .option('--scale <scale>', i18n.t('cli.commands.screenshot.scale') as string, '2')
+  .option('--download <dir>', i18n.t('cli.commands.screenshot.download') as string)
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
     const nodeId = cmdOptions.node || urlNodeId;
 
     if (!nodeId) {
-      console.error(chalk.red('错误: 请提供节点 ID'));
+      console.error(chalk.red(i18n.t('cli.commands.screenshot.noNodeId') as string));
       process.exit(1);
     }
 
-    console.log(chalk.blue(`正在获取截图...`));
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.screenshot.fetching') as string)).start();
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const result = await client.getImages(
         fileKey,
         [nodeId],
@@ -308,27 +576,27 @@ program
 
       const imageUrl = result.images[nodeId];
       if (!imageUrl) {
-        console.error(chalk.red('获取截图失败'));
+        spinner.fail(chalk.red(i18n.t('cli.commands.screenshot.failed') as string));
         process.exit(1);
       }
 
-      console.log(chalk.green(`\n✅ 截图 URL:`));
+      spinner.succeed(chalk.green(i18n.t('cli.commands.screenshot.url') as string + ':'));
       console.log(chalk.cyan(imageUrl));
 
       if (cmdOptions.download) {
         const downloadDir = path.resolve(cmdOptions.download);
         await fs.ensureDir(downloadDir);
 
-        console.log(chalk.blue(`\n正在下载截图...`));
+        const downloadSpinner = ora(chalk.blue(i18n.t('cli.commands.screenshot.downloading') as string)).start();
         const imageBuffer = await client.downloadImage(imageUrl);
         const fileName = `figma-${nodeId.replace(':', '-')}-${Date.now()}.${cmdOptions.format}`;
         const filePath = path.join(downloadDir, fileName);
         await fs.writeFile(filePath, imageBuffer);
 
-        console.log(chalk.green(`✅ 已保存到: ${filePath}`));
+        downloadSpinner.succeed(chalk.green(i18n.t('cli.commands.screenshot.saved') as string + `: ${filePath}`));
       }
     } catch (error) {
-      console.error(chalk.red(`获取截图失败: ${error instanceof Error ? error.message : String(error)}`));
+      spinner.fail(chalk.red(i18n.t('cli.commands.screenshot.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
   });
@@ -337,35 +605,35 @@ program
 
 program
   .command('metadata <url-or-filekey>')
-  .description('获取设计节点高层结构概览（避免上下文爆炸）')
-  .option('-n, --node <nodeId>', '节点 ID')
-  .option('-d, --depth <depth>', '概览深度 (1-3)', '1')
+  .description(i18n.t('cli.commands.metadata.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('-d, --depth <depth>', i18n.t('cli.commands.metadata.depth') as string, '1')
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
     const nodeId = cmdOptions.node || urlNodeId;
     const depth = Number.parseInt(cmdOptions.depth, 10) || 1;
 
-    console.log(chalk.blue(`正在获取设计概览...`));
-    console.log(chalk.gray(`文件: ${fileKey}${nodeId ? `, 节点: ${nodeId}` : ''}, 深度: ${depth}`));
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.metadata.fetching') as string)).start();
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}${nodeId ? `, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}` : ''}, ${i18n.t('cli.commands.metadata.depth') as string}: ${depth}`));
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const ctxService = createDesignContextService(client);
       const metadata = await ctxService.getMetadata(fileKey, nodeId, depth);
 
-      console.log(chalk.green(`\n📋 ${metadata.name}`));
-      console.log(chalk.gray(`   类型: ${metadata.type}`));
-      console.log(chalk.gray(`   尺寸: ${Math.round(metadata.size.width)} × ${Math.round(metadata.size.height)}`));
-      console.log(chalk.gray(`   直接子节点: ${metadata.childCount}`));
-      console.log(chalk.gray(`   使用颜色: ${metadata.colorsUsed.length}`));
-      console.log(chalk.gray(`   文本节点: ${metadata.textNodeCount}`));
-      console.log(chalk.gray(`   图片: ${metadata.imageCount}`));
+      spinner.succeed(chalk.green(`📋 ${metadata.name}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.info.type') as string}: ${metadata.type}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.size') as string}: ${Math.round(metadata.size.width)} × ${Math.round(metadata.size.height)}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.directChildren') as string}: ${metadata.childCount}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.colorsUsed') as string}: ${metadata.colorsUsed.length}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.textNodes') as string}: ${metadata.textNodeCount}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.metadata.images') as string}: ${metadata.imageCount}`));
       console.log('');
 
       if (metadata.children.length > 0) {
-        console.log(chalk.cyan(`子区块 (${metadata.children.length}):`));
-        console.log('   #  名称                      类型       语义         尺寸          子元素  组件');
+        console.log(chalk.cyan(`${i18n.t('cli.commands.metadata.sections') as string} (${metadata.children.length}):`));
+        console.log('   #  ' + i18n.t('cli.commands.metadata.nameHeader') as string + '  ' + i18n.t('cli.commands.metadata.typeHeader') as string + '  ' + i18n.t('cli.commands.metadata.semanticHeader') as string + '  ' + i18n.t('cli.commands.metadata.sizeHeader') as string + '  ' + i18n.t('cli.commands.metadata.childrenHeader') as string + '  ' + i18n.t('cli.commands.metadata.componentHeader') as string);
         console.log('   ─  ────────────────────────  ─────────  ───────────  ────────────  ─────  ────');
         metadata.children.forEach((c, i) => {
           const num = String(i + 1).padStart(2, ' ');
@@ -381,12 +649,115 @@ program
       }
 
       if (metadata.colorsUsed.length > 0) {
-        console.log(chalk.cyan(`使用颜色 (${metadata.colorsUsed.length}, 前15):`));
+        console.log(chalk.cyan(`${i18n.t('cli.commands.metadata.colorsUsed') as string} (${metadata.colorsUsed.length}, ${i18n.t('cli.commands.metadata.top15') as string}):`));
         metadata.colorsUsed.slice(0, 15).forEach((c) => console.log(`  - ${c}`));
-        if (metadata.colorsUsed.length > 15) console.log(chalk.gray(`  ... 共 ${metadata.colorsUsed.length} 个`));
+        if (metadata.colorsUsed.length > 15) console.log(chalk.gray(`  ... ${i18n.t('cli.commands.metadata.totalPrefix') as string} ${metadata.colorsUsed.length} ${i18n.t('cli.commands.metadata.totalSuffix') as string}`));
       }
     } catch (error) {
-      console.error(chalk.red(`获取元数据失败: ${error instanceof Error ? error.message : String(error)}`));
+      spinner.fail(chalk.red(i18n.t('cli.commands.metadata.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
+      process.exit(1);
+    }
+  });
+
+// ============= 命令: 设计规范检查 (v1.2.0) =============
+
+program
+  .command('lint <url-or-filekey>')
+  .description(i18n.t('cli.commands.lint.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.lint.node') as string)
+  .option('-d, --depth <depth>', i18n.t('cli.commands.lint.depth') as string, '8')
+  .option('--format <format>', '输出格式 (markdown/json)', 'markdown')
+  .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
+  .action(async (target, cmdOptions) => {
+    const opts = program.opts();
+    const { fileKey, nodeId: urlNodeId } = parseTarget(target);
+    const nodeId = cmdOptions.node || urlNodeId;
+    const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 8;
+
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.lint.checking') as string)).start();
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}${nodeId ? `, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}` : ''}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`));
+
+    const startTime = Date.now();
+
+    try {
+      const client = await getClient(opts.token);
+      const ctxService = createDesignContextService(client);
+      const linter = createDesignLinter();
+
+      let nodesToLint: ProcessedNode[] = [];
+
+      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.lint.getContext') as string));
+      if (nodeId) {
+        const context = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
+        nodesToLint = [context.node];
+      } else {
+        const file = await client.getFile(fileKey, undefined, 2);
+        const pages = file.document.children || [];
+        for (const page of pages) {
+          try {
+            const context = await ctxService.getDesignContext(fileKey, page.id, maxDepth);
+            nodesToLint.push(context.node);
+          } catch {
+          }
+        }
+      }
+
+      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.lint.running') as string));
+      const result = linter.lint(nodesToLint);
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+      spinner.succeed(chalk.green(i18n.t('cli.commands.lint.completed') as string + ` (${duration}s)`));
+      console.log('');
+
+      function getScoreEmoji(score: number): string {
+        if (score >= 90) return '🎉';
+        if (score >= 75) return '✅';
+        if (score >= 60) return '⚠️';
+        if (score >= 40) return '🔶';
+        return '❌';
+      }
+
+      function getScoreRating(score: number): string {
+        if (score >= 90) return i18n.t('cli.commands.lint.scoreExcellent') as string;
+        if (score >= 75) return i18n.t('cli.commands.lint.scoreGood') as string;
+        if (score >= 60) return i18n.t('cli.commands.lint.scorePass') as string;
+        if (score >= 40) return i18n.t('cli.commands.lint.scorePoor') as string;
+        return i18n.t('cli.commands.lint.scoreBad') as string;
+      }
+
+      const scoreEmoji = getScoreEmoji(result.score);
+      const rating = getScoreRating(result.score);
+
+      console.log(chalk.cyan(`${scoreEmoji} ${i18n.t('cli.commands.lint.score') as string}: ${chalk.bold(result.score)}/100 (${rating})`));
+      console.log('');
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.sync.file') as string}: ${result.totalNodes} 个节点`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.lint.errors') as string}: ${result.errorCount}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.lint.warnings') as string}: ${result.warningCount}`));
+      console.log(chalk.gray(`   ${i18n.t('cli.commands.lint.infos') as string}: ${result.infoCount}`));
+      console.log('');
+
+      if (result.score < 80) {
+        console.log(chalk.yellow(i18n.t('cli.commands.lint.hint') as string));
+        console.log('');
+      }
+
+      if (cmdOptions.output) {
+        const outPath = path.resolve(cmdOptions.output);
+        await fs.ensureDir(path.dirname(outPath));
+        const outputContent = cmdOptions.format === 'json' ? JSON.stringify(result, null, 2) : result.markdownReport;
+        await fs.writeFile(outPath, outputContent, 'utf-8');
+        console.log(chalk.green(`📄 报告已保存到: ${outPath}`));
+      } else {
+        console.log(chalk.cyan('─'.repeat(70)));
+        if (cmdOptions.format === 'json') {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(result.markdownReport);
+        }
+        console.log(chalk.cyan('─'.repeat(70)));
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(i18n.t('cli.commands.lint.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
   });
@@ -395,11 +766,11 @@ program
 
 program
   .command('structured <url-or-filekey>')
-  .description('获取框架无关的结构化设计数据（适用于 Vue/Svelte/HTML 等任意框架）')
-  .option('-n, --node <nodeId>', '节点 ID')
-  .option('--depth <depth>', '最大节点树深度', '8')
-  .option('--format <format>', '输出格式 (pretty/json)', 'pretty')
-  .option('--output <file>', '输出到文件（默认输出到控制台）')
+  .description(i18n.t('cli.commands.structured.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '8')
+  .option('--format <format>', i18n.t('cli.commands.structured.format') as string, 'pretty')
+  .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
@@ -407,20 +778,20 @@ program
     const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 8;
 
     if (!nodeId) {
-      console.error(chalk.red('错误: 请提供节点 ID (URL 中 ?node-id= 参数或 --node 选项)'));
+      console.error(chalk.red(i18n.t('cli.commands.structured.noNodeId') as string));
       process.exit(1);
     }
 
-    console.log(chalk.blue(`正在获取框架无关结构化数据...`));
-    console.log(chalk.gray(`文件: ${fileKey}, 节点: ${nodeId}, 深度: ${maxDepth}`));
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.structured.fetching') as string)).start();
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`));
 
     const startTime = Date.now();
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const ctxService = createDesignContextService(client);
 
-      console.log(chalk.gray('  ↳ 获取设计上下文...'));
+      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.structured.getContext') as string));
       const context = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -440,14 +811,14 @@ program
         const outPath = path.resolve(cmdOptions.output);
         await fs.ensureDir(path.dirname(outPath));
         await fs.writeFile(outPath, output, 'utf-8');
-        console.log(chalk.green(`\n✅ 结构化数据已保存 (${duration}s): ${outPath}`));
+        spinner.succeed(chalk.green(i18n.t('cli.commands.structured.saved') as string + ` (${duration}s): ${outPath}`));
         console.log(
-          chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`),
+          chalk.gray(`   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`),
         );
       } else {
-        console.log(chalk.green(`\n✅ 获取完成 (${duration}s): ${context.node.name}`));
+        spinner.succeed(chalk.green(i18n.t('cli.commands.structured.completed') as string + ` (${duration}s): ${context.node.name}`));
         console.log(
-          chalk.gray(`   节点数: ${nodeCount}, 资源: ${context.assets.length}, 文本: ${context.textNodes.length}`),
+          chalk.gray(`   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`),
         );
         console.log('');
         console.log(chalk.cyan('─'.repeat(70)));
@@ -455,7 +826,7 @@ program
         console.log(chalk.cyan('─'.repeat(70)));
       }
     } catch (error) {
-      console.error(chalk.red(`获取结构化数据失败: ${error instanceof Error ? error.message : String(error)}`));
+      spinner.fail(chalk.red(i18n.t('cli.commands.structured.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
   });
@@ -569,12 +940,13 @@ function toStructuredNode(node: ProcessedNode): StructuredNode {
 
 program
   .command('jsx <url-or-filekey>')
-  .description('一键生成 React+Tailwind TSX 代码（增强管线）')
-  .option('-n, --node <nodeId>', '节点 ID')
-  .option('--name <name>', '组件名称')
-  .option('--scene <scene>', '场景名（用于 public/portal/<scene>/ 资源路径）')
-  .option('--depth <depth>', '最大节点树深度', '8')
-  .option('--output <file>', '输出到文件（默认输出到控制台）')
+  .description(i18n.t('cli.commands.jsx.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('--name <name>', i18n.t('cli.commands.component.name') as string)
+  .option('--scene <scene>', i18n.t('cli.commands.jsx.scene') as string)
+  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '8')
+  .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
+  .option('--skip-lint', '跳过设计规范检查提示')
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
@@ -582,27 +954,44 @@ program
     const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 8;
 
     if (!nodeId) {
-      console.error(chalk.red('错误: 请提供节点 ID (URL 中 ?node-id= 参数或 --node 选项)'));
+      console.error(chalk.red(i18n.t('cli.commands.jsx.noNodeId') as string));
       process.exit(1);
     }
 
-    console.log(chalk.blue(`正在生成 JSX 代码 (增强管线)...`));
-    console.log(chalk.gray(`文件: ${fileKey}, 节点: ${nodeId}, 深度: ${maxDepth}`));
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.jsx.generating') as string)).start();
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`));
 
     const startTime = Date.now();
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
       const ctxService = createDesignContextService(client);
       const codeGen = createCodeGenerator(client);
 
       // 1. 获取精简设计上下文
-      console.log(chalk.gray('  ↳ 获取精简设计上下文...'));
+      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.jsx.getContext') as string));
       const ctx = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
 
-      // 2. 生成 JSX
-      console.log(chalk.gray('  ↳ 生成 JSX 代码...'));
-      const result = codeGen.generateJsxFromContext(ctx, {
+      // 2. 可选：设计规范检查
+      if (!cmdOptions.skipLint) {
+        try {
+          console.log(chalk.gray('  ↳ 代码还原质量预检...'));
+          const linter = createDesignLinter();
+          const lintResult = linter.lint(ctx.node);
+          if (lintResult.errorCount > 0 || lintResult.warningCount > 3) {
+            const scoreEmoji = lintResult.score >= 75 ? '✅' : lintResult.score >= 60 ? '⚠️' : '❌';
+            console.log(chalk.yellow(`  ${scoreEmoji} 代码还原质量评分: ${lintResult.score}/100，发现 ${lintResult.errorCount} 个错误、${lintResult.warningCount} 个警告`));
+            if (lintResult.score < 80) {
+              console.log(chalk.gray('     💡 建议先运行 figma-dev lint 查看详细报告，修复问题后再生成代码'));
+            }
+          }
+        } catch {
+        }
+      }
+
+      // 3. 生成 JSX
+      console.log(chalk.gray('  ↳ ' + i18n.t('cli.commands.jsx.generateCode') as string));
+      const result = await codeGen.generateJsxFromContext(ctx, {
         componentName: cmdOptions.name,
         sceneName: cmdOptions.scene,
         usePublicCdn: true,
@@ -617,13 +1006,44 @@ program
         return c;
       }
 
-      console.log(chalk.green(`\n✅ 生成完成 (${duration}s): ${result.componentName}`));
+      spinner.succeed(chalk.green(i18n.t('cli.commands.jsx.completed') as string + ` (${duration}s): ${result.componentName}`));
       console.log(
-        chalk.gray(`   节点数: ${countNodes(ctx.node)}, 资源: ${ctx.assets.length}, 文本: ${ctx.textNodes.length}`),
+        chalk.gray(`   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${countNodes(ctx.node)}, ${i18n.t('cli.commands.structured.assets') as string}: ${ctx.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${ctx.textNodes.length}`),
       );
 
+      if (result.reports) {
+        // v1.2.0 新增：显示增强报告
+        const reports = result.reports;
+        const flexFixes = reports.flexFixes;
+        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes) > 0) {
+          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes;
+          console.log(chalk.green(`\n🔧 ${i18n.t('reports.flex.title') as string}: ${flexCount} ${i18n.t('reports.flex.fixesApplied') as string}`));
+        }
+        const a11y = reports.a11y;
+        if (a11y) {
+          const a11yCount = a11y.enhancementsCount ?? (a11y.semanticTagsCount + a11y.buttonsIdentifiedCount + a11y.ariaAddedCount);
+          if (a11yCount > 0) {
+            console.log(chalk.green(`♿ ${i18n.t('reports.a11y.title') as string}: ${a11yCount} ${i18n.t('reports.a11y.enhancementsApplied') as string}`));
+          }
+        }
+        const ds = reports.designSystem;
+        if (ds) {
+          const dsCount = ds.suggestionsCount ?? (ds.colorSuggestions.length + ds.spacingTokens.length + ds.radiusTokens.length + ds.typographySuggestions.length);
+          if (dsCount > 0) {
+            console.log(chalk.cyan(`\n🎨 ${i18n.t('reports.design.title') as string}: ${dsCount} ${i18n.t('reports.design.suggestions') as string}`));
+          }
+        }
+        const resp = reports.responsive;
+        if (resp) {
+          const respCount = resp.suggestionsCount ?? (resp.recommendations.length + resp.classSuggestions.length + resp.layoutSuggestions.length);
+          if (respCount > 0) {
+            console.log(chalk.cyan(`📱 ${i18n.t('reports.responsive.title') as string}: ${respCount} ${i18n.t('reports.responsive.suggestions') as string}`));
+          }
+        }
+      }
+
       if (result.extensionsNeeded.length > 0) {
-        console.log(chalk.yellow(`\n⚠️  需要 @theme 扩展的 token (${result.extensionsNeeded.length}):`));
+        console.log(chalk.yellow(`\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${result.extensionsNeeded.length}):`));
         const unique = result.extensionsNeeded.filter(
           (v, i, a) => a.findIndex((x) => x.originalValue === v.originalValue) === i,
         );
@@ -634,20 +1054,20 @@ program
 
       if (result.pendingAssets.length > 0) {
         const uniqueAssets = result.pendingAssets.filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
-        console.log(chalk.cyan(`\n🖼️  需要下载的资源 (${uniqueAssets.length}):`));
+        console.log(chalk.cyan(`\n🖼️  ${i18n.t('cli.commands.jsx.assetsNeeded') as string} (${uniqueAssets.length}):`));
         uniqueAssets.forEach((a) => {
           console.log(`  - ${a.nodeId}: ${a.name} (${a.type})`);
         });
         console.log(
-          chalk.gray(`   运行: figma-dev assets <url> --scene ${cmdOptions.scene || '<scene>'} --nodes <nodeIds>`),
+          chalk.gray(`   ${i18n.t('cli.commands.jsx.downloadHint') as string} figma-dev assets <url> --scene ${cmdOptions.scene || '<scene>'} --nodes <nodeIds>`),
         );
       }
 
       const reusableComponents = ctx.componentsUsed.filter((c) => c.instanceCount > 0);
       if (reusableComponents.length > 0) {
-        console.log(chalk.magenta(`\n🧩 检查复用组件:`));
+        console.log(chalk.magenta(`\n🧩 ${i18n.t('cli.commands.jsx.reusableComponents') as string}:`));
         reusableComponents.forEach((c) => {
-          console.log(`  - ${c.name} (使用 ${c.instanceCount} 次) → @/components/web-official/`);
+          console.log(`  - ${c.name} (${i18n.t('cli.commands.jsx.usedTimes') as string} ${c.instanceCount} ${i18n.t('cli.commands.jsx.times') as string}) → @/components/web-official/`);
         });
       }
 
@@ -659,13 +1079,13 @@ program
         const outPath = path.resolve(cmdOptions.output);
         await fs.ensureDir(path.dirname(outPath));
         await fs.writeFile(outPath, result.code, 'utf-8');
-        console.log(chalk.green(`✅ 代码已写入: ${outPath}`));
+        console.log(chalk.green(i18n.t('cli.commands.jsx.codeSaved') as string + `: ${outPath}`));
       } else {
         console.log(result.code);
       }
       console.log(chalk.cyan('─'.repeat(70)));
     } catch (error) {
-      console.error(chalk.red(`生成 JSX 失败: ${error instanceof Error ? error.message : String(error)}`));
+      spinner.fail(chalk.red(i18n.t('cli.commands.jsx.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
     }
   });
@@ -674,13 +1094,13 @@ program
 
 program
   .command('assets <url-or-filekey>')
-  .description('下载设计资源到 public/portal/<scene>/ 目录')
-  .option('-n, --node <nodeId>', '节点 ID（可指定多个，逗号分隔）')
-  .option('--nodes <nodeIds>', '节点 ID 列表（逗号分隔）')
-  .option('--scene <scene>', '场景名称（如 health、edu、ai-innovation-class）', 'default')
-  .option('--project-root <dir>', '项目根目录（自动检测）')
-  .option('--scale <scale>', '导出倍率 (1-4)', '2')
-  .option('--svg-format <format>', '矢量导出格式 (svg/png)', 'svg')
+  .description(i18n.t('cli.commands.assets.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.assets.node') as string)
+  .option('--nodes <nodeIds>', i18n.t('cli.commands.assets.nodes') as string)
+  .option('--scene <scene>', i18n.t('cli.commands.assets.scene') as string, 'default')
+  .option('--project-root <dir>', i18n.t('cli.commands.assets.projectRoot') as string)
+  .option('--scale <scale>', i18n.t('cli.commands.screenshot.scale') as string, '2')
+  .option('--svg-format <format>', i18n.t('cli.commands.assets.svgFormat') as string, 'svg')
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
@@ -692,18 +1112,18 @@ program
     if (cmdOptions.nodes) nodeIds.push(...cmdOptions.nodes.split(','));
 
     if (nodeIds.length === 0) {
-      console.error(chalk.red('错误: 请提供节点 ID (--node 或 --nodes)'));
+      console.error(chalk.red(i18n.t('cli.commands.assets.noNodeId') as string));
       process.exit(1);
     }
 
     const scale = Number.parseInt(cmdOptions.scale, 10) || 2;
     const sceneName = cmdOptions.scene || 'default';
 
-    console.log(chalk.blue(`正在下载设计资源...`));
-    console.log(chalk.gray(`文件: ${fileKey}, 场景: ${sceneName}, 节点数: ${nodeIds.length}, 倍率: ${scale}x`));
+    const spinner = ora(chalk.blue(i18n.t('cli.commands.assets.downloading') as string)).start();
+    console.log(chalk.gray(`${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.assets.sceneName') as string}: ${sceneName}, ${i18n.t('cli.commands.assets.nodeCount') as string}: ${nodeIds.length}, ${i18n.t('cli.commands.screenshot.scale') as string}: ${scale}x`));
 
     try {
-      const client = getClient(opts.token);
+      const client = await getClient(opts.token);
 
       // 自动检测项目根目录
       let projectRoot = cmdOptions.projectRoot;
@@ -720,7 +1140,7 @@ program
         }
         if (!projectRoot) projectRoot = process.cwd();
       }
-      console.log(chalk.gray(`项目根目录: ${projectRoot}`));
+      console.log(chalk.gray(`${i18n.t('cli.commands.assets.projectRootDetected') as string}: ${projectRoot}`));
 
       // 获取资源元数据
       const ctxService = createDesignContextService(client);
@@ -748,11 +1168,11 @@ program
       });
 
       if (uniqueAssets.length === 0) {
-        console.log(chalk.yellow('未找到可下载的资源（请确认 nodeId 对应图片/图标节点）'));
+        spinner.warn(chalk.yellow(i18n.t('cli.commands.assets.noAssets') as string));
         return;
       }
 
-      console.log(chalk.gray(`发现 ${uniqueAssets.length} 个资源，开始下载...`));
+      console.log(chalk.gray(`${i18n.t('cli.commands.assets.foundAssets') as string} ${uniqueAssets.length} ${i18n.t('cli.commands.assets.assets') as string}`));
 
       const downloader = createAssetDownloader(client, {
         projectRoot,
@@ -762,7 +1182,7 @@ program
 
       const results = await downloader.downloadAssets(fileKey, sceneName, uniqueAssets);
 
-      console.log(chalk.green(`\n✅ 资源下载完成:`));
+      spinner.succeed(chalk.green(i18n.t('cli.commands.assets.completed') as string + ':'));
       let successCount = 0;
       results.forEach((r) => {
         if (r.success) {
@@ -773,10 +1193,43 @@ program
           console.log(`  ✗ ${r.asset.nodeId}: ${r.error}`);
         }
       });
-      console.log(chalk.gray(`\n   成功: ${successCount}/${results.length}`));
+      console.log(chalk.gray(`\n   ${i18n.t('cli.commands.assets.success') as string}: ${successCount}/${results.length}`));
     } catch (error) {
-      console.error(chalk.red(`下载资源失败: ${error instanceof Error ? error.message : String(error)}`));
+      spinner.fail(chalk.red(i18n.t('cli.commands.assets.failed') as string + ': ' + (error instanceof Error ? error.message : String(error))));
       process.exit(1);
+    }
+  });
+
+// ============= 命令: 教程 =============
+
+program
+  .command('tutorial')
+  .alias('help')
+  .description(i18n.t('cli.commands.tutorial.description') as string)
+  .option('--no-browser', i18n.t('cli.commands.tutorial.noBrowser') as string)
+  .action(async (cmdOptions) => {
+    const docsUrl = 'https://gitee.com/shanxi-youcha/figma-dev-tools';
+    const tokenUrl = 'https://www.figma.com/developers/api#access-tokens';
+
+    console.log(
+      boxen(
+        chalk.cyan.bold('📚 ' + i18n.t('cli.commands.tutorial.title') as string + '\n\n') +
+          chalk.white('📖 ' + i18n.t('cli.commands.tutorial.docs') as string + ':\n') +
+          chalk.cyan(`  ${docsUrl}\n\n`) +
+          chalk.white('🔑 ' + i18n.t('cli.commands.tutorial.getToken') as string + ':\n') +
+          chalk.cyan(`  ${tokenUrl}\n\n`) +
+          chalk.white('💡 ' + i18n.t('cli.commands.tutorial.quickStart') as string + ':\n') +
+          chalk.gray('  1. figma-dev wizard      ' + i18n.t('cli.commands.tutorial.step1') as string + '\n') +
+          chalk.gray('  2. figma-dev validate    ' + i18n.t('cli.commands.tutorial.step2') as string + '\n') +
+          chalk.gray('  3. figma-dev lint <url>  ' + i18n.t('cli.commands.wizard.cmdLint') as string + '\n') +
+          chalk.gray('  4. figma-dev jsx <url>   ' + i18n.t('cli.commands.tutorial.step3') as string),
+        { padding: 1, borderColor: 'cyan', margin: { top: 1 } },
+      ),
+    );
+
+    if (cmdOptions.browser !== false) {
+      console.log(chalk.gray(i18n.t('cli.commands.tutorial.openingBrowser') as string));
+      await open(docsUrl);
     }
   });
 
@@ -784,66 +1237,266 @@ program
 
 program
   .command('mcp')
-  .description('启动 MCP 服务器 (stdio 模式)')
+  .description(i18n.t('cli.commands.mcp.description') as string)
   .action(async () => {
     const { main } = await import('../index.js');
     await main();
   });
 
-// ============= 命令: 初始化配置 =============
+// ============= 命令: 交互式配置向导 =============
 
 program
-  .command('init')
-  .description('初始化 Figma Dev Tools 配置')
+  .command('wizard')
+  .alias('init')
+  .description(i18n.t('cli.commands.wizard.description') as string)
   .action(async () => {
+    console.log(
+      boxen(chalk.cyan.bold('🎨 ' + i18n.t('cli.commands.wizard.title') as string + ' v1.2.0\n\n') + chalk.white(i18n.t('cli.commands.wizard.subtitle') as string), {
+        padding: 1,
+        borderColor: 'cyan',
+        margin: { top: 1, bottom: 1 },
+      }),
+    );
+
+    // 步骤 0: 语言选择（v1.2.0 新增）
+    const currentLang = i18n.getLanguage();
+    const languages = i18n.getSupportedLanguages();
+    const langChoices = languages.map((lang) => ({
+      name: lang.code === currentLang ? `${lang.name} (${i18n.t('cli.commands.lang.currentMarker') as string})` : lang.name,
+      value: lang.code,
+    }));
+
+    const selectedLang = await select({
+      message: i18n.t('config.selectLanguage') as string,
+      choices: langChoices,
+      default: currentLang,
+    });
+
+    if (selectedLang !== currentLang) {
+      await i18n.setLanguage(selectedLang);
+      console.log(chalk.green(i18n.t('cli.commands.lang.success') as string + '\n'));
+    }
+
+    const tokenStore = createTokenStore();
+    const backend = await tokenStore.getBackend();
+
+    // 步骤 1: Token 配置
+    const existingTokens = await tokenStore.listTokens();
+    const defaultToken = await tokenStore.getDefault();
+
+    let selectedToken: string | null = null;
+
+    if (existingTokens.length > 0) {
+      const useExisting = await confirm({
+        message: i18n.t('cli.commands.wizard.existingToken') as string + ` (${backend === 'keytar' ? i18n.t('cli.commands.token.keychain') as string : i18n.t('cli.commands.token.encryptedFile') as string})?`,
+        default: true,
+      });
+
+      if (useExisting) {
+        selectedToken = await select({
+          message: i18n.t('cli.commands.wizard.selectToken') as string,
+          choices: existingTokens.map((name) => ({
+            name: name === defaultToken ? `${name} (${i18n.t('cli.commands.token.default') as string})` : name,
+            value: name,
+          })),
+          default: defaultToken,
+        });
+        await tokenStore.setDefault(selectedToken);
+      }
+    }
+
+    if (!selectedToken) {
+      console.log('');
+      console.log(chalk.cyan('📝 ' + i18n.t('cli.commands.wizard.howToGetToken') as string + ':'));
+      console.log(chalk.gray('   1. ' + i18n.t('cli.commands.wizard.tokenStep1') as string));
+      console.log(chalk.gray('   2. ' + i18n.t('cli.commands.wizard.tokenStep2') as string));
+      console.log(chalk.gray('   3. ' + i18n.t('cli.commands.wizard.tokenStep3') as string));
+      console.log('');
+
+      const openBrowser = await confirm({
+        message: i18n.t('cli.commands.wizard.openTokenPage') as string + '?',
+        default: true,
+      });
+      if (openBrowser) {
+        await open('https://www.figma.com/developers/api#access-tokens');
+      }
+
+      const tokenValue = await password({
+        message: i18n.t('cli.commands.token.pastePrompt') as string,
+        validate: (v: string) => {
+          if (!v || v.length < 20) return i18n.t('cli.commands.token.invalidLength') as string;
+          if (!v.startsWith('figd_')) return i18n.t('cli.commands.token.invalidPrefix') as string;
+          return true;
+        },
+      });
+
+      const tokenName = await input({
+        message: i18n.t('cli.commands.wizard.tokenName') as string,
+        default: 'default',
+      });
+
+      const spinner = ora(i18n.t('cli.commands.wizard.savingToken') as string).start();
+      await tokenStore.saveToken(tokenName, tokenValue);
+      await tokenStore.setDefault(tokenName);
+
+      try {
+        const client = createFigmaClient({ accessToken: tokenValue });
+        const isValid = await client.validateToken();
+        if (isValid) {
+          spinner.succeed(chalk.green(i18n.t('cli.commands.token.validateSuccess') as string));
+          selectedToken = tokenName;
+        } else {
+          spinner.fail(chalk.red(i18n.t('cli.commands.token.validateFailed') as string));
+          process.exit(1);
+        }
+      } catch {
+        spinner.fail(chalk.red(i18n.t('cli.commands.wizard.tokenValidateError') as string));
+        process.exit(1);
+      }
+    }
+
+    // 步骤 2: 项目配置
+    console.log('');
+    const framework = await select({
+      message: i18n.t('cli.commands.wizard.selectFramework') as string,
+      choices: [
+        { name: 'React + TypeScript + Tailwind CSS (' + i18n.t('cli.commands.wizard.recommended') as string + ')', value: 'react' },
+        { name: 'Vue 3 (' + i18n.t('cli.commands.wizard.comingSoon') as string + ')', value: 'vue', disabled: '(' + i18n.t('cli.commands.wizard.stayTuned') as string + ')' },
+        { name: 'HTML/CSS (' + i18n.t('cli.commands.wizard.noFramework') as string + ')', value: 'html' },
+      ],
+      default: 'react',
+    });
+
+    const outputDir = await input({
+      message: i18n.t('cli.commands.wizard.outputDir') as string,
+      default: './src/styles/figma',
+    });
+
+    // 创建配置文件
     const configPath = path.resolve('./figma-dev.config.json');
     const envPath = path.resolve('./.env');
 
-    console.log(chalk.blue('正在初始化 Figma Dev Tools...\n'));
+    const spinner = ora(i18n.t('cli.commands.wizard.creatingConfig') as string).start();
 
-    // 创建配置文件
-    const defaultConfig = {
+    const config = {
       $schema: 'https://schema.figma-dev-tools.com/config.json',
-      defaultFileKey: '',
-      outputDir: './src/styles/figma',
-      framework: 'react',
+      defaultToken: selectedToken || 'default',
+      outputDir,
+      framework,
       styleFormat: 'tailwind',
       typescript: true,
       colorFormat: 'oklch',
       spacingUnit: 'px',
       importAlias: '@',
+      language: i18n.getLanguage(),
     };
 
-    if (await fs.pathExists(configPath)) {
-      console.log(chalk.yellow(`⚠️  配置文件已存在: ${configPath}`));
-    } else {
-      await fs.writeJSON(configPath, defaultConfig, { spaces: 2 });
-      console.log(chalk.green(`✅ 创建配置文件: ${configPath}`));
-    }
+    await fs.writeJSON(configPath, config, { spaces: 2 });
 
-    // 创建 .env 示例
-    if (await fs.pathExists(envPath)) {
-      const envContent = await fs.readFile(envPath, 'utf-8');
-      if (!envContent.includes('FIGMA_ACCESS_TOKEN')) {
-        await fs.appendFile(
-          envPath,
-          '\n# Figma Access Token\n# 获取地址: https://www.figma.com/developers/api#access-tokens\nFIGMA_ACCESS_TOKEN=your_token_here\n',
-        );
-        console.log(chalk.green(`✅ 更新 .env 文件，添加 FIGMA_ACCESS_TOKEN 配置`));
-      }
-    } else {
+    // .env 文件不再需要明文 Token（因为使用安全存储）
+    if (!(await fs.pathExists(envPath))) {
       await fs.writeFile(
         envPath,
-        '# Figma Access Token\n# 获取地址: https://www.figma.com/developers/api#access-tokens\nFIGMA_ACCESS_TOKEN=your_token_here\n',
+        '# Figma Dev Tools 配置\n# Token 已安全存储在系统密钥链/加密文件中，无需在此配置\n# 如需覆盖可设置 FIGMA_ACCESS_TOKEN 环境变量\n',
       );
-      console.log(chalk.green(`✅ 创建 .env 文件: ${envPath}`));
     }
 
-    console.log('');
-    console.log(chalk.cyan('下一步:'));
-    console.log('  1. 在 .env 文件中设置你的 FIGMA_ACCESS_TOKEN');
-    console.log('  2. 运行 figma-dev validate 验证 Token');
-    console.log('  3. 运行 figma-dev sync <figma-url> 同步设计 Tokens');
+    spinner.succeed(chalk.green(i18n.t('cli.commands.wizard.configComplete') as string));
+
+    // 显示成功信息和下一步指引
+    console.log(
+      boxen(
+        chalk.green.bold('🎉 ' + i18n.t('cli.commands.wizard.setupComplete') as string + '\n\n') +
+          chalk.white(i18n.t('cli.commands.wizard.commonCommands') as string + ':\n') +
+          chalk.cyan('  figma-dev validate') + chalk.gray('        ' + i18n.t('cli.commands.wizard.cmdValidate') as string + '\n') +
+          chalk.cyan('  figma-dev sync <url>') + chalk.gray('      ' + i18n.t('cli.commands.wizard.cmdSync') as string + '\n') +
+          chalk.cyan('  figma-dev lint <url>') + chalk.gray('      ' + i18n.t('cli.commands.wizard.cmdLint') as string + '\n') +
+          chalk.cyan('  figma-dev jsx <url>') + chalk.gray('       ' + i18n.t('cli.commands.wizard.cmdJsx') as string + '\n') +
+          chalk.cyan('  figma-dev assets <url>') + chalk.gray('    ' + i18n.t('cli.commands.wizard.cmdAssets') as string + '\n') +
+          chalk.cyan('  figma-dev metadata <url>') + chalk.gray('  ' + i18n.t('cli.commands.wizard.cmdMetadata') as string + '\n') +
+          chalk.cyan('  figma-dev lang switch') + chalk.gray('    ' + i18n.t('cli.commands.wizard.cmdLang') as string + '\n') +
+          chalk.cyan('  figma-dev tutorial') + chalk.gray('      ' + i18n.t('cli.commands.wizard.cmdTutorial') as string + '\n\n') +
+          chalk.yellow('💡 ' + i18n.t('cli.commands.wizard.mcpHint') as string),
+        { padding: 1, borderColor: 'green', margin: { top: 1 } },
+      ),
+    );
+  });
+
+// ============= Shell 自动补全 =============
+
+program.addHelpText(
+  'after',
+  chalk.gray(`
+${i18n.t('cli.completion.title') as string}:
+  ${i18n.t('cli.completion.install') as string}:
+    ${chalk.cyan('figma-dev completion >> ~/.zshrc')}     # Zsh
+    ${chalk.cyan('figma-dev completion >> ~/.bashrc')}    # Bash
+    ${chalk.cyan('figma-dev completion | Out-String | Invoke-Expression')}  # PowerShell
+
+  ${i18n.t('cli.completion.afterInstall') as string}
+`),
+);
+
+// Shell 自动补全命令
+program
+  .command('completion', { hidden: true })
+  .description(i18n.t('cli.completion.description') as string)
+  .action(() => {
+    const shell = process.env.SHELL?.includes('zsh') ? 'zsh' : process.env.SHELL?.includes('fish') ? 'fish' : 'bash';
+    // Commander 内置补全 - 简单实现
+    const compLog = (msg: string) => console.log(msg);
+
+    if (shell === 'zsh') {
+      compLog(`# Figma Dev Tools Zsh Completion`);
+      compLog(`# 追加到 ~/.zshrc 即可生效:`);
+      compLog(`#   figma-dev completion >> ~/.zshrc && source ~/.zshrc`);
+      compLog(``);
+      compLog(`#compdef figma-dev figma-dev-tools`);
+      compLog(`_figma_dev_completion() {`);
+      compLog(`  local -a commands`);
+      compLog(`  commands=(`);
+      compLog(`    'wizard:交互式配置向导'`);
+      compLog(`    'lang:语言设置'`);
+      compLog(`    'validate:验证 Figma Token'`);
+      compLog(`    'token:管理 Access Token（set/get/list/delete/default）'`);
+      compLog(`    'sync:同步设计 Tokens'`);
+      compLog(`    'lint:检查设计规范'`);
+      compLog(`    'jsx:生成 React+Tailwind TSX 代码'`);
+      compLog(`    'component:生成 React 组件'`);
+      compLog(`    'assets:下载设计资源'`);
+      compLog(`    'metadata:查看设计稿概览'`);
+      compLog(`    'structured:获取结构化设计数据'`);
+      compLog(`    'screenshot:获取节点截图'`);
+      compLog(`    'info:查看文件信息'`);
+      compLog(`    'mcp:启动 MCP 服务器'`);
+      compLog(`    'tutorial:查看教程文档'`);
+      compLog(`    'completion:生成补全脚本'`);
+      compLog(`  )`);
+      compLog(`  _describe 'command' commands`);
+      compLog(`}`);
+      compLog(`compdef _figma_dev_completion figma-dev figma-dev-tools`);
+    } else if (shell === 'bash') {
+      compLog(`# Figma Dev Tools Bash Completion`);
+      compLog(`_figma_dev_completion() {`);
+      compLog(`  local cur prev commands`);
+      compLog(`  COMPREPLY=()`);
+      compLog(`  cur="\${COMP_WORDS[COMP_CWORD]}"`);
+      compLog(`  prev="\${COMP_WORDS[COMP_CWORD-1]}"`);
+      compLog(`  commands="wizard lang validate token sync lint jsx component assets metadata structured screenshot info mcp tutorial completion"`);
+      compLog(`  COMPREPLY=( $(compgen -W "\${commands}" -- \${cur}) )`);
+      compLog(`  return 0`);
+      compLog(`}`);
+      compLog(`complete -F _figma_dev_completion figma-dev figma-dev-tools`);
+    } else {
+      // PowerShell
+      compLog(`# Figma Dev Tools PowerShell Completion`);
+      compLog(`# 将此输出追加到 $PROFILE 即可生效:`);
+      compLog(`#   figma-dev completion >> $PROFILE`);
+      compLog(`Register-ArgumentCompleter -Native -CommandName figma-dev,figma-dev-tools -ScriptBlock {`);
+      compLog(`  param($wordToComplete, $commandAst, $cursorPosition)`);
+      compLog(`  @('wizard','lang','validate','token','sync','lint','jsx','component','assets','metadata','structured','screenshot','info','mcp','tutorial') | Where-Object { $_ -like "$wordToComplete*" }`);
+      compLog(`}`);
+    }
   });
 
 // 解析命令行参数

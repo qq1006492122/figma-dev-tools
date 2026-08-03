@@ -27,7 +27,9 @@
  *   ↓
  * 4. HTTP 下载图片到 public 目录
  *   ↓
- * 5. 填充 asset.localPath / asset.cdnUrl
+ * 5. SVG 优化（如果启用）
+ *   ↓
+ * 6. 填充 asset.localPath / asset.cdnUrl
  *   ↓
  * DownloadResult[]（含成功/失败状态和错误信息）
  * ```
@@ -39,6 +41,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { optimize as svgoOptimize } from 'svgo';
 
 import type { FigmaExportFormat } from '../types.js';
 import type { ProcessedAsset, ProcessedNode } from '../types/nodes.js';
@@ -60,15 +63,18 @@ export interface AssetDownloaderOptions {
   svgFormat?: 'svg' | 'png';
   /** 是否跳过已存在的文件（避免重复下载） */
   skipExisting?: boolean;
+  /** 是否使用 SVGO 优化 SVG 输出（移除冗余属性、压缩体积），默认 true */
+  optimizeSvg?: boolean;
 }
 
 /**
  * 默认下载配置
  */
-const DEFAULT_OPTIONS: Required<Pick<AssetDownloaderOptions, 'scale' | 'svgFormat' | 'skipExisting'>> = {
+const DEFAULT_OPTIONS: Required<Pick<AssetDownloaderOptions, 'scale' | 'svgFormat' | 'skipExisting' | 'optimizeSvg'>> = {
   scale: 2,
   svgFormat: 'svg',
   skipExisting: true,
+  optimizeSvg: true,
 };
 
 /**
@@ -242,7 +248,8 @@ export class AssetDownloader {
    * 2. 按导出格式（SVG/PNG）分组节点 ID
    * 3. 分批调用 Figma Images API 获取导出 URL
    * 4. 逐一下载图片（跳过已存在的文件）
-   * 5. 填充 asset 的 localPath 和 cdnUrl 字段
+   * 5. SVG 优化（如果启用）
+   * 6. 填充 asset 的 localPath 和 cdnUrl 字段
    *
    * @param fileKey - Figma 文件 Key
    * @param sceneName - 场景名称（用于目录组织）
@@ -311,6 +318,7 @@ export class AssetDownloader {
    * - 整批 API 调用失败：为该批每个节点记录错误
    * - 单个节点无导出 URL：标记为失败，不影响其他节点
    * - 单个文件下载失败：标记为失败，不影响其他节点
+   * - SVG 优化失败：使用原始 SVG，不阻塞下载
    *
    * @param fileKey - Figma 文件 Key
    * @param sceneName - 场景名称
@@ -393,7 +401,31 @@ export class AssetDownloader {
             }
             // 使用 arrayBuffer() 下载二进制数据，转为 Buffer 后写入文件
             const buffer = Buffer.from(await response.arrayBuffer());
-            fs.writeFileSync(filePath, buffer);
+
+            // SVG 优化（如果启用）
+            let finalBuffer = buffer;
+            if (format === 'svg' && this._options.optimizeSvg) {
+              try {
+                const svgString = buffer.toString('utf-8');
+                const result = svgoOptimize(svgString, {
+                  multipass: true,
+                  plugins: [
+                    'preset-default',
+                    'removeDimensions',
+                    {
+                      name: 'removeAttrs',
+                      params: {
+                        attrs: ['data-name', 'id'],
+                      },
+                    },
+                  ],
+                });
+                finalBuffer = Buffer.from(result.data, 'utf-8');
+              } catch {
+                // SVGO 优化失败时使用原始 SVG，不阻塞下载
+              }
+            }
+            fs.writeFileSync(filePath, finalBuffer);
 
             const localPath = this._generateLocalPath(sceneName, fileName);
             const cdnUrl = this._generateCdnCode(sceneName, fileName);

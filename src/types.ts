@@ -947,6 +947,8 @@ export interface CodeGenOptions {
   readonly includeProps?: boolean;
   /** 是否包含子节点 */
   readonly includeChildren?: boolean;
+  /** 是否跳过增强功能（flex-fixer/a11y/design-system/responsive） */
+  readonly skipEnhancements?: boolean;
 }
 
 /**

@@ -1,15 +1,17 @@
 /**
- * 轻量级类名合并工具
+ * 类名合并工具 - Class Name Utility
  *
- * 独立实现的 cn() 函数，用于条件性地拼接 CSS 类名。
- * 自动过滤 falsy 值（false、null、undefined、0、''），
- * 支持嵌套数组递归展开。
- *
- * 设计为零外部依赖，不依赖 clsx 或 tailwind-merge，
- * 保持 skill 包的轻量性。
+ * 基于 clsx + tailwind-merge 的智能类名合并函数，专门为 Tailwind CSS 设计：
+ * - 自动过滤 falsy 值（false、null、undefined、0、''）
+ * - 支持嵌套数组递归展开
+ * - 使用 tailwind-merge 智能解决 Tailwind 类名冲突（如 p-2 px-4 → px-4 py-2）
+ * - 支持对象形式条件类名（{ 'class-name': condition }）
  *
  * @module
  */
+
+import { twMerge } from 'tailwind-merge';
+import { clsx, type ClassValue as ClsxClassValue } from 'clsx';
 
 /**
  * 可传入 cn() 的类名值类型
@@ -19,52 +21,33 @@
  * - 数字：转为字符串作为类名
  * - false/null/undefined：被过滤掉
  * - 嵌套数组：递归展开处理
- *
- * 注意：不支持对象形式（如 { 'class-name': condition }），
- * 如需条件类名请使用 && 或三元表达式。
+ * - 对象：key 为类名，value 为布尔值控制是否包含
  */
-export type ClassValue = string | number | null | undefined | false | readonly ClassValue[];
+export type ClassValue = ClsxClassValue;
 
 /**
- * 合并 CSS 类名
+ * 合并 CSS 类名（支持 Tailwind 类名智能去重/冲突解决）
  *
  * 将多个类名参数合并为以空格分隔的单个字符串，
- * 自动过滤所有 falsy 值，并支持数组递归嵌套。
+ * 自动过滤所有 falsy 值，支持数组/对象递归展开，
+ * 并通过 tailwind-merge 智能解决 Tailwind 类名冲突。
  *
- * @param inputs - 任意数量的类名参数
- * @returns 合并后的类名字符串
+ * @param inputs - 任意数量的类名参数（字符串、数字、对象、数组、falsy 值）
+ * @returns 合并并处理冲突后的类名字符串
  *
  * @example
  * ```typescript
+ * // 基础用法
  * cn('flex', 'items-center');
- * // "flex items-center"
  *
- * cn('flex', false && 'hidden', undefined, null, 'p-4');
- * // "flex p-4"
+ * // Tailwind 冲突自动解决（后面的类名覆盖前面的冲突类名）
+ * cn('p-2', 'px-4');          // → "py-2 px-4"
+ * cn('text-red-500', 'text-blue-500');  // → "text-blue-500"
  *
- * cn('text-sm', isActive && 'font-bold', ['px-2', 'py-1']);
- * // isActive=true:  "text-sm font-bold px-2 py-1"
- * // isActive=false: "text-sm px-2 py-1"
+ * // 条件类名
+ * cn('text-sm', isActive && 'font-bold', { 'opacity-50': isDisabled });
  * ```
- *
- * 边界情况：
- * - 空参数或全 falsy 值返回空字符串
- * - 数字会被转为字符串（如 cn(1) → "1"）
- * - 嵌套数组会被递归展开
- * - 不做类名去重（如有需要请自行保证类名不冲突）
  */
 export function cn(...inputs: ClassValue[]): string {
-  const output: string[] = [];
-  for (const value of inputs) {
-    if (!value) continue;
-    if (typeof value === 'string' || typeof value === 'number') {
-      output.push(String(value));
-    } else if (Array.isArray(value)) {
-      const nestedResult = cn(...value);
-      if (nestedResult) {
-        output.push(nestedResult);
-      }
-    }
-  }
-  return output.join(' ');
+  return twMerge(clsx(inputs));
 }

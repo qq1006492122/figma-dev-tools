@@ -3,9 +3,13 @@
  * Figma Dev Tools MCP Server
  * 提供 Figma 设计稿与代码的桥接能力，包括：
  * - 设计 Tokens 提取
- * - 组件代码生成
+ * - 组件代码生成（含 Flex 修复、a11y 增强、设计系统对齐、响应式推断）
  * - 文件信息查询
  * - 截图获取
+ * - 资源下载与 SVG Sprite 生成
+ * - 设计规范检查
+ *
+ * @version 1.2.0
  */
 
 import * as fs from 'node:fs';
@@ -19,22 +23,27 @@ import { z } from 'zod';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
 import { createCodeGenerator } from './services/code-generator.js';
 import { createDesignContextService } from './services/design-context.js';
+import { createDesignLinter } from './services/design-linter.js';
 import { createFigmaClient, type FigmaClient } from './services/figma-client.js';
 import { createFileWriter } from './services/file-writer.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
+import { generateSvgSprite, generateSpriteTypes } from './services/svg-sprite-generator.js';
+import { initI18nSync } from './i18n/index.js';
 import type { DesignTokens } from './types.js';
 import type { ProcessedNode, StructuredNode } from './types/nodes.js';
+import type { FlexFixEntry } from './services/flex-fixer.js';
+import type { A11yReportEntry } from './services/a11y-enhancer.js';
+import type { DesignSystemSuggestion } from './services/design-system.js';
+import type { ResponsiveSuggestion } from './services/responsive-inferrer.js';
 import { parseFigmaUrl, extractFileKey, extractNodeId } from './utils/figma-url.js';
 
-// 加载环境变量
 dotenv.config();
 
-// 全局变量
+// 初始化 i18n（v1.2.0 新增）
+initI18nSync();
+
 let figmaClient: FigmaClient | null = null;
 
-/**
- * 获取或创建 Figma 客户端
- */
 function getFigmaClient(token?: string): FigmaClient {
   const accessToken = token || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
 
@@ -52,19 +61,11 @@ function getFigmaClient(token?: string): FigmaClient {
   return figmaClient;
 }
 
-/**
- * 创建 MCP 服务器实例
- */
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.1.4',
+  version: '1.2.0',
 });
 
-// ============= 工具注册 =============
-
-/**
- * 工具 1: 解析 Figma URL
- */
 server.registerTool(
   'figma_parse_url',
   {
@@ -134,9 +135,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 2: 获取 Figma 文件信息
- */
 server.registerTool(
   'figma_get_file',
   {
@@ -168,7 +166,6 @@ server.registerTool(
       const client = getFigmaClient(accessToken);
       const file = await client.getFile(key, undefined, 1);
 
-      // 提取页面信息
       const pages =
         file.document.children?.map((page) => ({
           id: page.id,
@@ -220,9 +217,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 3: 提取设计 Tokens
- */
 server.registerTool(
   'figma_extract_tokens',
   {
@@ -270,7 +264,6 @@ server.registerTool(
 
       const tokens = await extractor.extract(key, nId);
 
-      // 生成统计信息
       const summary = {
         colors: Object.keys(tokens.colors).length,
         spacing: Object.keys(tokens.spacing).length,
@@ -280,7 +273,6 @@ server.registerTool(
         source: tokens.metadata.figmaFileName || key,
       };
 
-      // 生成预览
       let preview = `# 设计 Tokens 提取结果\n\n`;
       preview += `**来源**: ${summary.source}\n\n`;
       preview += `## 统计\n\n`;
@@ -321,16 +313,14 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 4: 生成组件代码
- */
 server.registerTool(
   'figma_generate_component',
   {
     title: '生成 React 组件代码',
-    description: `从 Figma 节点生成 React/TypeScript 组件代码。
+    description: `从 Figma 节点生成 React/TypeScript 组件代码（兼容旧版）。
 自动识别布局、样式、文本等属性，生成 Tailwind CSS 类名。
-生成的代码遵循项目现有代码风格（shadcn/ui + Tailwind v4）。`,
+注意：此工具使用旧版代码生成管线。如需 Flex 修复、a11y 增强、设计系统分析、
+响应式推断等 v1.2.0 增强功能，请使用 figma_generate_jsx 工具。`,
     inputSchema: z.object({
       fileKey: z.string().describe('Figma 文件 Key'),
       nodeId: z.string().describe('节点 ID（必需）'),
@@ -339,6 +329,7 @@ server.registerTool(
       typescript: z.boolean().default(true).describe('是否生成 TypeScript 代码'),
       styleFormat: z.enum(['tailwind', 'css-modules', 'inline-styles']).default('tailwind').describe('样式格式'),
       includeChildren: z.boolean().default(true).describe('是否包含子元素'),
+      skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能（Flex 修复、a11y 等）'),
       accessToken: z.string().optional().describe('Figma Access Token'),
     }),
     annotations: {
@@ -348,7 +339,7 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, componentName, typescript, styleFormat, includeChildren, accessToken }) => {
+  async ({ fileKey, nodeId, figmaUrl, componentName, typescript, styleFormat, includeChildren, skipEnhancements, accessToken }) => {
     try {
       let key = fileKey;
       let nId = nodeId;
@@ -380,6 +371,7 @@ server.registerTool(
         styleFormat,
         componentName,
         includeChildren,
+        skipEnhancements,
       });
 
       const component = await generator.generateComponent(key, nId);
@@ -411,9 +403,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 5: 获取节点截图
- */
 server.registerTool(
   'figma_get_screenshot',
   {
@@ -486,9 +475,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 6: 生成 CSS/Tailwind 配置文件
- */
 server.registerTool(
   'figma_generate_styles',
   {
@@ -567,9 +553,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 7: 同步 Tokens 到项目
- */
 server.registerTool(
   'figma_sync_to_project',
   {
@@ -644,9 +627,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 8: 验证 Token
- */
 server.registerTool(
   'figma_validate_token',
   {
@@ -692,9 +672,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 9: 获取节点元数据（高层结构概览，避免上下文爆炸）
- */
 server.registerTool(
   'figma_get_metadata',
   {
@@ -767,9 +744,6 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 10: 获取精简设计上下文（含节点树、token 值、资源列表）
- */
 server.registerTool(
   'figma_get_design_context',
   {
@@ -801,7 +775,6 @@ server.registerTool(
       const ctxService = createDesignContextService(client);
       const context = await ctxService.getDesignContext(key, nId, maxDepth);
 
-      // 生成简洁预览（不输出完整节点树避免上下文爆炸，结构化数据在 structuredContent 中）
       let preview = `# 设计上下文: ${context.node.name}\n\n`;
       preview += `- **语义角色**: ${context.node.role}\n`;
       preview += `- **尺寸**: ${context.node.size ? Math.round(context.node.size.width) + '×' + Math.round(context.node.size.height) : 'N/A'}\n`;
@@ -847,15 +820,13 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 11: 下载设计资源到 public/portal/<scene>/
- */
 server.registerTool(
   'figma_download_assets',
   {
     title: '下载设计资源到项目 public 目录',
     description: `将 figma_get_design_context 返回的资源下载到项目 public/portal/<场景名>/ 目录，
 并自动生成 publicCdnUrl() 引用代码。下载的图片可直接在组件中通过 publicCdnUrl('/<场景>/xxx.png') 引用。
+v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
 遵循项目资源落位规范（figma-to-code.md）。`,
     inputSchema: z.object({
       fileKey: z.string().describe('Figma 文件 Key'),
@@ -865,6 +836,7 @@ server.registerTool(
       projectRoot: z.string().optional().describe('项目根目录绝对路径（默认自动检测）'),
       scale: z.number().min(1).max(4).default(2).describe('导出倍率（默认2x）'),
       svgFormat: z.enum(['svg', 'png']).default('svg').describe('矢量图形导出格式'),
+      optimizeSvg: z.boolean().default(true).describe('是否使用 SVGO 优化 SVG（移除冗余属性、压缩体积），默认 true'),
       accessToken: z.string().optional().describe('Figma Access Token'),
     }),
     annotations: {
@@ -874,12 +846,11 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, sceneName, assetNodeIds, figmaUrl, projectRoot, scale, svgFormat, accessToken }) => {
+  async ({ fileKey, sceneName, assetNodeIds, figmaUrl, projectRoot, scale, svgFormat, optimizeSvg, accessToken }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       if (!key) return { content: [{ type: 'text', text: '请提供 fileKey 或 figmaUrl' }], isError: true };
 
-      // 自动检测项目根目录（从 cwd 向上查找包含 pnpm-workspace.yaml 的目录）
       let root = projectRoot;
       if (!root) {
         let dir = process.cwd();
@@ -897,25 +868,21 @@ server.registerTool(
 
       const client = getFigmaClient(accessToken);
 
-      // 先获取设计上下文以提取资产元数据
       const ctxService = createDesignContextService(client);
       const assets = [];
       for (const nodeId of assetNodeIds) {
         try {
           const ctx = await ctxService.getDesignContext(key, nodeId, 1);
           if (ctx.node.asset) assets.push(ctx.node.asset);
-          // 也收集子节点中的资产
           function collectAssets(n: typeof ctx.node) {
             if (n.asset) assets.push(n.asset);
             if (n.children) n.children.forEach(collectAssets);
           }
           collectAssets(ctx.node);
         } catch {
-          /* 单个节点失败不影响整体 */
         }
       }
 
-      // 去重
       const seen = new Set<string>();
       const uniqueAssets = assets.filter((a) => {
         if (seen.has(a.nodeId)) return false;
@@ -934,6 +901,7 @@ server.registerTool(
         projectRoot: root,
         scale: scale as 1 | 2 | 3 | 4,
         svgFormat: svgFormat as 'svg' | 'png',
+        optimizeSvg,
       });
 
       const results = await downloader.downloadAssets(key, sceneName, uniqueAssets);
@@ -952,9 +920,101 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 12: 列出文件中的 Figma Components
- */
+server.registerTool(
+  'figma_create_icon_sprite',
+  {
+    title: '生成 SVG Sprite 图标雪碧图',
+    description: `将本地 public 目录下已下载的 SVG 图标合并为一个 SVG Sprite 文件，支持通过 <use href="#icon-name"> 引用。
+适用场景：批量下载图标资源后，生成统一的雪碧图以减少 HTTP 请求。
+使用前提：先调用 figma_download_assets 将 SVG 图标下载到项目目录。
+输出：一个 sprite.svg 文件 + 可选的 TypeScript 类型定义文件（含图标名称联合类型）。`,
+    inputSchema: z.object({
+      svgDir: z.string().describe('包含 SVG 文件的目录绝对路径（通常是 public/portal/<场景名>/icons 之类的目录）'),
+      outputPath: z.string().describe('输出 sprite.svg 的绝对路径（如 /path/to/public/icons/sprite.svg）'),
+      typesPath: z.string().optional().describe('可选，输出 TypeScript 类型文件路径（如 /path/src/types/icons.ts）'),
+      prefix: z.string().default('icon-').describe('symbol id 前缀，默认 "icon-"'),
+      removeFill: z.boolean().default(true).describe('是否移除 fill 属性以便通过 CSS color 控制颜色，默认 true'),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ svgDir, outputPath, typesPath, prefix, removeFill }) => {
+    try {
+      if (!fs.existsSync(svgDir)) {
+        return {
+          content: [{ type: 'text', text: `目录不存在: ${svgDir}，请先调用 figma_download_assets 下载 SVG 资源。` }],
+          isError: true,
+        };
+      }
+
+      const allFiles = fs.readdirSync(svgDir);
+      const svgFiles = allFiles
+        .filter((f: string) => f.toLowerCase().endsWith('.svg'))
+        .map((f: string) => path.join(svgDir, f));
+
+      if (svgFiles.length === 0) {
+        return {
+          content: [{ type: 'text', text: `目录 ${svgDir} 中没有找到 SVG 文件。` }],
+          isError: false,
+        };
+      }
+
+      const results = generateSvgSprite(svgFiles, { outputPath, prefix, removeFill });
+      const successCount = results.filter((r) => r.success).length;
+      const failCount = results.filter((r) => !r.success).length;
+
+      let typesFile: string | null = null;
+      if (typesPath) {
+        generateSpriteTypes(svgFiles, typesPath, prefix);
+        typesFile = typesPath;
+      }
+
+      const exampleIcon = results.find((r) => r.success);
+      const spriteRelPath = './' + path.basename(outputPath);
+      const exampleSnippet = exampleIcon
+        ? `\n## 使用示例\n\n\`\`\`tsx\n// 1. 在入口文件导入 sprite\nimport '${spriteRelPath}';\n\n// 2. 在组件中使用\nexport const Icon = ({ name }: { name: IconName }) => (\n  <svg className="icon" aria-hidden="true">\n    <use href={\`#${prefix}\${name}\`} />\n  </svg>\n);\n\`\`\``
+        : '';
+
+      let preview = `# SVG Sprite 生成完成\n\n`;
+      preview += `- **输入目录**: ${svgDir}\n`;
+      preview += `- **SVG 文件数**: ${svgFiles.length}\n`;
+      preview += `- **成功合并**: ${successCount}\n`;
+      preview += `- **失败**: ${failCount}\n`;
+      preview += `- **输出文件**: ${outputPath}\n`;
+      if (typesFile) preview += `- **类型文件**: ${typesFile}\n`;
+      preview += exampleSnippet;
+
+      if (failCount > 0) {
+        preview += `\n## 处理失败的文件\n\n`;
+        results.filter((r) => !r.success).forEach((r) => {
+          preview += `- ${r.name}: ${r.error}\n`;
+        });
+      }
+
+      return {
+        content: [{ type: 'text', text: preview }],
+        structuredContent: {
+          outputPath,
+          typesPath: typesFile,
+          totalSvg: svgFiles.length,
+          successCount,
+          failCount,
+          icons: results.filter((r) => r.success).map((r) => r.name),
+        },
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `生成 SVG Sprite 失败: ${error instanceof Error ? error.message : String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 server.registerTool(
   'figma_list_components',
   {
@@ -1012,28 +1072,20 @@ server.registerTool(
   },
 );
 
-// ============= 工具 13: figma_generate_jsx（一键生成增强版 JSX）=============
-
 server.registerTool(
-  'figma_generate_jsx',
+  'figma_lint_design',
   {
-    title: '一键生成 React JSX 代码（增强版）',
-    description: `整合增强管线：自动精简层级 → 匹配 design token → 语义标签选择 → 生成 React+Tailwind TSX 代码。
-自动：消除 div soup（layout-only 节点扁平化）、颜色/间距/圆角/阴影命中 token、图片标记 publicCdnUrl 占位、复用组件提示 import。
-输出包含：TSX 代码、需下载资源列表、需 @theme 扩展的 token、复用组件提示。
-
-工作流建议：
-1. 先调用 figma_get_metadata 了解结构
-2. 对目标区块调用 figma_generate_jsx 生成代码
-3. 如有图片，调用 figma_download_assets 下载到 public/portal/<场景>/
-4. 将生成代码复制到项目，处理 TODO 注释（复用组件映射）`,
+    title: '代码还原质量预检',
+    description: `检查 Figma 设计稿的代码还原质量，识别会影响生成代码质量的问题并给出修复建议。
+这是代码生成前的预检工具，专注于"如何让 AI 更好地还原设计"，与官方 Figma Code Connect 互补（Code Connect 用于映射已有设计系统组件）。
+检查项包括：Auto Layout 使用、图层命名、规范间距/尺寸/圆角、组件复用、无障碍尺寸、嵌套层级等。
+评分低于 80 分时建议先修复问题再生成代码，以获得最佳还原效果。
+参见：FIGMA-DESIGN-GUIDELINES.md 给设计师/AI 的设计规范。`,
     inputSchema: z.object({
-      fileKey: z.string().describe('Figma 文件 Key（URL 中 /design/<key>/ 部分）'),
-      nodeId: z.string().describe('目标节点 ID（URL 中 node-id= 参数）'),
-      figmaUrl: z.string().optional().describe('Figma URL（可替代 fileKey+nodeId）'),
-      componentName: z.string().optional().describe('生成的组件名（默认从节点名推断）'),
-      sceneName: z.string().optional().describe('场景名（用于 public/portal/<场景>/ 资源路径）'),
-      maxDepth: z.number().default(8).describe('节点树最大遍历深度（默认 8）'),
+      fileKey: z.string().describe('Figma 文件 Key'),
+      nodeId: z.string().optional().describe('节点 ID（可选，默认检查整个文件或指定节点）'),
+      figmaUrl: z.string().optional().describe('Figma URL（如果提供则自动解析 fileKey 和 nodeId）'),
+      maxDepth: z.number().min(1).max(10).default(8).describe('最大检查深度（默认8）'),
       accessToken: z.string().optional().describe('Figma Access Token'),
     }),
     annotations: {
@@ -1043,7 +1095,97 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, componentName, sceneName, maxDepth, accessToken }) => {
+  async ({ fileKey, nodeId, figmaUrl, maxDepth, accessToken }) => {
+    try {
+      const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
+      const nId = figmaUrl ? extractNodeId(figmaUrl) || nodeId : nodeId;
+      if (!key) {
+        return { content: [{ type: 'text', text: '请提供 fileKey 或有效的 figmaUrl' }], isError: true };
+      }
+
+      const client = getFigmaClient(accessToken);
+      const ctxService = createDesignContextService(client);
+      const linter = createDesignLinter();
+
+      let nodesToLint: ProcessedNode[] = [];
+
+      if (nId) {
+        const context = await ctxService.getDesignContext(key, nId, maxDepth);
+        nodesToLint = [context.node];
+      } else {
+        const file = await client.getFile(key, undefined, 2);
+        const pages = file.document.children || [];
+        for (const page of pages) {
+          try {
+            const context = await ctxService.getDesignContext(key, page.id, maxDepth);
+            nodesToLint.push(context.node);
+          } catch {
+          }
+        }
+      }
+
+      const result = linter.lint(nodesToLint);
+
+      return {
+        content: [{ type: 'text', text: result.markdownReport }],
+        structuredContent: {
+          score: result.score,
+          totalNodes: result.totalNodes,
+          errorCount: result.errorCount,
+          warningCount: result.warningCount,
+          infoCount: result.infoCount,
+          issues: result.issues,
+          categoryBreakdown: result.categoryBreakdown,
+          summary: result.summary,
+        },
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `代码还原质量预检失败: ${error instanceof Error ? error.message : String(error)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'figma_generate_jsx',
+  {
+    title: '一键生成 React JSX 代码（增强版）',
+    description: `整合增强管线：自动精简层级 → 匹配 design token → 语义标签选择 → Flex 布局修复 → 无障碍增强 → 设计系统对齐 → 响应式推断 → 生成 React+Tailwind TSX 代码。
+v1.2.0 新增强化功能：
+- 🔧 Flex 布局问题自动修复（图标变形、文本截断、溢出滚动等）
+- ♿ 无障碍(a11y)自动增强（语义化标签、alt 文本、ARIA 属性）
+- 🎨 设计系统自动化（颜色变量、间距/字体/圆角/阴影映射）
+- 📱 响应式断点智能推断（设备类型、响应式前缀建议）
+自动：消除 div soup（layout-only 节点扁平化）、颜色/间距/圆角/阴影命中 token、图片标记 publicCdnUrl 占位、复用组件提示 import。
+输出包含：TSX 代码、增强报告、需下载资源列表、需 @theme 扩展的 token、复用组件提示。
+
+工作流建议：
+1. 先调用 figma_get_metadata 了解结构
+2. 可选：调用 figma_lint_design 检查设计规范并修复问题
+3. 对目标区块调用 figma_generate_jsx 生成代码
+4. 如有图片，调用 figma_download_assets 下载到 public/portal/<场景>/
+5. 将生成代码复制到项目，处理 TODO 注释（复用组件映射）`,
+    inputSchema: z.object({
+      fileKey: z.string().describe('Figma 文件 Key（URL 中 /design/<key>/ 部分）'),
+      nodeId: z.string().describe('目标节点 ID（URL 中 node-id= 参数）'),
+      figmaUrl: z.string().optional().describe('Figma URL（可替代 fileKey+nodeId）'),
+      componentName: z.string().optional().describe('生成的组件名（默认从节点名推断）'),
+      sceneName: z.string().optional().describe('场景名（用于 public/portal/<场景>/ 资源路径）'),
+      maxDepth: z.number().default(8).describe('节点树最大遍历深度（默认 8）'),
+      skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能'),
+      skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示'),
+      accessToken: z.string().optional().describe('Figma Access Token'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({ fileKey, nodeId, figmaUrl, componentName, sceneName, maxDepth, skipEnhancements, skipLintCheck, accessToken }) => {
     try {
       let resolvedKey = fileKey;
       let resolvedNode = nodeId;
@@ -1060,19 +1202,86 @@ server.registerTool(
       const ctxService = createDesignContextService(client);
       const codeGen = createCodeGenerator(client);
 
-      // 1. 获取精简设计上下文
       const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
 
-      // 2. 生成 JSX
-      const result = codeGen.generateJsxFromContext(ctx, {
+      let lintReport: Awaited<ReturnType<ReturnType<typeof createDesignLinter>['lint']>> | null = null;
+      if (!skipLintCheck) {
+        try {
+          const linter = createDesignLinter();
+          lintReport = linter.lint(ctx.node);
+        } catch {
+        }
+      }
+
+      const result = await codeGen.generateJsxFromContext(ctx, {
         componentName,
         sceneName,
         usePublicCdn: true,
+        skipEnhancements,
       });
 
-      // 3. 组装预览信息
       const lines: string[] = [];
       lines.push(`# ${result.componentName} - React TSX 代码\n`);
+
+      if (lintReport && (lintReport.errorCount > 0 || lintReport.warningCount > 3)) {
+        lines.push(`## ⚠️ 设计规范提示\n`);
+        const scoreEmoji = lintReport.score >= 75 ? '✅' : lintReport.score >= 60 ? '⚠️' : '❌';
+        lines.push(`${scoreEmoji} 当前设计规范评分: **${lintReport.score}/100**，发现 ${lintReport.errorCount} 个错误、${lintReport.warningCount} 个警告`);
+        if (lintReport.score < 80) {
+          lines.push('');
+          lines.push('💡 建议先修复设计规范问题再生成代码，可以获得更高质量的还原结果。');
+          lines.push(`   可调用 \`figma_lint_design\` 工具查看详细报告。`);
+        }
+        lines.push('');
+      }
+
+      // v1.2.0 新增：显示增强报告
+      if (result.reports && !skipEnhancements) {
+        const reports = result.reports;
+        const flexFixes = reports.flexFixes;
+        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes) > 0) {
+          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes;
+          lines.push(`## 🔧 Flex 布局修复 (${flexCount} 处)\n`);
+          flexFixes.fixes.slice(0, 10).forEach((fix: FlexFixEntry) => {
+            lines.push(`- 节点 \`${fix.nodeName}\`: 添加了 ${fix.addedClasses.join(', ')}`);
+          });
+          lines.push('');
+        }
+        const a11yReport = reports.a11y;
+        if (a11yReport) {
+          const a11yCount = a11yReport.enhancementsCount ?? (a11yReport.semanticTagsCount + a11yReport.buttonsIdentifiedCount + a11yReport.ariaAddedCount);
+          if (a11yCount > 0) {
+            lines.push(`## ♿ 无障碍增强 (${a11yCount} 处)\n`);
+            a11yReport.report.slice(0, 10).forEach((enh: A11yReportEntry) => {
+              lines.push(`- 节点 \`${enh.nodeName}\`: ${enh.enhancement}`);
+            });
+            lines.push('');
+          }
+        }
+        const dsReport = reports.designSystem;
+        if (dsReport) {
+          const dsCount = dsReport.suggestionsCount ?? (dsReport.colorSuggestions.length + dsReport.spacingTokens.length + dsReport.radiusTokens.length + dsReport.typographySuggestions.length);
+          if (dsCount > 0) {
+            lines.push(`## 🎨 设计系统建议 (${dsCount} 条)\n`);
+            dsReport.suggestions.slice(0, 10).forEach((sug: DesignSystemSuggestion) => {
+              lines.push(`- ${sug.message}`);
+            });
+            lines.push('');
+          }
+        }
+        const respReport = reports.responsive;
+        if (respReport) {
+          const respCount = respReport.suggestionsCount ?? (respReport.recommendations.length + respReport.classSuggestions.length + respReport.layoutSuggestions.length);
+          if (respCount > 0) {
+            lines.push(`## 📱 响应式建议 (${respCount} 条)\n`);
+            respReport.suggestions.slice(0, 10).forEach((sug: ResponsiveSuggestion) => {
+              lines.push(`- ${sug.message}`);
+            });
+            lines.push('');
+          }
+        }
+      }
+
       lines.push('```tsx');
       lines.push(result.code);
       lines.push('```\n');
@@ -1125,9 +1334,11 @@ server.registerTool(
         structuredContent: {
           componentName: result.componentName,
           code: result.code,
+          reports: result.reports,
           extensionsNeeded: result.extensionsNeeded,
           pendingAssets: result.pendingAssets,
           reusableComponents,
+          lintScore: lintReport?.score,
           stats: {
             assetCount: ctx.assets.length,
             textCount: ctx.textNodes.length,
@@ -1145,15 +1356,13 @@ server.registerTool(
   },
 );
 
-/**
- * 工具 14: 获取框架无关的结构化数据
- */
 server.registerTool(
   'figma_get_structured_data',
   {
     title: '获取框架无关结构化数据',
     description: `从 design context 转换为框架无关的描述性 JSON 结构，包含每个节点的 id/name/role/type/size/layout/styles/text/asset/children 信息。
 不输出 React 代码，适用于 Vue、Svelte、HTML、Angular、Solid 等任意框架的代码生成。
+v1.2.0 增强：输出包含语义标签建议、a11y 属性建议、设计系统 token 映射信息。
 输出结构包含完整的精简节点树，可直接遍历渲染任意框架组件。`,
     inputSchema: z.object({
       fileKey: z.string().describe('Figma 文件 Key'),
@@ -1187,6 +1396,7 @@ server.registerTool(
       preview += `- **颜色数**: ${context.colors.length}\n`;
       preview += `- **资源数**: ${context.assets.length}\n`;
       preview += `- **文本节点**: ${context.textNodes.length}\n\n`;
+      preview += `> v1.2.0: 结构化数据包含语义标签建议、a11y 属性、设计 token 映射。\n\n`;
       preview += `> 完整结构化节点树（含 id/name/role/type/size/layout/styles/text/asset/children）已在 structuredContent 中，可用于任意框架代码生成。\n`;
 
       return {
@@ -1204,9 +1414,6 @@ server.registerTool(
   },
 );
 
-/**
- * 将 ProcessedNode 转换为框架无关的 StructuredNode
- */
 function toStructuredNode(node: ProcessedNode): StructuredNode {
   const result: StructuredNode = {
     id: node.id,
@@ -1241,9 +1448,6 @@ function toStructuredNode(node: ProcessedNode): StructuredNode {
   return result;
 }
 
-/**
- * 统计节点树中节点总数
- */
 function countNodes(node: { children?: unknown[] }): number {
   let count = 1;
   if (node.children) {
@@ -1254,22 +1458,8 @@ function countNodes(node: { children?: unknown[] }): number {
   return count;
 }
 
-// ============= 启动服务器 =============
-
-/**
- * 启动 stdio 服务器
- */
 export async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Figma Dev Tools MCP Server running via stdio');
-}
-
-// 只有当直接运行此文件时才启动服务器
-const isDirectRun = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}`;
-if (isDirectRun) {
-  main().catch((error) => {
-    console.error('Failed to start MCP server:', error);
-    process.exit(1);
-  });
+  console.error('Figma Dev Tools MCP Server v1.2.0 running via stdio');
 }

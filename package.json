@@ -1,7 +1,7 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.1.4",
-  "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, and one-click installation across 10+ editors. Zero-config npx mode with --figma-api-key.",
+  "version": "1.2.0",
+  "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, and one-click installation across 10+ editors. Features i18n, a11y (accessibility), responsive design inference, design system alignment, flex layout fixes, zero-config npx mode with --figma-api-key, secure token storage, interactive wizard CLI, Prettier auto-formatting, SVG sprite generation, Tailwind class merging with tailwind-merge",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -45,7 +45,15 @@
     "framework-agnostic",
     "zero-config",
     "yarn",
-    "bun"
+    "bun",
+    "i18n",
+    "a11y",
+    "accessibility",
+    "responsive",
+    "design-system",
+    "flex-fixer",
+    "responsive-design",
+    "flexbox"
   ],
   "author": "Youcha",
   "license": "MIT",
@@ -64,17 +72,25 @@
     ".env.example",
     "README.md",
     "SKILL.md",
+    "FIGMA-DESIGN-GUIDELINES.md",
     "mcp-standalone.mjs",
     "LICENSE"
   ],
   "dependencies": {
+    "@inquirer/prompts": "^8.5.2",
     "@modelcontextprotocol/sdk": "^1.6.1",
     "axios": "^1.7.9",
+    "boxen": "^8.0.1",
     "chalk": "^5.3.0",
+    "clsx": "^2.1.1",
     "commander": "^12.1.0",
     "dotenv": "^16.4.7",
     "fs-extra": "^11.2.0",
+    "open": "^11.0.0",
+    "ora": "^9.4.1",
     "prettier": "^3.4.2",
+    "svgo": "^3.3.2",
+    "tailwind-merge": "^3.6.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
