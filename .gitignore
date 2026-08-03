@@ -10,3 +10,5 @@ Thumbs.db
 fix-types.mjs
 .npmrc
 commit-msg.txt
+publish-*.mjs
+*-temp.mjs

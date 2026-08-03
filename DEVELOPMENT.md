@@ -1,0 +1,141 @@
+# figma-dev-tools 开发指南
+
+## 项目概述
+figma-dev-tools 是一个 Figma 设计稿转代码的 MCP 工具，支持 React + Tailwind CSS 代码生成。
+
+## 环境要求
+- Node.js >= 20
+- pnpm >= 10.26.2（也支持 npm/yarn/bun）
+
+## 常用命令
+| 命令 | 说明 |
+|------|------|
+| `npm install` | 安装依赖 |
+| `npm run dev` | 开发模式（监听文件变化） |
+| `npm run build` | TypeScript 编译 |
+| `npm run cli` | 运行 CLI 命令 |
+| `npm test` | 运行测试 |
+| `npm run test:watch` | 监听模式运行测试 |
+| `npm start` | 运行编译后的代码 |
+
+## 项目结构
+```
+figma-dev-tools/
+├── bin/                    # CLI 入口
+│   └── figma-dev.js
+├── src/
+│   ├── index.ts           # MCP 服务器入口
+│   ├── cli/               # CLI 命令实现
+│   │   └── index.ts
+│   ├── i18n/              # 国际化（zh-CN/en-US）
+│   │   ├── index.ts
+│   │   ├── zh-CN.ts
+│   │   └── en-US.ts
+│   ├── services/          # 核心服务
+│   │   ├── figma-client.ts      # Figma API 客户端
+│   │   ├── node-processor.ts    # 节点处理
+│   │   ├── tailwind-mapper.ts   # Figma → Tailwind 映射
+│   │   ├── code-generator.ts    # React 代码生成
+│   │   ├── code-formatter.ts    # Prettier 格式化
+│   │   ├── flex-fixer.ts        # Flex 布局自动修复
+│   │   ├── a11y-enhancer.ts     # 无障碍增强
+│   │   ├── design-system.ts     # 设计系统自动化
+│   │   ├── responsive-inferrer.ts # 响应式推断
+│   │   ├── design-linter.ts     # 设计规范检查
+│   │   ├── asset-downloader.ts  # 资源下载
+│   │   ├── svg-sprite-generator.ts # SVG Sprite
+│   │   ├── token-store.ts       # Token 安全存储
+│   │   ├── tokens-extractor.ts  # Token 提取
+│   │   ├── token-matcher.ts     # Token 匹配
+│   │   ├── design-context.ts    # 设计上下文
+│   │   └── file-writer.ts       # 文件写入
+│   ├── types/             # TypeScript 类型定义
+│   │   └── nodes.ts
+│   ├── utils/             # 工具函数
+│   │   ├── cn.ts
+│   │   ├── color.ts
+│   │   ├── errors.ts
+│   │   └── figma-url.ts
+│   └── types.ts
+├── dist/                  # TypeScript 编译输出
+├── install.mjs            # 安装脚本
+├── uninstall.mjs          # 卸载脚本
+├── mcp-standalone.mjs     # MCP 独立运行脚本
+├── FIGMA-DESIGN-GUIDELINES.md # 设计规范文档
+├── OPTIMIZATION-ANALYSIS.md   # 优化分析
+├── SKILL.md               # Skill 说明文档
+├── README.md              # 项目说明
+├── LICENSE                # 许可证
+├── mcp-config.schema.json # MCP 配置 Schema
+├── .env.example           # 环境变量示例
+├── tsconfig.json          # TypeScript 配置
+└── package.json
+```
+
+## ⚠️ 开发注意事项
+
+### 1. 临时文件清理
+- **任务执行完成后必须删除临时脚本文件**，包括但不限于：
+  - 以 `fix-` 开头的修复脚本
+  - 以 `verify-` 开头的验证脚本
+  - 以 `release-` 开头的发布脚本
+  - 以 `_` 开头的临时文件
+  - `test-*.txt` 等测试文件
+- 以下是项目必需的脚本文件，**不要删除**：
+  - `install.mjs` - 安装脚本
+  - `uninstall.mjs` - 卸载脚本
+  - `mcp-standalone.mjs` - MCP 独立运行脚本
+
+### 2. 代码规范
+- **禁止使用 `any` 类型**，使用 `unknown` 或具体类型替代
+- 未使用的变量/参数以下划线 `_` 开头
+- 使用 TypeScript 严格模式
+- 优先使用 `import type` 导入类型
+- 字符串模板使用反引号 `` ` ``，不是单引号 `'`
+- 避免在 map 中使用对象 spread，使用 Object.assign 或直接赋值
+- 避免冗余的条件判断（如 `x > 0 && x > 20` 只需要 `x > 20`）
+
+### 3. Lint 规则
+提交前必须通过 lint 和类型检查：
+```bash
+npm run build     # 确保 TypeScript 编译通过
+npm test          # 确保测试通过
+```
+
+### 4. 国际化 (i18n)
+- 所有用户可见文本必须通过 i18n 系统
+- 新增文本需要同时更新 zh-CN.ts 和 en-US.ts
+- 带参数的翻译使用函数形式，参考现有 colorAlias 等示例
+
+### 5. 版本号管理
+- 版本号在 package.json、src/cli/index.ts、src/index.ts 三处保持一致
+- 不要在代码中硬编码版本号，从 package.json 读取或统一常量
+
+### 6. Git 提交规范
+使用 Conventional Commits：
+- `feat:` 新功能
+- `fix:` 修复
+- `docs:` 文档
+- `refactor:` 重构
+- `chore:` 构建/工具
+- `test:` 测试
+
+### 7. 发布流程
+1. 确保所有检查通过：`npm run build && npm test`
+2. 确认版本号正确
+3. 确认没有临时文件
+4. git add/commit/push
+5. npm publish --access public
+
+## MCP 工具列表
+| 工具名 | 说明 |
+|--------|------|
+| figma_get_file | 获取 Figma 文件信息 |
+| figma_get_node | 获取节点信息 |
+| figma_generate_jsx | 生成增强版 JSX（推荐） |
+| figma_generate_component | 生成 React 组件（旧版兼容） |
+| figma_lint_design | 代码还原质量预检 |
+| figma_get_structured_data | 获取框架无关结构化数据 |
+| figma_download_assets | 下载图片资源 |
+| figma_create_icon_sprite | 生成 SVG Sprite |
+| figma_get_screenshot | 获取节点截图 |
