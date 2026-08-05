@@ -65,7 +65,6 @@ const DEFAULT_OPTIONS: Required<NodeProcessorOptions> = {
  */
 const SAFE_MAX_DEPTH = 50; // 绝对最大递归深度（即使配置 -1 也不超过此值）
 const SAFE_MAX_NODES = 20000; // 绝对最大节点数（防止恶意/异常文件）
-const SAFE_MAX_VISITED_PATH = 200; // visited 路径最大长度（循环引用检测窗口）
 
 // ============ 视觉属性判断工具 ============
 

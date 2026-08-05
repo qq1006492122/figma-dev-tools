@@ -392,7 +392,9 @@ class TokenStoreImpl implements TokenStore {
     // 保存时先验证 Token 有效性
     const validation = await this.validateTokenWithApi(token);
     if (!validation.valid) {
-      throw new Error(`Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`);
+      throw new Error(
+        `Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`,
+      );
     }
 
     const metadata = JSON.stringify({
@@ -400,11 +402,13 @@ class TokenStoreImpl implements TokenStore {
       createdAt: Date.now(),
       lastValidatedAt: Date.now(),
       validationStatus: 'valid' as TokenValidationStatus,
-      userInfo: validation.user ? {
-        id: validation.user.id,
-        email: validation.user.email,
-        handle: validation.user.handle,
-      } : undefined,
+      userInfo: validation.user
+        ? {
+            id: validation.user.id,
+            email: validation.user.email,
+            handle: validation.user.handle,
+          }
+        : undefined,
     });
     const password = JSON.stringify({ value: token, metadata });
 
@@ -538,7 +542,9 @@ class TokenStoreImpl implements TokenStore {
     // 保存时先验证 Token 有效性
     const validation = await this.validateTokenWithApi(token);
     if (!validation.valid) {
-      throw new Error(`Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`);
+      throw new Error(
+        `Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`,
+      );
     }
 
     const data = await this.readEncryptedFile();
@@ -553,11 +559,13 @@ class TokenStoreImpl implements TokenStore {
       lastUsedAt: existing?.lastUsedAt,
       lastValidatedAt: now,
       validationStatus: 'valid',
-      userInfo: validation.user ? {
-        id: validation.user.id,
-        email: validation.user.email,
-        handle: validation.user.handle,
-      } : undefined,
+      userInfo: validation.user
+        ? {
+            id: validation.user.id,
+            email: validation.user.email,
+            handle: validation.user.handle,
+          }
+        : undefined,
       note: note ?? existing?.note,
     };
 
@@ -864,8 +872,7 @@ class TokenStoreImpl implements TokenStore {
       if (!info) continue;
 
       const neverValidated = !info.lastValidatedAt;
-      const validationExpired = info.lastValidatedAt
-        && (Date.now() - info.lastValidatedAt) > TOKEN_VALIDATION_INTERVAL;
+      const validationExpired = info.lastValidatedAt && Date.now() - info.lastValidatedAt > TOKEN_VALIDATION_INTERVAL;
 
       if (neverValidated || validationExpired || info.validationStatus === 'invalid') {
         needingValidation.push(name);

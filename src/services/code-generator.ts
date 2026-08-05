@@ -65,7 +65,7 @@ import type { FigmaNode, CodeGenOptions, GeneratedComponent } from '../types.js'
 import type { ProcessedNode, DesignContext } from '../types/nodes.js';
 import { cn } from '../utils/cn.js';
 import { convertFigmaColor } from '../utils/color.js';
-import { escapeAttribute, escapeJsString, sanitizeIdentifier, sanitizeText } from '../utils/security.js';
+import { escapeAttribute, sanitizeIdentifier, sanitizeText } from '../utils/security.js';
 import { createA11yEnhancer, type A11yEnhancerResult } from './a11y-enhancer.js';
 import { formatCode } from './code-formatter.js';
 import { createDesignSystemAnalyzer, type DesignSystemResult } from './design-system.js';
@@ -608,7 +608,8 @@ export class CodeGenerator {
    */
   private _generateReportComments(reports: EnhancementReports): string[] {
     const comments: string[] = [];
-    const hasContent = reports.flexFixes || reports.a11y || reports.designSystem || reports.responsive || reports.interaction;
+    const hasContent =
+      reports.flexFixes || reports.a11y || reports.designSystem || reports.responsive || reports.interaction;
 
     if (!hasContent) return comments;
 
@@ -656,9 +657,7 @@ export class CodeGenerator {
       const typeSummary = Array.from(typeCounts.entries())
         .map(([type, count]) => `${type}:${count}`)
         .join(', ');
-      comments.push(
-        ` * 🔄 Interactions inferred: ${reports.interaction.interactionsCount} (${typeSummary})`
-      );
+      comments.push(` * 🔄 Interactions inferred: ${reports.interaction.interactionsCount} (${typeSummary})`);
       if (reports.interaction.interactions.some((i) => i.codeHint)) {
         comments.push(' *    ⚠️  Check TODO comments for event handler wiring');
       }
@@ -918,9 +917,7 @@ export class CodeGenerator {
     // ============ 15. 递归生成子节点（异步等待） ============
     const childrenJsx =
       node.children && node.children.length > 0
-        ? (await Promise.all(
-            node.children.map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx)),
-          ))
+        ? (await Promise.all(node.children.map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx))))
             .filter(Boolean)
             .join('\n')
         : '';
@@ -947,10 +944,7 @@ export class CodeGenerator {
    * @param ctx - 生成上下文
    * @returns 内联 SVG 结果，失败返回 null
    */
-  private async _tryRenderInlineSvg(
-    node: ProcessedNode,
-    ctx: ProcessedNodeContext,
-  ): Promise<InlineSvgResult | null> {
+  private async _tryRenderInlineSvg(node: ProcessedNode, ctx: ProcessedNodeContext): Promise<InlineSvgResult | null> {
     try {
       // 检查节点是否包含非矢量子节点（如文本），如果有则不内联
       if (this._hasNonVectorDescendants(node)) {

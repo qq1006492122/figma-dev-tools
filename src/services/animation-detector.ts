@@ -44,13 +44,7 @@ export type FigmaTransitionType =
   | 'SLIDE'
   | 'SCROLL_ANIMATE';
 
-export type FigmaEasingType =
-  | 'EASE_IN'
-  | 'EASE_OUT'
-  | 'EASE_IN_AND_OUT'
-  | 'LINEAR'
-  | 'SPRING'
-  | 'CUSTOM_CUBIC_BEZIER';
+export type FigmaEasingType = 'EASE_IN' | 'EASE_OUT' | 'EASE_IN_AND_OUT' | 'LINEAR' | 'SPRING' | 'CUSTOM_CUBIC_BEZIER';
 
 export interface AnimationTransition {
   /** 过渡类型 */
@@ -303,10 +297,7 @@ export class AnimationDetector {
   /**
    * 生成 CSS transition 代码建议
    */
-  private _generateCssTransition(
-    reactions: AnimationReaction[],
-    animatedProps: Set<string>,
-  ): string {
+  private _generateCssTransition(reactions: AnimationReaction[], animatedProps: Set<string>): string {
     // 取第一个非空 transition 作为示例
     const firstTransition = reactions.find((r) => r.transition)?.transition;
     if (!firstTransition) return '';

@@ -297,8 +297,8 @@ async function main() {
   }
 
   const allSupported = editorConfigs.map((e) => e.editor);
-  const found = [...new Set([...configured.map((c) => c.editor), ...alreadyConfigured.map((c) => c.editor)])];
-  const notFound = allSupported.filter((e) => !found.includes(e));
+  const foundSet = new Set([...configured.map((c) => c.editor), ...alreadyConfigured.map((c) => c.editor)]);
+  const notFound = allSupported.filter((e) => !foundSet.has(e));
 
   if (notFound.length > 0) {
     console.log('💡 以下编辑器未检测到，如需使用请手动配置:');

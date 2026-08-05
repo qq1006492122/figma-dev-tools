@@ -605,7 +605,13 @@ export class DesignLinter {
     } else {
       layoutDetail = '无需要布局的容器';
     }
-    dimensions.push({ name: '布局规范 (Auto Layout)', score: layoutScore, weight: layoutWeight, maxScore: layoutWeight, details: layoutDetail });
+    dimensions.push({
+      name: '布局规范 (Auto Layout)',
+      score: layoutScore,
+      weight: layoutWeight,
+      maxScore: layoutWeight,
+      details: layoutDetail,
+    });
 
     // 2. 命名得分 (20%) - 语义化命名比例
     const namingWeight = 20;
@@ -618,7 +624,13 @@ export class DesignLinter {
     } else {
       namingDetail = '无可命名节点';
     }
-    dimensions.push({ name: '命名规范', score: namingScore, weight: namingWeight, maxScore: namingWeight, details: namingDetail });
+    dimensions.push({
+      name: '命名规范',
+      score: namingScore,
+      weight: namingWeight,
+      maxScore: namingWeight,
+      details: namingDetail,
+    });
 
     // 3. 组件复用得分 (15%)
     const componentWeight = 15;
@@ -635,7 +647,13 @@ export class DesignLinter {
     } else {
       componentDetail = '节点较少，暂无组件复用需求';
     }
-    dimensions.push({ name: '组件复用', score: componentScore, weight: componentWeight, maxScore: componentWeight, details: componentDetail });
+    dimensions.push({
+      name: '组件复用',
+      score: componentScore,
+      weight: componentWeight,
+      maxScore: componentWeight,
+      details: componentDetail,
+    });
 
     // 4. 间距/尺寸/圆角得分 (15%) - 4px 网格符合率（info 类问题，给保底分）
     const spacingWeight = 15;
@@ -650,7 +668,13 @@ export class DesignLinter {
     } else {
       spacingDetail = '无间距/尺寸检查项';
     }
-    dimensions.push({ name: '间距/尺寸规范', score: spacingScore, weight: spacingWeight, maxScore: spacingWeight, details: spacingDetail });
+    dimensions.push({
+      name: '间距/尺寸规范',
+      score: spacingScore,
+      weight: spacingWeight,
+      maxScore: spacingWeight,
+      details: spacingDetail,
+    });
 
     // 5. 无障碍得分 (10%) - 可交互元素尺寸
     const a11yWeight = 10;
@@ -663,7 +687,13 @@ export class DesignLinter {
     } else {
       a11yDetail = '未检测到可交互元素（按钮/链接/输入框）';
     }
-    dimensions.push({ name: '无障碍 (A11y)', score: a11yScore, weight: a11yWeight, maxScore: a11yWeight, details: a11yDetail });
+    dimensions.push({
+      name: '无障碍 (A11y)',
+      score: a11yScore,
+      weight: a11yWeight,
+      maxScore: a11yWeight,
+      details: a11yDetail,
+    });
 
     // 6. 结构得分 (10%) - 嵌套深度 + 图标一致性
     const structureWeight = 10;
@@ -676,14 +706,20 @@ export class DesignLinter {
     }
     // 图标尺寸过多扣分
     if (this.ctx.iconSizeKinds > 3) {
-      structurePenalty += Math.min(5, (this.ctx.iconSizeKinds - 3));
+      structurePenalty += Math.min(5, this.ctx.iconSizeKinds - 3);
     }
     structureScore = Math.max(0, structureWeight - structurePenalty);
     const structureIssues: string[] = [];
     if (this.ctx.deepNestingNodes > 0) structureIssues.push(`${this.ctx.deepNestingNodes} 个节点嵌套过深`);
     if (this.ctx.iconSizeKinds > 1) structureIssues.push(`图标有 ${this.ctx.iconSizeKinds} 种尺寸`);
     structureDetail = structureIssues.length > 0 ? structureIssues.join('，') : '结构良好';
-    dimensions.push({ name: '结构合理性', score: structureScore, weight: structureWeight, maxScore: structureWeight, details: structureDetail });
+    dimensions.push({
+      name: '结构合理性',
+      score: structureScore,
+      weight: structureWeight,
+      maxScore: structureWeight,
+      details: structureDetail,
+    });
 
     // 计算总分
     const totalScore = dimensions.reduce((sum, d) => sum + d.score, 0);

@@ -11,12 +11,11 @@
  * @module
  */
 
+import equal from 'fast-deep-equal';
 import { optimize, type Config as SvgoConfig } from 'svgo';
 
-import equal from 'fast-deep-equal';
-
-import type { FigmaClient } from './figma-client.js';
 import { sanitizeSvg } from '../utils/security.js';
+import type { FigmaClient } from './figma-client.js';
 
 // ============ 类型定义 ============
 
@@ -264,7 +263,7 @@ export class SvgInlineRenderer {
     const rawSvg = buffer.toString('utf-8');
 
     // 安全清理 SVG
-    let cleanedSvg = sanitizeSvg(rawSvg);
+    const cleanedSvg = sanitizeSvg(rawSvg);
 
     // 使用 svgo 优化
     let optimizedSvg = cleanedSvg;
@@ -445,9 +444,12 @@ export class SvgInlineRenderer {
     let result = svg;
 
     // 匹配 fill="#xxx" 和 stroke="#xxx"（非 none、非透明、非 url() 引用）
-    result = result.replace(/(fill|stroke)=["'](?!none|transparent|url\(|white|#fff|#ffffff)([^"']+)["']/g, (match, attr: string) => {
-      return `${attr}="currentColor"`;
-    });
+    result = result.replace(
+      /(fill|stroke)=["'](?!none|transparent|url\(|white|#fff|#ffffff)([^"']+)["']/g,
+      (match, attr: string) => {
+        return `${attr}="currentColor"`;
+      },
+    );
 
     return result;
   }
@@ -460,26 +462,33 @@ export class SvgInlineRenderer {
   }
 }
 
+interface VectorCheckNode {
+  type?: string;
+  originalType?: string;
+  role?: string;
+  children?: VectorCheckNode[];
+}
+
 /**
  * 判断节点是否为矢量图形节点（适合内联 SVG 渲染）
  */
-export function isVectorNode(node: { type?: string; originalType?: string; role?: string }): boolean {
+export function isVectorNode(node: VectorCheckNode): boolean {
   const type = node.type || node.originalType;
   return (
-    type === 'VECTOR'
-    || type === 'BOOLEAN_OPERATION'
-    || type === 'STAR'
-    || type === 'LINE'
-    || type === 'REGULAR_POLYGON'
-    || (type === 'ELLIPSE' && node.role === 'icon')
-    || (type === 'RECTANGLE' && node.role === 'icon')
+    type === 'VECTOR' ||
+    type === 'BOOLEAN_OPERATION' ||
+    type === 'STAR' ||
+    type === 'LINE' ||
+    type === 'REGULAR_POLYGON' ||
+    (type === 'ELLIPSE' && node.role === 'icon') ||
+    (type === 'RECTANGLE' && node.role === 'icon')
   );
 }
 
 /**
  * 检查节点是否包含矢量子节点
  */
-export function hasVectorDescendants(node: { children?: any[] }): boolean {
+export function hasVectorDescendants(node: VectorCheckNode): boolean {
   if (!node.children) return false;
   return node.children.some((child) => {
     if (isVectorNode(child)) return true;

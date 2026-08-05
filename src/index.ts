@@ -10,7 +10,7 @@
  * - 设计规范检查（含维度评分）
  * - 本地缓存加速
  *
- * @version 1.4.0
+ * @version 1.4.1
  */
 
 import * as fs from 'node:fs';
@@ -37,7 +37,7 @@ import type { ResponsiveSuggestion } from './services/responsive-inferrer.js';
 import { generateSvgSprite, generateSpriteTypes } from './services/svg-sprite-generator.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
 import { createVueGenerator } from './services/vue-generator.js';
-import type { DesignTokens } from './types.js';
+import type { CodeGenResult, DesignTokens, TailwindExtension } from './types.js';
 import type { ProcessedNode, StructuredNode } from './types/nodes.js';
 import { parseFigmaUrl, extractFileKey, extractNodeId } from './utils/figma-url.js';
 
@@ -71,7 +71,7 @@ function getFigmaClient(token?: string): FigmaClient {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.4.0',
+  version: '1.4.1',
 });
 
 server.registerTool(
@@ -1199,7 +1199,10 @@ v1.2.0 新增强化功能：
       sceneName: z.string().optional().describe('场景名（用于 public/portal/<场景>/ 资源路径）'),
       maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）'),
       framework: z.enum(['react', 'vue']).default('react').describe('目标框架：react (默认) | vue (v1.4.0新增)'),
-      styleFormat: z.enum(['tailwind', 'unocss']).default('tailwind').describe('样式方案：tailwind (默认) | unocss (v1.4.0新增)'),
+      styleFormat: z
+        .enum(['tailwind', 'unocss'])
+        .default('tailwind')
+        .describe('样式方案：tailwind (默认) | unocss (v1.4.0新增)'),
       skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能'),
       skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示'),
       accessToken: z.string().optional().describe('Figma Access Token'),
@@ -1256,18 +1259,7 @@ v1.2.0 新增强化功能：
         } catch {}
       }
 
-      let result: {
-        code: string;
-        componentName: string;
-        pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
-        extensionsNeeded: Array<{ type: string; suggestedName: string; originalValue: string }>;
-        reports?: {
-          flexFixes?: { fixedCount?: number; totalFixedNodes?: number; fixes: FlexFixEntry[] };
-          a11y?: { enhancementsCount?: number; semanticTagsCount: number; buttonsIdentifiedCount: number; ariaAddedCount: number; report: A11yReportEntry[] };
-          designSystem?: { suggestionsCount?: number; suggestions: DesignSystemSuggestion[]; colorSuggestions: unknown[]; spacingTokens: unknown[]; radiusTokens: unknown[]; typographySuggestions: unknown[] };
-          responsive?: { suggestionsCount?: number; suggestions: ResponsiveSuggestion[]; recommendations: unknown[]; classSuggestions: unknown[]; layoutSuggestions: unknown[] };
-        };
-      };
+      let result: CodeGenResult;
 
       if (framework === 'vue') {
         const vueResult = await vueGen.generateFromContext(ctx, {
@@ -1277,31 +1269,36 @@ v1.2.0 新增强化功能：
           styleFormat: styleFormat === 'unocss' ? 'unocss' : 'tailwind',
           skipEnhancements,
         });
-        result = vueResult as any;
+        result = vueResult as unknown as CodeGenResult;
       } else {
-        result = await codeGen.generateJsxFromContext(ctx, {
+        result = (await codeGen.generateJsxFromContext(ctx, {
           componentName,
           sceneName,
           usePublicCdn: true,
           skipEnhancements,
-        });
+        })) as unknown as CodeGenResult;
       }
 
       const lines: string[] = [];
-      lines.push(`# ${result.componentName} - ${framework === 'vue' ? 'Vue 3 SFC' : 'React TSX'} 代码 (${styleFormat})\n`);
+      lines.push(
+        `# ${result.componentName} - ${framework === 'vue' ? 'Vue 3 SFC' : 'React TSX'} 代码 (${styleFormat})\n`,
+      );
 
       if (libDetection.library !== 'none' && componentMatches.length > 0) {
         lines.push(`## 🧩 检测到组件库: ${libDetection.library}\n`);
         lines.push(`匹配到 ${componentMatches.length} 个可复用组件：\n`);
         componentMatches.slice(0, 5).forEach((m) => {
-          lines.push(`- **${m.componentName}** (置信度 ${Math.round(m.confidence * 100)}%) → import from \`${m.importPath}\``);
+          lines.push(
+            `- **${m.componentName}** (置信度 ${Math.round(m.confidence * 100)}%) → import from \`${m.importPath}\``,
+          );
         });
         lines.push('');
       }
 
       if (lintReport && (lintReport.errorCount > 0 || lintReport.warningCount > 3)) {
         lines.push(`## ⚠️ 设计规范提示\n`);
-        const scoreEmoji = lintReport.score >= 90 ? '🎉' : lintReport.score >= 80 ? '✅' : lintReport.score >= 60 ? '🔶' : '❌';
+        const scoreEmoji =
+          lintReport.score >= 90 ? '🎉' : lintReport.score >= 80 ? '✅' : lintReport.score >= 60 ? '🔶' : '❌';
         lines.push(
           `${scoreEmoji} 当前设计规范评分: **${lintReport.score}/100**，发现 ${lintReport.errorCount} 个错误、${lintReport.warningCount} 个警告`,
         );
@@ -1315,12 +1312,12 @@ v1.2.0 新增强化功能：
 
       // v1.2.0 新增：显示增强报告
       if (result.reports && !skipEnhancements) {
-        const reports: any = result.reports;
+        const reports = result.reports;
         const flexFixes = reports.flexFixes;
         if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
           const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
           lines.push(`## 🔧 Flex 布局修复 (${flexCount} 处)\n`);
-          (flexFixes.fixes || []).slice(0, 10).forEach((fix: FlexFixEntry) => {
+          ((flexFixes.fixes as readonly FlexFixEntry[]) || []).slice(0, 10).forEach((fix) => {
             lines.push(`- 节点 \`${fix.nodeName}\`: 添加了 ${fix.addedClasses.join(', ')}`);
           });
           lines.push('');
@@ -1329,16 +1326,18 @@ v1.2.0 新增强化功能：
         if (a11yReport) {
           const a11yCount =
             a11yReport.enhancementsCount ??
-            (a11yReport.semanticTagsCount || 0) + (a11yReport.buttonsIdentifiedCount || 0) + (a11yReport.ariaAddedCount || 0);
+            (a11yReport.semanticTagsCount || 0) +
+              (a11yReport.buttonsIdentifiedCount || 0) +
+              (a11yReport.ariaAddedCount || 0);
           if (a11yCount > 0) {
             lines.push(`## ♿ 无障碍增强 (${a11yCount} 处)\n`);
-            a11yReport.report.slice(0, 10).forEach((enh: A11yReportEntry) => {
+            (a11yReport.report as readonly A11yReportEntry[]).slice(0, 10).forEach((enh) => {
               lines.push(`- 节点 \`${enh.nodeName}\`: ${enh.enhancement}`);
             });
             lines.push('');
           }
         }
-        const dsReport: any = reports.designSystem;
+        const dsReport = reports.designSystem;
         if (dsReport) {
           const dsCount =
             dsReport.suggestionsCount ??
@@ -1348,13 +1347,13 @@ v1.2.0 新增强化功能：
               (dsReport.typographySuggestions?.length || 0);
           if (dsCount > 0) {
             lines.push(`## 🎨 设计系统建议 (${dsCount} 条)\n`);
-            (dsReport.suggestions || []).slice(0, 10).forEach((sug: DesignSystemSuggestion) => {
+            ((dsReport.suggestions as readonly DesignSystemSuggestion[]) || []).slice(0, 10).forEach((sug) => {
               lines.push(`- ${sug.message}`);
             });
             lines.push('');
           }
         }
-        const respReport: any = reports.responsive;
+        const respReport = reports.responsive;
         if (respReport) {
           const respCount =
             respReport.suggestionsCount ??
@@ -1363,7 +1362,7 @@ v1.2.0 新增强化功能：
               (respReport.layoutSuggestions?.length || 0);
           if (respCount > 0) {
             lines.push(`## 📱 响应式建议 (${respCount} 条)\n`);
-            (respReport.suggestions || []).slice(0, 10).forEach((sug: ResponsiveSuggestion) => {
+            ((respReport.suggestions as readonly ResponsiveSuggestion[]) || []).slice(0, 10).forEach((sug) => {
               lines.push(`- ${sug.message}`);
             });
             lines.push('');
@@ -1378,7 +1377,7 @@ v1.2.0 新增强化功能：
       if ((result.extensionsNeeded || []).length > 0) {
         lines.push('## ⚠️ 需要 @theme 扩展的 token\n');
         const grouped = new Map<string, Array<{ name: string; value: string }>>();
-        for (const ext of result.extensionsNeeded as Array<any>) {
+        for (const ext of result.extensionsNeeded as readonly TailwindExtension[]) {
           if (!grouped.has(ext.type)) grouped.set(ext.type, []);
           grouped.get(ext.type)!.push({ name: ext.suggestedName, value: ext.originalValue });
         }

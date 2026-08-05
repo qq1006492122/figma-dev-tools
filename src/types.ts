@@ -985,6 +985,83 @@ export interface GeneratedStyles {
   readonly themeConfig?: Record<string, unknown>;
 }
 
+/**
+ * 需要 @theme 扩展的 Tailwind 值
+ */
+export interface TailwindExtension {
+  readonly type: string;
+  readonly suggestedName: string;
+  readonly originalValue: string;
+}
+
+/**
+ * 待下载资源信息
+ */
+export interface PendingAsset {
+  readonly nodeId: string;
+  readonly name: string;
+  readonly type: string;
+}
+
+/**
+ * 增强报告（v1.2.0+ 新增）
+ *
+ * 包含代码生成过程中各种增强功能的统计和建议
+ */
+export interface EnhancementReports {
+  /** Flex 修复报告 */
+  readonly flexFixes?: {
+    readonly fixedCount?: number;
+    readonly totalFixedNodes?: number;
+    readonly fixes: ReadonlyArray<unknown>;
+  };
+  /** 无障碍增强报告 */
+  readonly a11y?: {
+    readonly enhancementsCount?: number;
+    readonly semanticTagsCount: number;
+    readonly buttonsIdentifiedCount: number;
+    readonly ariaAddedCount: number;
+    readonly report: ReadonlyArray<unknown>;
+  };
+  /** 设计系统分析报告 */
+  readonly designSystem?: {
+    readonly suggestionsCount?: number;
+    readonly suggestions: ReadonlyArray<unknown>;
+    readonly colorSuggestions: ReadonlyArray<unknown>;
+    readonly spacingTokens: ReadonlyArray<unknown>;
+    readonly radiusTokens: ReadonlyArray<unknown>;
+    readonly typographySuggestions: ReadonlyArray<unknown>;
+  };
+  /** 响应式推断报告 */
+  readonly responsive?: {
+    readonly suggestionsCount?: number;
+    readonly suggestions: ReadonlyArray<unknown>;
+    readonly recommendations: ReadonlyArray<unknown>;
+    readonly classSuggestions: ReadonlyArray<unknown>;
+    readonly layoutSuggestions: ReadonlyArray<unknown>;
+  };
+}
+
+/**
+ * 代码生成结果（React/Vue 通用）
+ *
+ * 统一 React TSX 和 Vue SFC 生成器的返回类型
+ */
+export interface CodeGenResult {
+  /** 组件名 */
+  readonly componentName: string;
+  /** 生成的组件代码（TSX 或 Vue SFC） */
+  readonly code: string;
+  /** 需要的 import 语句集合（React 为 Set<string>，Vue 为 string[]） */
+  readonly imports: ReadonlySet<string> | readonly string[];
+  /** 需要 @theme 扩展的值 */
+  readonly extensionsNeeded: readonly TailwindExtension[];
+  /** 需要下载的资源列表 */
+  readonly pendingAssets: readonly PendingAsset[];
+  /** 增强报告 */
+  readonly reports: EnhancementReports;
+}
+
 // ============================================================
 // CLI 配置类型
 // ============================================================

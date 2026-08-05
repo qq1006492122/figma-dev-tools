@@ -28,7 +28,7 @@ import { createFileWriter } from '../services/file-writer.js';
 import { createTokenStore } from '../services/token-store.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
 import { createVueGenerator } from '../services/vue-generator.js';
-import { checkGitignore, getPrivacyStatement } from '../utils/security.js';
+import type { CodeGenResult, TailwindExtension, PendingAsset } from '../types.js';
 import type {
   ProcessedAsset,
   ProcessedFill,
@@ -37,6 +37,7 @@ import type {
   StructuredNode,
 } from '../types/nodes.js';
 import { parseFigmaUrl } from '../utils/figma-url.js';
+import { checkGitignore, getPrivacyStatement } from '../utils/security.js';
 
 // 加载环境变量
 dotenv.config();
@@ -50,7 +51,7 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.4.0');
+  .version('1.4.1');
 
 // 全局选项
 program
@@ -943,8 +944,7 @@ program
 
       const nodeCount = countNodes(context.node);
       const structuredNode = toStructuredNode(context.node);
-      const output =
-        isJsonFormat ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
+      const output = isJsonFormat ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
 
       if (cmdOptions.output) {
         const outPath = path.resolve(cmdOptions.output);
@@ -1145,14 +1145,14 @@ program
       // v1.4.0 新增：自动检测组件库
       const libDetection = componentMapper.detectLibrary();
       if (libDetection.library !== 'none') {
-        console.log(
-          chalk.cyan(`  ↳ 检测到组件库: ${libDetection.library} (${libDetection.reason})`),
-        );
+        console.log(chalk.cyan(`  ↳ 检测到组件库: ${libDetection.library} (${libDetection.reason})`));
         const matches = componentMapper.matchComponentsInTree(ctx.node, libDetection.library);
         if (matches.length > 0) {
           console.log(chalk.green(`     匹配到 ${matches.length} 个可复用组件:`));
           matches.slice(0, 5).forEach((m) => {
-            console.log(`     • ${m.componentName} (置信度: ${Math.round(m.confidence * 100)}%) → import from ${m.importPath}`);
+            console.log(
+              `     • ${m.componentName} (置信度: ${Math.round(m.confidence * 100)}%) → import from ${m.importPath}`,
+            );
           });
         }
       }
@@ -1164,7 +1164,8 @@ program
           const linter = createDesignLinter();
           const lintResult = linter.lint(ctx.node);
           if (lintResult.errorCount > 0 || lintResult.warningCount > 3) {
-            const scoreEmoji = lintResult.score >= 90 ? '🎉' : lintResult.score >= 80 ? '✅' : lintResult.score >= 60 ? '🔶' : '❌';
+            const scoreEmoji =
+              lintResult.score >= 90 ? '🎉' : lintResult.score >= 80 ? '✅' : lintResult.score >= 60 ? '🔶' : '❌';
             console.log(
               chalk.yellow(
                 `  ${scoreEmoji} 代码还原质量评分: ${lintResult.score}/100，发现 ${lintResult.errorCount} 个错误、${lintResult.warningCount} 个警告`,
@@ -1179,7 +1180,7 @@ program
 
       // 3. 生成代码（React 或 Vue）
       console.log(chalk.gray(`  ↳ Generating ${framework.toUpperCase()} code...`));
-      let result: any;
+      let result: CodeGenResult;
 
       if (framework === 'vue') {
         const vueResult = await vueGen.generateFromContext(ctx, {
@@ -1188,13 +1189,13 @@ program
           usePublicCdn: true,
           styleFormat: cmdOptions.style === 'unocss' ? 'unocss' : 'tailwind',
         });
-        result = vueResult;
+        result = vueResult as unknown as CodeGenResult;
       } else {
-        result = await codeGen.generateJsxFromContext(ctx, {
+        result = (await codeGen.generateJsxFromContext(ctx, {
           componentName: cmdOptions.name,
           sceneName: cmdOptions.scene,
           usePublicCdn: true,
-        });
+        })) as unknown as CodeGenResult;
       }
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -1217,7 +1218,7 @@ program
 
       if (result.reports) {
         // v1.2.0 新增：显示增强报告
-        const reports: any = result.reports;
+        const reports = result.reports;
         const flexFixes = reports.flexFixes;
         if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
           const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
@@ -1230,7 +1231,8 @@ program
         const a11y = reports.a11y;
         if (a11y) {
           const a11yCount =
-            a11y.enhancementsCount ?? (a11y.semanticTagsCount || 0) + (a11y.buttonsIdentifiedCount || 0) + (a11y.ariaAddedCount || 0);
+            a11y.enhancementsCount ??
+            (a11y.semanticTagsCount || 0) + (a11y.buttonsIdentifiedCount || 0) + (a11y.ariaAddedCount || 0);
           if (a11yCount > 0) {
             console.log(
               chalk.green(
@@ -1259,7 +1261,9 @@ program
         if (resp) {
           const respCount =
             resp.suggestionsCount ??
-            (resp.recommendations?.length || 0) + (resp.classSuggestions?.length || 0) + (resp.layoutSuggestions?.length || 0);
+            (resp.recommendations?.length || 0) +
+              (resp.classSuggestions?.length || 0) +
+              (resp.layoutSuggestions?.length || 0);
           if (respCount > 0) {
             console.log(
               chalk.cyan(
@@ -1273,7 +1277,7 @@ program
       if ((result.extensionsNeeded || []).length > 0) {
         // 按 type:originalValue 去重，相同值只显示一次
         const seen = new Set<string>();
-        const unique = (result.extensionsNeeded as any[]).filter((ext) => {
+        const unique = (result.extensionsNeeded as readonly TailwindExtension[]).filter((ext) => {
           const key = `${ext.type}:${ext.originalValue}`;
           if (seen.has(key)) return false;
           seen.add(key);
@@ -1290,11 +1294,7 @@ program
           'font-weight': '--font-weight-',
         };
 
-        console.log(
-          chalk.yellow(
-            `\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${unique.length}):`,
-          ),
-        );
+        console.log(chalk.yellow(`\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${unique.length}):`));
         unique.slice(0, 10).forEach((ext) => {
           const prefix = prefixMap[ext.type] || '--color-';
           console.log(`  - @theme inline { ${prefix}${ext.suggestedName}: ${ext.originalValue}; }`);
@@ -1305,7 +1305,9 @@ program
       }
 
       if ((result.pendingAssets || []).length > 0) {
-        const uniqueAssets = (result.pendingAssets as any[]).filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
+        const uniqueAssets = (result.pendingAssets as readonly PendingAsset[]).filter(
+          (v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i,
+        );
         console.log(chalk.cyan(`\n🖼️  ${i18n.t('cli.commands.jsx.assetsNeeded') as string} (${uniqueAssets.length}):`));
         uniqueAssets.forEach((a) => {
           console.log(`  - ${a.nodeId}: ${a.name} (${a.type})`);
@@ -1649,7 +1651,9 @@ program
         const client = createFigmaClient({ accessToken: tokenValue });
         const userInfo = await client.validateToken();
         if (userInfo) {
-          spinner.succeed(chalk.green((i18n.t('cli.commands.token.validateSuccess') as string) + ` (${userInfo.email})`));
+          spinner.succeed(
+            chalk.green((i18n.t('cli.commands.token.validateSuccess') as string) + ` (${userInfo.email})`),
+          );
           selectedToken = tokenName;
         } else {
           spinner.fail(chalk.red(i18n.t('cli.commands.token.validateFailed') as string));
@@ -1825,7 +1829,7 @@ function formatBytes(bytes: number): string {
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+  return `${Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
 // ============= 命令: 隐私声明 (v1.4.0 新增) =============

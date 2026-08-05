@@ -27,13 +27,43 @@ const STRICT_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
  */
 const SVG_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   allowedTags: [
-    'svg', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
-    'g', 'defs', 'clippath', 'mask', 'pattern', 'lineargradient', 'radialgradient',
-    'stop', 'use', 'symbol', 'image', 'text', 'tspan', 'title', 'desc',
+    'svg',
+    'path',
+    'rect',
+    'circle',
+    'ellipse',
+    'line',
+    'polyline',
+    'polygon',
+    'g',
+    'defs',
+    'clippath',
+    'mask',
+    'pattern',
+    'lineargradient',
+    'radialgradient',
+    'stop',
+    'use',
+    'symbol',
+    'image',
+    'text',
+    'tspan',
+    'title',
+    'desc',
   ],
   allowedAttributes: {
     svg: ['viewBox', 'width', 'height', 'xmlns', 'fill', 'stroke', 'stroke-width', 'class'],
-    path: ['d', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'fill-rule', 'clip-path', 'transform'],
+    path: [
+      'd',
+      'fill',
+      'stroke',
+      'stroke-width',
+      'stroke-linecap',
+      'stroke-linejoin',
+      'fill-rule',
+      'clip-path',
+      'transform',
+    ],
     rect: ['x', 'y', 'width', 'height', 'rx', 'ry', 'fill', 'stroke', 'stroke-width', 'transform'],
     circle: ['cx', 'cy', 'r', 'fill', 'stroke', 'stroke-width', 'transform'],
     ellipse: ['cx', 'cy', 'rx', 'ry', 'fill', 'stroke', 'stroke-width', 'transform'],
@@ -103,17 +133,19 @@ export function sanitizeSvg(svgString: string): string {
  */
 export function escapeAttribute(value: string): string {
   if (!value) return value;
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    // 移除控制字符（换行/回车/制表符/零宽空格），防止属性值格式破坏
-    .replace(/[\n\r\t\u200b-\u200d\ufeff]/g, ' ')
-    // 合并多个连续空格
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  return (
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      // 移除控制字符（换行/回车/制表符/零宽空格），防止属性值格式破坏
+      .replace(/[\n\r\t\u200b-\u200d\ufeff]/g, ' ')
+      // 合并多个连续空格
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+  );
 }
 
 /**
@@ -325,18 +357,19 @@ export async function checkGitignore(projectDir: string): Promise<GitignoreCheck
     // 检查 .env
     result.envIgnored = lines.some((line) => {
       const normalized = line.replace(/^\/+/, '').replace(/\\/g, '/');
-      return normalized === '.env'
-        || normalized === '.env.*'
-        || normalized === '*.env'
-        || normalized === '.env.local'
-        || normalized.startsWith('.env');
+      return (
+        normalized === '.env' ||
+        normalized === '.env.*' ||
+        normalized === '*.env' ||
+        normalized === '.env.local' ||
+        normalized.startsWith('.env')
+      );
     });
 
     // 检查 credentials.enc
     result.credentialsIgnored = lines.some((line) => {
       const normalized = line.replace(/^\/+/, '').replace(/\\/g, '/');
-      return normalized.includes('credentials.enc')
-        || normalized.includes('.config/figma-dev-tools');
+      return normalized.includes('credentials.enc') || normalized.includes('.config/figma-dev-tools');
     });
   } catch {
     result.exists = false;

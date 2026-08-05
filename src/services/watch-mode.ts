@@ -12,11 +12,11 @@
  * @module
  */
 
-import type { FigmaClient } from './figma-client.js';
-import type { DesignContextService } from './design-context.js';
-import type { CodeGenerator } from './code-generator.js';
-import type { FileWriter } from './file-writer.js';
 import type { GeneratedComponent } from '../types.js';
+import type { CodeGenerator } from './code-generator.js';
+import type { DesignContextService } from './design-context.js';
+import type { FigmaClient } from './figma-client.js';
+import type { FileWriter } from './file-writer.js';
 
 // ============ 类型定义 ============
 
@@ -185,14 +185,11 @@ export class WatchMode {
           console.log(
             isFirstRun
               ? `[Watch] Initial generation for ${nodeId}...`
-              : `[Watch] Change detected for ${nodeId} (${oldModifiedAt} → ${newModifiedAt})`
+              : `[Watch] Change detected for ${nodeId} (${oldModifiedAt} → ${newModifiedAt})`,
           );
 
           // 获取完整 DesignContext
-          const context = await this._designContext.getDesignContext(
-            this._options.fileKey,
-            nodeId,
-          );
+          const context = await this._designContext.getDesignContext(this._options.fileKey, nodeId);
 
           const componentName = this._deriveComponentName(nodeId);
 
@@ -210,10 +207,7 @@ export class WatchMode {
           };
 
           // 写入文件
-          const generatedFiles = await this._fileWriter.writeComponent(
-            component,
-            this._options.outputDir,
-          );
+          const generatedFiles = await this._fileWriter.writeComponent(component, this._options.outputDir);
 
           const durationMs = Date.now() - startTime;
 

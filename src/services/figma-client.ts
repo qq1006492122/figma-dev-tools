@@ -13,9 +13,16 @@
 
 // ============ 依赖导入 ============
 
-import { create as axiosCreate, type AxiosInstance, type AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios';
+import type { Agent as HttpsAgent } from 'node:https';
+
+import {
+  create as axiosCreate,
+  type AxiosInstance,
+  type AxiosError,
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import type { Agent as HttpsAgent } from 'https';
 
 import type {
   FigmaFileResponse,
@@ -177,7 +184,7 @@ const DEFAULT_MIN_INTERVAL_MS = 100;
 const HTTPS_PROTOCOL = 'https:';
 
 /** 本地地址（允许 HTTP） */
-const LOCALHOST_ADDRESSES = ['localhost', '127.0.0.1', '::1'];
+const LOCALHOST_ADDRESSES = new Set(['localhost', '127.0.0.1', '::1']);
 
 /** getImages 单批最大节点数（防止 URL 过长导致 HTTP 414 错误） */
 const GET_IMAGES_BATCH_SIZE = 50;
@@ -245,8 +252,8 @@ export class FigmaClient {
 
     // 检查 NO_PROXY 是否包含 api.figma.com
     if (noProxy) {
-      const noProxyList = noProxy.split(',').map((s) => s.trim().toLowerCase());
-      if (noProxyList.includes('api.figma.com') || noProxyList.includes('*')) {
+      const noProxySet = new Set(noProxy.split(',').map((s) => s.trim().toLowerCase()));
+      if (noProxySet.has('api.figma.com') || noProxySet.has('*')) {
         return false;
       }
     }
@@ -255,7 +262,7 @@ export class FigmaClient {
       const url = new URL(proxyUrl);
       return {
         host: url.hostname,
-        port: parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
+        port: Number.parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
         protocol: url.protocol === 'https:' ? 'https' : 'http',
         username: url.username || undefined,
         password: url.password || undefined,
@@ -269,9 +276,7 @@ export class FigmaClient {
    * 创建代理 Agent
    */
   private _createProxyAgent(proxyConfig: ProxyConfig): HttpsAgent {
-    const auth = proxyConfig.username && proxyConfig.password
-      ? `${proxyConfig.username}:${proxyConfig.password}@`
-      : '';
+    const auth = proxyConfig.username && proxyConfig.password ? `${proxyConfig.username}:${proxyConfig.password}@` : '';
     const proxyUrl = `${proxyConfig.protocol || 'https'}://${auth}${proxyConfig.host}:${proxyConfig.port}`;
     return new HttpsProxyAgent(proxyUrl);
   }
@@ -282,7 +287,7 @@ export class FigmaClient {
   private _isLocalhost(url: string): boolean {
     try {
       const parsed = new URL(url);
-      return LOCALHOST_ADDRESSES.includes(parsed.hostname.toLowerCase());
+      return LOCALHOST_ADDRESSES.has(parsed.hostname.toLowerCase());
     } catch {
       return false;
     }
@@ -314,11 +319,11 @@ export class FigmaClient {
     const reset = headers['x-ratelimit-reset'];
 
     if (remaining !== undefined) {
-      this._rateLimitState.remaining = parseInt(remaining, 10);
+      this._rateLimitState.remaining = Number.parseInt(remaining, 10);
     }
     if (reset !== undefined) {
       // Figma 返回的是 Unix 时间戳（秒）
-      this._rateLimitState.resetAt = parseInt(reset, 10) * 1000;
+      this._rateLimitState.resetAt = Number.parseInt(reset, 10) * 1000;
     }
   }
 
@@ -365,8 +370,8 @@ export class FigmaClient {
     if (!error.response?.headers) return undefined;
     const retryAfter = error.response.headers['retry-after'];
     if (retryAfter) {
-      const parsed = parseInt(retryAfter, 10);
-      return isNaN(parsed) ? undefined : parsed;
+      const parsed = Number.parseInt(retryAfter, 10);
+      return Number.isNaN(parsed) ? undefined : parsed;
     }
     return undefined;
   }
@@ -417,7 +422,7 @@ export class FigmaClient {
     }
 
     // 代理配置
-    const proxyConfig = config.proxy === false ? false : (config.proxy || this._detectProxy());
+    const proxyConfig = config.proxy === false ? false : config.proxy || this._detectProxy();
     const httpsAgent = proxyConfig ? this._createProxyAgent(proxyConfig) : undefined;
 
     // Axios 实例配置
@@ -490,7 +495,8 @@ export class FigmaClient {
               break;
             case 403:
               message = '权限不足';
-              suggestion = '该 Token 无法访问此文件，请确认 Token 权限包含 File content (Read only)，且你有该文件的访问权限';
+              suggestion =
+                '该 Token 无法访问此文件，请确认 Token 权限包含 File content (Read only)，且你有该文件的访问权限';
               break;
             case 404:
               message = '文件或节点不存在';
@@ -524,8 +530,8 @@ export class FigmaClient {
           // 请求已发出但未收到响应（网络问题、DNS 失败、超时等）
           const networkError = new Error(
             'Figma API 请求失败：网络连接错误或请求超时。' +
-            '请检查网络设置，如有代理可配置 HTTP_PROXY/HTTPS_PROXY 环境变量，' +
-            '或使用 figma-dev config set proxy 配置代理。'
+              '请检查网络设置，如有代理可配置 HTTP_PROXY/HTTPS_PROXY 环境变量，' +
+              '或使用 figma-dev config set proxy 配置代理。',
           );
           throw networkError;
         } else {
@@ -553,12 +559,8 @@ export class FigmaClient {
    * @returns 包含总请求数、重试次数、缓存命中数的统计对象
    */
   getRequestStats(): { total: number; retried: number; cached: number; retryRate: number; cacheHitRate: number } {
-    const retryRate = this._requestStats.total > 0
-      ? this._requestStats.retried / this._requestStats.total
-      : 0;
-    const cacheHitRate = this._requestStats.total > 0
-      ? this._requestStats.cached / this._requestStats.total
-      : 0;
+    const retryRate = this._requestStats.total > 0 ? this._requestStats.retried / this._requestStats.total : 0;
+    const cacheHitRate = this._requestStats.total > 0 ? this._requestStats.cached / this._requestStats.total : 0;
     return {
       ...this._requestStats,
       retryRate,
@@ -829,7 +831,8 @@ export class FigmaClient {
   ): Promise<{ images: Record<string, string | null>; err?: string }> {
     // 尝试从缓存获取
     if (this._cache) {
-      const cacheKey = FigmaCache.generateImageCacheKey(fileKey, nodeIds, format, scale) + (useAbsoluteBounds ? ':abs' : '');
+      const cacheKey =
+        FigmaCache.generateImageCacheKey(fileKey, nodeIds, format, scale) + (useAbsoluteBounds ? ':abs' : '');
       const cached = await this._cache.get<{ images: Record<string, string | null>; err?: string }>(cacheKey);
       if (cached) {
         this._requestStats.cached++;
@@ -854,7 +857,8 @@ export class FigmaClient {
 
     // 写入缓存（图片URL缓存时间稍短，5分钟）
     if (this._cache) {
-      const cacheKey = FigmaCache.generateImageCacheKey(fileKey, nodeIds, format, scale) + (useAbsoluteBounds ? ':abs' : '');
+      const cacheKey =
+        FigmaCache.generateImageCacheKey(fileKey, nodeIds, format, scale) + (useAbsoluteBounds ? ':abs' : '');
       await this._cache.set(cacheKey, response.data, Math.min(this._cacheTTL, 5 * 60 * 1000));
     }
 

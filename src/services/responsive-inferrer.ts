@@ -263,7 +263,8 @@ export class ResponsiveInferrer {
       // 2. 安全区域适配建议
       suggestions.push({
         type: 'safe-area',
-        classes: 'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]',
+        classes:
+          'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]',
         description: '适配iPhone刘海屏和底部小黑条，使用env(safe-area-inset-*)设置安全区域padding',
         cssSnippet: `/* 安全区域适配 */
 .safe-area-top { padding-top: env(safe-area-inset-top); }
@@ -273,7 +274,8 @@ export class ResponsiveInferrer {
       // 3. 1px 边框（高清屏边框）
       suggestions.push({
         type: 'hairline-border',
-        classes: 'relative after:content-[""] after:absolute after:top-0 after:left-0 after:w-full after:h-full after:border after:border-current after:transform after:scale-50 after:origin-top-left',
+        classes:
+          'relative after:content-[""] after:absolute after:top-0 after:left-0 after:w-full after:h-full after:border after:border-current after:transform after:scale-50 after:origin-top-left',
         description: '高清屏1px边框实现，使用transform: scale(0.5)避免边框变粗',
         cssSnippet: `/* 1px 边框 */
 .hairline-border {
@@ -319,8 +321,7 @@ export class ResponsiveInferrer {
       suggestions.push({
         type: 'viewport',
         description: '移动端适配需设置正确的viewport元标签',
-        cssSnippet:
-          '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">',
+        cssSnippet: '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">',
       });
       suggestions.push({
         type: 'safe-area',

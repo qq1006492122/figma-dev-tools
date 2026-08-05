@@ -118,6 +118,59 @@ const CHILD_KEYWORD_PATTERNS = [
   /头像/,
 ];
 
+// ============ 内部递归节点类型 ============
+
+/**
+ * 层级遍历用的通用填充/描边/效果类型
+ */
+interface HierarchyFill {
+  visible?: boolean;
+  type?: string;
+  color?: { a?: number };
+}
+
+interface HierarchyEffect {
+  visible?: boolean;
+  type?: string;
+}
+
+/**
+ * 层级遍历用的通用节点类型
+ * 兼容 FigmaNode 和 ProcessedNode 两种格式
+ */
+interface HierarchyNode {
+  id?: string;
+  figmaId?: string;
+  name?: string;
+  type?: string;
+  visible?: boolean;
+  layoutMode?: string;
+  children?: HierarchyNode[];
+  fills?: HierarchyFill[];
+  strokes?: HierarchyFill[];
+  effects?: HierarchyEffect[];
+  strokeWeight?: number;
+  backgroundColor?: { a?: number };
+  absoluteBoundingBox?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  position?: {
+    x: number;
+    y: number;
+  };
+  size?: {
+    width: number;
+    height: number;
+  };
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
 // ============ Bounding Box 工具 ============
 
 interface BoundingBox {
@@ -132,31 +185,31 @@ interface BoundingBox {
  */
 function getNodeBounds(node: FigmaNode | ProcessedNode): BoundingBox | null {
   // ProcessedNode 使用 size + position
-  const anyNode = node as any;
+  const hNode = node as unknown as HierarchyNode;
 
   // absoluteBoundingBox（Figma API 格式）
-  if (anyNode.absoluteBoundingBox) {
-    const box = anyNode.absoluteBoundingBox;
+  if (hNode.absoluteBoundingBox) {
+    const box = hNode.absoluteBoundingBox;
     return { x: box.x, y: box.y, width: box.width, height: box.height };
   }
 
   // ProcessedNode 格式：position + size
-  if (anyNode.position && anyNode.size) {
+  if (hNode.position && hNode.size) {
     return {
-      x: anyNode.position.x,
-      y: anyNode.position.y,
-      width: anyNode.size.width,
-      height: anyNode.size.height,
+      x: hNode.position.x,
+      y: hNode.position.y,
+      width: hNode.size.width,
+      height: hNode.size.height,
     };
   }
 
   // FigmaNode 原始格式
-  if (anyNode.x !== undefined && anyNode.y !== undefined) {
+  if (hNode.x !== undefined && hNode.y !== undefined) {
     return {
-      x: anyNode.x,
-      y: anyNode.y,
-      width: anyNode.width || 0,
-      height: anyNode.height || 0,
+      x: hNode.x,
+      y: hNode.y,
+      width: hNode.width || 0,
+      height: hNode.height || 0,
     };
   }
 
@@ -226,17 +279,17 @@ export class HierarchyFixer {
     this._autoFixedCount = 0;
 
     // 1. 第一遍：统计节点数、检测深度和循环引用
-    this._originalNodeCount = this._countNodes(root, 0, new Set<string>());
+    this._originalNodeCount = this._countNodes(root as unknown as HierarchyNode, 0, new Set<string>());
 
     // 2. 第二遍：检测层级问题
-    this._walkAndDetect(root as any, 0, null, []);
+    this._walkAndDetect(root as unknown as HierarchyNode, 0, null, []);
 
     // 3. 如果启用自动修复，执行修复
     if (this._options.autoFix) {
-      this._applyFixes(root as any);
+      this._applyFixes(root as unknown as HierarchyNode);
       // 修复后重新统计
-      this._fixedNodeCount = this._countNodes(root, 0, new Set<string>());
-      this._maxFixedDepth = this._measureDepth(root as any, 0, new Set<string>());
+      this._fixedNodeCount = this._countNodes(root as unknown as HierarchyNode, 0, new Set<string>());
+      this._maxFixedDepth = this._measureDepth(root as unknown as HierarchyNode, 0, new Set<string>());
     } else {
       this._fixedNodeCount = this._originalNodeCount;
       this._maxFixedDepth = this._maxOriginalDepth;
@@ -261,7 +314,7 @@ export class HierarchyFixer {
     this._issues = [];
     this._maxOriginalDepth = 0;
 
-    this._walkAndDetect(root as any, 0, null, []);
+    this._walkAndDetect(root as unknown as HierarchyNode, 0, null, []);
     return this._issues;
   }
 
@@ -319,7 +372,15 @@ export class HierarchyFixer {
     }
 
     // 空容器检测
-    if ((!node.children || node.children.length === 0) && !node.fills && !node.strokes && !node.effects && !node.textContent && !node.asset && depth > 0) {
+    if (
+      (!node.children || node.children.length === 0) &&
+      !node.fills &&
+      !node.strokes &&
+      !node.effects &&
+      !node.textContent &&
+      !node.asset &&
+      depth > 0
+    ) {
       this._issues.push({
         type: 'empty_container',
         nodeId,
@@ -334,7 +395,14 @@ export class HierarchyFixer {
     // 冗余包裹链检测（连续多个只有一个子节点的容器）
     let wrapperChain = 0;
     let current: ProcessedNode | undefined = node;
-    while (current && current.children && current.children.length === 1 && !current.fills && !current.strokes && !current.effects) {
+    while (
+      current &&
+      current.children &&
+      current.children.length === 1 &&
+      !current.fills &&
+      !current.strokes &&
+      !current.effects
+    ) {
       wrapperChain++;
       current = current.children[0];
     }
@@ -361,7 +429,7 @@ export class HierarchyFixer {
   /**
    * 统计节点总数
    */
-  private _countNodes(node: any, depth: number, visited: Set<string>): number {
+  private _countNodes(node: HierarchyNode, depth: number, visited: Set<string>): number {
     const nodeId = node.id || node.figmaId;
     if (nodeId) {
       if (visited.has(nodeId)) {
@@ -384,7 +452,7 @@ export class HierarchyFixer {
   /**
    * 测量树深度
    */
-  private _measureDepth(node: any, depth: number, visited: Set<string>): number {
+  private _measureDepth(node: HierarchyNode, depth: number, visited: Set<string>): number {
     const nodeId = node.id || node.figmaId;
     if (nodeId) {
       if (visited.has(nodeId)) return depth;
@@ -405,10 +473,10 @@ export class HierarchyFixer {
    * 递归遍历并检测层级问题
    */
   private _walkAndDetect(
-    node: any,
+    node: HierarchyNode,
     depth: number,
-    parent: any,
-    siblingPath: any[],
+    parent: HierarchyNode | null,
+    siblingPath: HierarchyNode[],
   ): void {
     const nodeId = node.id || node.figmaId;
     const nodeName = node.name || 'Unknown';
@@ -445,10 +513,10 @@ export class HierarchyFixer {
 
     // 检测空容器
     if (
-      (!node.children || node.children.length === 0)
-      && (node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'COMPONENT')
-      && !hasVisualProps(node)
-      && depth > 0
+      (!node.children || node.children.length === 0) &&
+      (node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'COMPONENT') &&
+      !hasVisualProps(node) &&
+      depth > 0
     ) {
       this._issues.push({
         type: 'empty_container',
@@ -463,7 +531,7 @@ export class HierarchyFixer {
 
     // 检测重叠兄弟节点（坐标包含关系）
     if (this._options.detectOverlapping && siblingPath.length > 0) {
-      const nodeBounds = getNodeBounds(node);
+      const nodeBounds = getNodeBounds(node as unknown as FigmaNode | ProcessedNode);
       if (nodeBounds) {
         // 只检测有子元素关键词的节点，或完全在其他兄弟节点内的节点
         const looksLikeChild = hasChildKeyword(nodeName);
@@ -473,7 +541,7 @@ export class HierarchyFixer {
           const sibling = siblingPath[i];
           if (!sibling || sibling === node) continue;
 
-          const siblingBounds = getNodeBounds(sibling);
+          const siblingBounds = getNodeBounds(sibling as unknown as FigmaNode | ProcessedNode);
           if (!siblingBounds) continue;
 
           // 跳过没有尺寸的节点
@@ -523,12 +591,12 @@ export class HierarchyFixer {
     // 检测冗余包裹链（连续多个无视觉属性的单层容器）
     if (this._options.detectRedundantWrappers) {
       let wrapperChain = 0;
-      let current: any = node;
+      let current: HierarchyNode | undefined = node;
       while (
-        current
-        && (current.type === 'FRAME' || current.type === 'GROUP')
-        && !hasVisualProps(current)
-        && current.children?.length === 1
+        current &&
+        (current.type === 'FRAME' || current.type === 'GROUP') &&
+        !hasVisualProps(current) &&
+        current.children?.length === 1
       ) {
         wrapperChain++;
         current = current.children[0];
@@ -562,13 +630,13 @@ export class HierarchyFixer {
    * - 标记空容器为 invisible（让 node-processor 跳过）
    * - 高置信度错位子节点移动到建议父节点
    */
-  private _applyFixes(root: any): void {
+  private _applyFixes(root: HierarchyNode): void {
     // 首先收集需要移动的节点（高置信度 misplaced_child）
-    const moves: Array<{ node: any; fromParent: any; toParentId: string }> = [];
-    const nodesToHide: any[] = [];
+    const moves: Array<{ node: HierarchyNode; fromParent: HierarchyNode | null; toParentId: string }> = [];
+    const nodesToHide: HierarchyNode[] = [];
 
     // 建立 ID -> 节点和父节点映射
-    const nodeMap = new Map<string, { node: any; parent: any }>();
+    const nodeMap = new Map<string, { node: HierarchyNode; parent: HierarchyNode | null }>();
     this._buildNodeMap(root, null, nodeMap);
 
     for (const issue of this._issues) {
@@ -577,8 +645,8 @@ export class HierarchyFixer {
         const parentInfo = nodeMap.get(issue.suggestedParentId);
         if (nodeInfo && parentInfo) {
           // 再次验证包含关系（修复前确认）
-          const nodeBounds = getNodeBounds(nodeInfo.node);
-          const parentBounds = getNodeBounds(parentInfo.node);
+          const nodeBounds = getNodeBounds(nodeInfo.node as unknown as FigmaNode | ProcessedNode);
+          const parentBounds = getNodeBounds(parentInfo.node as unknown as FigmaNode | ProcessedNode);
           if (nodeBounds && parentBounds) {
             const ratio = containmentRatio(nodeBounds, parentBounds);
             if (ratio >= this._options.containmentThreshold && hasChildKeyword(issue.nodeName || '')) {
@@ -629,7 +697,11 @@ export class HierarchyFixer {
   /**
    * 构建节点 ID -> 节点 + 父节点映射
    */
-  private _buildNodeMap(node: any, parent: any, map: Map<string, { node: any; parent: any }>): void {
+  private _buildNodeMap(
+    node: HierarchyNode,
+    parent: HierarchyNode | null,
+    map: Map<string, { node: HierarchyNode; parent: HierarchyNode | null }>,
+  ): void {
     const nodeId = node.id || node.figmaId;
     if (nodeId) {
       map.set(nodeId, { node, parent });
@@ -646,7 +718,7 @@ export class HierarchyFixer {
 /**
  * 简化版 hasVisualProps（不依赖其他模块）
  */
-function hasVisualProps(node: any): boolean {
+function hasVisualProps(node: HierarchyNode): boolean {
   if (node.fills && node.fills.length > 0) {
     for (const fill of node.fills) {
       if (fill.visible !== false && fill.type !== 'EMOJI') {
@@ -666,13 +738,16 @@ function hasVisualProps(node: any): boolean {
 
   if (node.effects && node.effects.length > 0) {
     for (const effect of node.effects) {
-      if (effect.visible && (effect.type === 'DROP_SHADOW' || effect.type === 'INNER_SHADOW' || effect.type === 'BACKGROUND_BLUR')) {
+      if (
+        effect.visible &&
+        (effect.type === 'DROP_SHADOW' || effect.type === 'INNER_SHADOW' || effect.type === 'BACKGROUND_BLUR')
+      ) {
         return true;
       }
     }
   }
 
-  if (node.backgroundColor && node.backgroundColor.a > 0) {
+  if (node.backgroundColor && (node.backgroundColor.a ?? 0) > 0) {
     return true;
   }
 

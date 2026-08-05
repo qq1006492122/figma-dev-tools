@@ -9,13 +9,13 @@
 
 import type { DesignContext, ProcessedNode } from '../types/nodes.js';
 import { escapeAttribute, sanitizeIdentifier, sanitizeText } from '../utils/security.js';
-import { createA11yEnhancer, type A11yEnhancerResult } from './a11y-enhancer.js';
+import { createA11yEnhancer } from './a11y-enhancer.js';
 import { formatCode } from './code-formatter.js';
 import type { EnhancementReports } from './code-generator.js';
-import { createDesignSystemAnalyzer, type DesignSystemResult } from './design-system.js';
+import { createDesignSystemAnalyzer } from './design-system.js';
 import type { FigmaClient } from './figma-client.js';
-import { createFlexFixer, type FlexFixResult } from './flex-fixer.js';
-import { createResponsiveInferrer, type ResponsiveResult } from './responsive-inferrer.js';
+import { createFlexFixer } from './flex-fixer.js';
+import { createResponsiveInferrer } from './responsive-inferrer.js';
 import { SvgInlineRenderer, isVectorNode } from './svg-inline-renderer.js';
 import { createTailwindMapper, type TailwindMapping } from './tailwind-mapper.js';
 
@@ -183,7 +183,6 @@ export class VueGenerator {
 
     const baseIndent = isRoot ? 2 : ctx.depth + 1;
     const indent = '  '.repeat(baseIndent);
-    const childIndent = '  '.repeat(baseIndent + 1);
 
     // 类型增强：安全访问 a11y-enhancer 和 flex-fixer 添加的扩展字段
     const nodeEnhancements = node as ProcessedNode & {
@@ -210,7 +209,12 @@ export class VueGenerator {
       // 失败时回退到普通渲染
     }
 
-    if (!isRoot && (node.role === 'layout-only' || node.originalType === 'GROUP') && node.children && node.children.length > 0) {
+    if (
+      !isRoot &&
+      (node.role === 'layout-only' || node.originalType === 'GROUP') &&
+      node.children &&
+      node.children.length > 0
+    ) {
       const childResults = await Promise.all(
         node.children.map((child) => this._renderNode(child, twMapper, { ...ctx, depth: ctx.depth }, false)),
       );
@@ -249,9 +253,7 @@ export class VueGenerator {
 
     // ============ 图片节点特殊处理（增强版 v1.4.0） ============
     const isImageNode =
-      (node.originalType === 'RECTANGLE' && node.fills?.some((f) => f.type === 'image')) ||
-      node.asset ||
-      tag === 'img';
+      (node.originalType === 'RECTANGLE' && node.fills?.some((f) => f.type === 'image')) || node.asset || tag === 'img';
 
     if (isImageNode) {
       const attrs: string[] = [];
@@ -311,7 +313,11 @@ export class VueGenerator {
       } else if (node.asset?.localPath && ctx.usePublicCdn) {
         attrs.push(`:src="publicCdnUrl('${node.asset.localPath}')"`);
       } else {
-        ctx.pendingAssets.push({ nodeId: node.figmaId || node.id, name: this._kebabCase(node.name || 'image') + '.png', type: 'image' });
+        ctx.pendingAssets.push({
+          nodeId: node.figmaId || node.id,
+          name: this._kebabCase(node.name || 'image') + '.png',
+          type: 'image',
+        });
         // 1x1 透明 GIF data URI，避免 src="" 产生额外请求
         const transparentGif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
         attrs.push(`src="${transparentGif}"`);
@@ -371,10 +377,7 @@ export class VueGenerator {
   /**
    * 尝试渲染节点为内联 SVG（Vue 版本，v1.4.0 新增）
    */
-  private async _tryRenderInlineSvg(
-    node: ProcessedNode,
-    ctx: VueRenderContext,
-  ): Promise<{ vueCode: string } | null> {
+  private async _tryRenderInlineSvg(node: ProcessedNode, ctx: VueRenderContext): Promise<{ vueCode: string } | null> {
     try {
       if (this._hasNonVectorDescendants(node)) {
         return null;
@@ -495,12 +498,14 @@ export class VueGenerator {
 
   private _kebabCase(str: string): string {
     if (!str) return 'image';
-    return str
-      .replace(/([a-z])([A-Z])/g, '$1-$2')
-      .replace(/[^a-zA-Z0-9]/g, '-')
-      .toLowerCase()
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '') || 'image';
+    return (
+      str
+        .replace(/([a-z])([A-Z])/g, '$1-$2')
+        .replace(/[^a-zA-Z0-9]/g, '-')
+        .toLowerCase()
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') || 'image'
+    );
   }
 }
 

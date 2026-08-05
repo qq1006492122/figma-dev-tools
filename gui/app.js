@@ -50,7 +50,8 @@ const I18N = {
       tokenSaved: 'Token 已安全保存',
       hint: '🔒 Token 仅存储在本地（系统密钥链或加密文件），不会上传到任何服务器，所有 Figma API 请求直接从你的电脑发送',
       privacy: '隐私承诺',
-      privacyText: '我们重视你的数据安全：Token 永不离开你的设备、不收集任何个人数据、不发送遥测信息、所有代码生成本地完成',
+      privacyText:
+        '我们重视你的数据安全：Token 永不离开你的设备、不收集任何个人数据、不发送遥测信息、所有代码生成本地完成',
       tokenExists: '检测到已保存的 Token',
       useExisting: '使用现有 Token',
       replaceToken: '替换 Token',
@@ -149,7 +150,8 @@ const I18N = {
       getTokenDesc2: '2. Click "Generate new token"',
       getTokenDesc3: '3. ⚠️ ONLY check "File content" (Read only) permission (no other permissions needed)',
       getTokenDesc4: '4. Choose expiration (30 days recommended)',
-      permissionWarning: '⚠️ Security Tip: It is recommended to grant ONLY Read only permission. This tool only needs to read file content, no write access required.',
+      permissionWarning:
+        '⚠️ Security Tip: It is recommended to grant ONLY Read only permission. This tool only needs to read file content, no write access required.',
       openTokenPage: 'Open Token Page',
       validateBtn: 'Validate Token',
       validating: 'Validating...',
@@ -158,7 +160,8 @@ const I18N = {
       tokenSaved: 'Token saved securely',
       hint: '🔒 Token is stored locally only (system keychain or encrypted file), never uploaded to any server. All Figma API requests are sent directly from your computer.',
       privacy: 'Privacy Promise',
-      privacyText: 'We take your data security seriously: Token never leaves your device, no personal data collected, no telemetry sent, all code generation done locally.',
+      privacyText:
+        'We take your data security seriously: Token never leaves your device, no personal data collected, no telemetry sent, all code generation done locally.',
       tokenExists: 'Saved Token detected',
       useExisting: 'Use existing Token',
       replaceToken: 'Replace Token',

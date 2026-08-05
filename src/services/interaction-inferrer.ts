@@ -162,7 +162,23 @@ export class InteractionInferrer {
     const hasChildren = node.children && node.children.length > 0;
 
     // ============ 1. 检测表单（必须是有子节点的容器，避免误判普通文本） ============
-    if (hasChildren && this._nameContains(name, ['form', '表单', 'login form', 'signin form', 'signup form', 'register form', 'search form', 'search bar', '搜索框', '搜索栏', '登录', '注册'])) {
+    if (
+      hasChildren &&
+      this._nameContains(name, [
+        'form',
+        '表单',
+        'login form',
+        'signin form',
+        'signup form',
+        'register form',
+        'search form',
+        'search bar',
+        '搜索框',
+        '搜索栏',
+        '登录',
+        '注册',
+      ])
+    ) {
       parentFormId = node.id;
       this._inferFormSubmit(node);
     }
@@ -173,7 +189,10 @@ export class InteractionInferrer {
     }
 
     // ============ 3. 输入框（role 是 input 或名称明确） ============
-    if (role === 'input' || this._nameContains(name, ['input', '输入框', 'textfield', 'text field', '搜索栏', 'search bar'])) {
+    if (
+      role === 'input' ||
+      this._nameContains(name, ['input', '输入框', 'textfield', 'text field', '搜索栏', 'search bar'])
+    ) {
       this._inferInputChange(node, parentFormId);
     }
 
@@ -225,9 +244,7 @@ export class InteractionInferrer {
 
     // 避免重复state
     if (!this._stateDeclarations.some((s) => s.includes(`[${stateName},`))) {
-      this._stateDeclarations.push(
-        `  const [${stateName}, set${this._toPascalCase(stateName)}] = useState({});`
-      );
+      this._stateDeclarations.push(`  const [${stateName}, set${this._toPascalCase(stateName)}] = useState({});`);
     }
     // 避免重复handler
     if (!this._handlerSkeletons.some((h) => h.includes(handlerName))) {
@@ -236,7 +253,7 @@ export class InteractionInferrer {
     e.preventDefault();
     // TODO: 实现表单提交逻辑
     console.log('${stateName}:', ${stateName});
-  };`
+  };`,
       );
     }
 
@@ -297,9 +314,7 @@ export class InteractionInferrer {
       const stateName = `${overlayType}Open`;
 
       if (!this._stateDeclarations.some((s) => s.includes(stateName))) {
-        this._stateDeclarations.push(
-          `  const [${stateName}, set${this._toPascalCase(stateName)}] = useState(false);`
-        );
+        this._stateDeclarations.push(`  const [${stateName}, set${this._toPascalCase(stateName)}] = useState(false);`);
       }
 
       this._interactions.push({
@@ -321,7 +336,7 @@ export class InteractionInferrer {
       this._handlerSkeletons.push(
         `  const ${handlerName} = () => {
     // TODO: 实现按钮点击逻辑
-  };`
+  };`,
       );
     }
 
@@ -339,7 +354,6 @@ export class InteractionInferrer {
    * 推断输入框变化
    */
   private _inferInputChange(node: ProcessedNode, parentFormId: string | null): void {
-    const nameLower = (node.name || '').toLowerCase();
     const fieldName = this._toCamelCase(node.name) || 'inputValue';
 
     if (parentFormId) {

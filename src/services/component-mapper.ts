@@ -17,9 +17,19 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ProcessedNode } from '../types/nodes.js';
 
-type NodeAny = any;
+interface ComponentMatchFill {
+  type?: string;
+}
+
+interface ComponentMatchNode {
+  name?: string;
+  characters?: string;
+  originalType?: string;
+  role?: string;
+  children?: ComponentMatchNode[];
+  fills?: ComponentMatchFill[];
+}
 
 // ============ 类型定义 ============
 
@@ -315,7 +325,7 @@ export class ComponentMapper {
   /**
    * 匹配单个节点到组件
    */
-  matchComponent(node: NodeAny, library?: ComponentLibrary): ComponentMatch | null {
+  matchComponent(node: ComponentMatchNode, library?: ComponentLibrary): ComponentMatch | null {
     const lib = library || this.detectLibrary().library;
     if (lib === 'none') return null;
 
@@ -332,11 +342,11 @@ export class ComponentMapper {
   /**
    * 批量匹配节点树中的组件
    */
-  matchComponentsInTree(root: NodeAny, library?: ComponentLibrary): ComponentMatch[] {
+  matchComponentsInTree(root: ComponentMatchNode, library?: ComponentLibrary): ComponentMatch[] {
     const matches: ComponentMatch[] = [];
     const lib = library || this.detectLibrary().library;
 
-    const traverse = (node: NodeAny): void => {
+    const traverse = (node: ComponentMatchNode): void => {
       const match = this.matchComponent(node, lib);
       if (match) matches.push(match);
       if (node.children) {
@@ -361,7 +371,7 @@ export class ComponentMapper {
   /**
    * shadcn/ui 组件匹配
    */
-  private _matchShadcnComponent(node: NodeAny, nodeName: string): ComponentMatch | null {
+  private _matchShadcnComponent(node: ComponentMatchNode, nodeName: string): ComponentMatch | null {
     for (const comp of SHADCN_COMPONENTS) {
       // 关键词匹配
       const keywordMatch = comp.keywords.some((kw) => nodeName.includes(kw.toLowerCase()));
@@ -371,7 +381,10 @@ export class ComponentMapper {
       let confidence = 0.7;
       const features = comp.features;
 
-      if (features.hasText && (node.characters || node.children?.some((c: NodeAny) => c.originalType === 'TEXT' || c.role === 'text'))) {
+      if (
+        features.hasText &&
+        (node.characters || node.children?.some((c) => c.originalType === 'TEXT' || c.role === 'text'))
+      ) {
         confidence += 0.1;
       }
       if (features.isInteractive) {
@@ -380,7 +393,7 @@ export class ComponentMapper {
       if (features.minChildren && node.children && node.children.length >= features.minChildren) {
         confidence += 0.05;
       }
-      if (features.hasBackground && node.fills?.some((f: NodeAny) => f.type === 'SOLID')) {
+      if (features.hasBackground && node.fills?.some((f) => f.type === 'SOLID')) {
         confidence += 0.05;
       }
 
@@ -400,9 +413,9 @@ export class ComponentMapper {
   /**
    * 获取建议的 props
    */
-  private _getSuggestedProps(componentName: string, node: NodeAny): Record<string, string | boolean> {
+  private _getSuggestedProps(componentName: string, node: ComponentMatchNode): Record<string, string | boolean> {
     const props: Record<string, string | boolean> = {};
-    const name = node.name.toLowerCase();
+    const name = (node.name || '').toLowerCase();
 
     switch (componentName) {
       case 'Button':
@@ -411,20 +424,23 @@ export class ComponentMapper {
         else if (name.includes('outline') || name.includes('边框')) props.variant = 'outline';
         else if (name.includes('ghost')) props.variant = 'ghost';
         else if (name.includes('link')) props.variant = 'link';
-        else if (name.includes('destructive') || name.includes('danger') || name.includes('危险')) props.variant = 'destructive';
+        else if (name.includes('destructive') || name.includes('danger') || name.includes('危险'))
+          props.variant = 'destructive';
         if (name.includes('disabled')) props.disabled = true;
         if (name.includes('small') || name.includes('sm')) props.size = 'sm';
         else if (name.includes('large') || name.includes('lg') || name.includes('大')) props.size = 'lg';
         break;
       case 'Badge':
         if (name.includes('success') || name.includes('成功')) props.variant = 'default';
-        else if (name.includes('destructive') || name.includes('danger') || name.includes('错误')) props.variant = 'destructive';
+        else if (name.includes('destructive') || name.includes('danger') || name.includes('错误'))
+          props.variant = 'destructive';
         else if (name.includes('outline')) props.variant = 'outline';
         else if (name.includes('secondary')) props.variant = 'secondary';
         break;
       case 'Alert':
         if (name.includes('success')) props.variant = 'default';
-        else if (name.includes('destructive') || name.includes('danger') || name.includes('error')) props.variant = 'destructive';
+        else if (name.includes('destructive') || name.includes('danger') || name.includes('error'))
+          props.variant = 'destructive';
         else if (name.includes('warning') || name.includes('warn')) props.variant = 'default';
         break;
       case 'Input':
