@@ -108,12 +108,7 @@ async function runCli() {
       process.exit(1);
     }
   } else {
-    const tsxBin = path.join(
-      packageRoot,
-      'node_modules',
-      '.bin',
-      process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
-    );
+    const tsxBin = path.join(packageRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx');
     const srcCli = path.join(packageRoot, 'src', 'cli', 'index.ts');
 
     if (fs.existsSync(tsxBin) && fs.existsSync(srcCli)) {

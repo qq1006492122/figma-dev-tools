@@ -596,16 +596,57 @@ export class TokenMatcher {
       };
     }
 
-    // 转换为 Tailwind spacing unit（1 unit = 4px）
+    // 转换为 Tailwind spacing unit（1 unit = 0.25rem = 4px）
     const units = px / 4;
-    const isNearInteger = Math.abs(units - Math.round(units)) < 0.15;
-    const nearest = Math.round(units);
 
-    // Tailwind 特殊命名值映射
-    const specialNameMap: Readonly<Record<number, string>> = { 0: '0', 1: 'px', 2: '0.5' };
-    const spacingName = specialNameMap[nearest] ?? String(nearest);
+    // Tailwind v3 默认 spacing scale（units 值）
+    // 来源：https://tailwindcss.com/docs/customizing-spacing#default-spacing-scale
+    // px=0.25(1px), 0.5(2px), 1(4px), 1.5(6px), 2(8px), 2.5(10px), 3(12px), 3.5(14px)
+    // 4(16px), 5(20px), 6(24px), 7(28px), 8(32px), 9(36px), 10(40px), 11(44px), 12(48px)
+    // 14(56px), 16(64px), 20(80px), 24(96px), 28(112px), 32(128px), 36(144px), 40(160px)
+    // 44(176px), 48(192px), 52(208px), 56(224px), 60(240px), 64(256px), 72(288px), 80(320px), 96(384px)
+    const STANDARD_UNITS: ReadonlyArray<number> = [
+      0.25, 0.5, 1, 1.5, 2, 2.5, 3, 3.5,
+      4, 5, 6, 7, 8, 9, 10, 11, 12,
+      14, 16, 20, 24, 28, 32, 36, 40,
+      44, 48, 52, 56, 60, 64, 72, 80, 96,
+    ];
 
-    // 构建类名（注意 p/m 需要方向直接拼接，其他属性用 - 连接）
+    // 查找最接近的标准单位值
+    let bestUnit = -1;
+    let bestDiff = Infinity;
+    for (const u of STANDARD_UNITS) {
+      const diff = Math.abs(units - u);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestUnit = u;
+      }
+    }
+
+    // 超大尺寸（>96 units = 384px）直接使用任意值，避免生成 w-207 这种不存在的类名
+    if (bestUnit > 96 || bestUnit < 0) {
+      return {
+        matched: false,
+        className: `${property}-[${px}px]`,
+        originalValue: `${px}px`,
+        tokenValue: '',
+        confidence: 0,
+        needsExtension: true,
+      };
+    }
+
+    // 容差：与标准值的偏差 < 0.1 units（即 < 0.4px）认为匹配
+    const isMatch = bestDiff < 0.1;
+    const confidence = isMatch ? 1 : Math.max(0.3, 1 - bestDiff * 2);
+
+    // 单位值到 Tailwind 类名后缀的映射
+    const unitToSuffix: Readonly<Record<number, string>> = {
+      0.25: 'px',
+      0.5: '0.5',
+    };
+    const spacingName = unitToSuffix[bestUnit] ?? String(bestUnit);
+
+    // 构建类名
     let className: string;
     if (['gap', 'space-x', 'space-y', 'w', 'h', 'top', 'right', 'bottom', 'left', 'inset'].includes(property)) {
       className = direction ? `${property}-${direction}-${spacingName}` : `${property}-${spacingName}`;
@@ -613,14 +654,13 @@ export class TokenMatcher {
       className = direction ? `${property}${direction}-${spacingName}` : `${property}-${spacingName}`;
     }
 
-    const confidence = isNearInteger ? 1 : Math.max(0.5, 1 - Math.abs(units - nearest) * 2);
     return {
-      matched: confidence > 0.7,
+      matched: isMatch,
       className,
       originalValue: `${px}px`,
       tokenValue: spacingName,
       confidence,
-      needsExtension: confidence <= 0.7,
+      needsExtension: !isMatch,
     };
   }
 

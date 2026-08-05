@@ -10,6 +10,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
 import * as prettier from 'prettier';
 
 /**
@@ -81,7 +82,9 @@ export async function formatCode(code: string, options: FormatCodeOptions = {}):
     return await prettier.format(code, prettierOptions);
   } catch (error) {
     if (!silent) {
-      console.warn(`[figma-dev] Prettier 格式化失败，返回原始代码: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(
+        `[figma-dev] Prettier 格式化失败，返回原始代码: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     return code;
   }
@@ -120,8 +123,7 @@ async function findPrettierConfig(startDir: string): Promise<string | null> {
       try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as { prettier?: unknown };
         if (pkg.prettier) return pkgPath;
-      } catch {
-      }
+      } catch {}
     }
 
     for (const name of configNames) {

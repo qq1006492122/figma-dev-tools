@@ -20,11 +20,11 @@ import type { FigmaColor, ColorToken, RgbColor, OklchColor, ColorFormat, CssColo
  *
  * @internal
  * @param value - 通道值，自动四舍五入并夹紧到 [0, 255]
- * @returns 两位十六进制字符串（大写）
+ * @returns 两位十六进制字符串（小写）
  */
 function toHexChannel(value: number): string {
   const clamped = Math.max(0, Math.min(255, Math.round(value)));
-  const hex = clamped.toString(16);
+  const hex = clamped.toString(16).toLowerCase();
   return hex.length === 1 ? `0${hex}` : hex;
 }
 
@@ -36,12 +36,12 @@ function toHexChannel(value: number): string {
  *
  * @param color - Figma 颜色对象（r,g,b,a 范围均为 0-1）
  * @param includeAlpha - 是否在 alpha < 1 时输出 8 位 Hex（含透明度），默认 false
- * @returns Hex 颜色字符串，大写格式（如 "#FF5500" 或 "#FF550080"）
+ * @returns Hex 颜色字符串，小写格式（如 "#ff5500" 或 "#ff550080"）
  *
  * @example
  * ```typescript
- * figmaColorToHex({ r: 1, g: 0.33, b: 0, a: 1 }); // "#FF5400"
- * figmaColorToHex({ r: 1, g: 0, b: 0, a: 0.5 }, true); // "#FF000080"
+ * figmaColorToHex({ r: 1, g: 0.33, b: 0, a: 1 }); // "#ff5400"
+ * figmaColorToHex({ r: 1, g: 0, b: 0, a: 0.5 }, true); // "#ff000080"
  * ```
  *
  * 边界情况：
@@ -58,7 +58,7 @@ export function figmaColorToHex(color: FigmaColor, includeAlpha = false): CssCol
   if (includeAlpha && a < 255) {
     hex += toHexChannel(a);
   }
-  return hex.toUpperCase() as CssColorValue;
+  return hex as CssColorValue;
 }
 
 /**
@@ -238,16 +238,16 @@ export function hexToRgb(hex: string): (RgbColor & { readonly a?: number }) | nu
  * @param r - 红色通道，范围 0-255（自动夹紧）
  * @param g - 绿色通道，范围 0-255（自动夹紧）
  * @param b - 蓝色通道，范围 0-255（自动夹紧）
- * @returns 6 位大写 Hex 字符串（不含 alpha）
+ * @returns 6 位小写 Hex 字符串（不含 alpha）
  *
  * @example
  * ```typescript
- * rgbToHex(255, 0, 0); // "#FF0000"
- * rgbToHex(300, -10, 0); // "#FF0000" （自动夹紧）
+ * rgbToHex(255, 0, 0); // "#ff0000"
+ * rgbToHex(300, -10, 0); // "#ff0000" （自动夹紧）
  * ```
  */
 export function rgbToHex(r: number, g: number, b: number): CssColorValue {
-  return `#${toHexChannel(r)}${toHexChannel(g)}${toHexChannel(b)}`.toUpperCase() as CssColorValue;
+  return `#${toHexChannel(r)}${toHexChannel(g)}${toHexChannel(b)}` as CssColorValue;
 }
 
 /**
@@ -308,7 +308,7 @@ function figmaColorToHslString(color: FigmaColor): CssColorValue {
  * @example
  * ```typescript
  * const red = { r: 1, g: 0, b: 0, a: 1 };
- * convertFigmaColor(red, 'hex');    // "#FF0000"
+ * convertFigmaColor(red, 'hex');    // "#ff0000"
  * convertFigmaColor(red, 'rgb');    // "rgb(255, 0, 0)"
  * convertFigmaColor(red, 'oklch');  // "oklch(62.8% 0.258 29.2)"
  * convertFigmaColor(red, 'hsl');    // "hsl(0, 100%, 50%)"

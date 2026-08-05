@@ -12,8 +12,8 @@
  * @module
  */
 
-import type { DesignContext, ProcessedNode } from '../types/nodes.js';
 import { getI18n } from '../i18n/index.js';
+import type { DesignContext, ProcessedNode } from '../types/nodes.js';
 
 // ============ 类型定义 ============
 
@@ -196,12 +196,7 @@ export class DesignSystemAnalyzer {
     const typographySuggestions = this._generateTypographySuggestions(fontFrequency);
 
     // ============ 6. 生成建议列表 ============
-    const suggestions = this._generateSuggestions(
-      colorSuggestions,
-      spacingTokens,
-      radiusTokens,
-      typographySuggestions,
-    );
+    const suggestions = this._generateSuggestions(colorSuggestions, spacingTokens, radiusTokens, typographySuggestions);
 
     // ============ 7. 生成 @theme inline 代码 ============
     const themeExtensions = this._generateThemeExtensions(colorSuggestions, spacingTokens, radiusTokens);
@@ -233,7 +228,8 @@ export class DesignSystemAnalyzer {
     fonts: Map<string, number>,
   ): void {
     if (node.visible === false) {
-      if (node.children) (node.children as ProcessedNode[]).forEach((c) => this._collectStats(c, colors, spacings, radii, fonts));
+      if (node.children)
+        (node.children as ProcessedNode[]).forEach((c) => this._collectStats(c, colors, spacings, radii, fonts));
       return;
     }
 
@@ -445,28 +441,40 @@ export class DesignSystemAnalyzer {
     if (colors.length > 0) {
       suggestions.push({
         type: 'color',
-        message: typeof dsMsg.colorSuggestions === 'function' ? dsMsg.colorSuggestions(colors.length) : `检测到 ${colors.length} 种主要颜色，建议统一为 CSS 变量`,
+        message:
+          typeof dsMsg.colorSuggestions === 'function'
+            ? dsMsg.colorSuggestions(colors.length)
+            : `检测到 ${colors.length} 种主要颜色，建议统一为 CSS 变量`,
       });
     }
 
     if (spacings.length > 0) {
       suggestions.push({
         type: 'spacing',
-        message: typeof dsMsg.spacingSuggestions === 'function' ? dsMsg.spacingSuggestions(spacings.length) : `检测到 ${spacings.length} 种常用间距，建议纳入 spacing scale`,
+        message:
+          typeof dsMsg.spacingSuggestions === 'function'
+            ? dsMsg.spacingSuggestions(spacings.length)
+            : `检测到 ${spacings.length} 种常用间距，建议纳入 spacing scale`,
       });
     }
 
     if (radii.length > 0) {
       suggestions.push({
         type: 'radius',
-        message: typeof dsMsg.radiusSuggestions === 'function' ? dsMsg.radiusSuggestions(radii.length) : `检测到 ${radii.length} 种圆角值，建议统一为 rounded 系列`,
+        message:
+          typeof dsMsg.radiusSuggestions === 'function'
+            ? dsMsg.radiusSuggestions(radii.length)
+            : `检测到 ${radii.length} 种圆角值，建议统一为 rounded 系列`,
       });
     }
 
     if (typography.length > 0) {
       suggestions.push({
         type: 'typography',
-        message: typeof dsMsg.typographySuggestions === 'function' ? dsMsg.typographySuggestions(typography.length) : `检测到 ${typography.length} 种字体层级，建议统一字号比例`,
+        message:
+          typeof dsMsg.typographySuggestions === 'function'
+            ? dsMsg.typographySuggestions(typography.length)
+            : `检测到 ${typography.length} 种字体层级，建议统一字号比例`,
       });
     }
 
@@ -478,14 +486,36 @@ export class DesignSystemAnalyzer {
    */
   private _generateThemeExtensions(
     colors: ColorSuggestion[],
-    _spacings: SpacingTokenSuggestion[],
-    _radii: RadiusTokenSuggestion[],
+    spacings: SpacingTokenSuggestion[],
+    radii: RadiusTokenSuggestion[],
   ): string {
     const lines: string[] = ['@theme inline {'];
 
+    // 颜色变量
     for (const color of colors.slice(0, 10)) {
       if (!color.suggestedName.includes('[') && !color.suggestedName.startsWith('[')) {
         lines.push(`  --color-${color.suggestedName}: ${color.original};`);
+      }
+    }
+
+    // 间距变量（非预设值才需要扩展）
+    const presetSpacings = new Set(Object.keys(SPACING_PRESET).map(Number));
+    for (const sp of spacings.slice(0, 8)) {
+      if (!presetSpacings.has(sp.originalValue) && !sp.suggestedName.includes('[')) {
+        lines.push(`  --spacing-${sp.suggestedName}: ${sp.originalValue}px;`);
+      } else if (sp.suggestedName.startsWith('[')) {
+        // 任意值建议用一个有意义的名称
+        lines.push(`  --spacing-${Math.round(sp.originalValue)}: ${sp.originalValue}px;`);
+      }
+    }
+
+    // 圆角变量（非预设值才需要扩展）
+    const presetRadii = new Set(Object.keys(RADIUS_PRESET).map(Number));
+    for (const rad of radii.slice(0, 6)) {
+      if (!presetRadii.has(rad.originalValue) && !rad.suggestedName.includes('[')) {
+        lines.push(`  --radius-${rad.suggestedName}: ${rad.originalValue}px;`);
+      } else if (rad.suggestedName.startsWith('[')) {
+        lines.push(`  --radius-${Math.round(rad.originalValue)}: ${rad.originalValue}px;`);
       }
     }
 

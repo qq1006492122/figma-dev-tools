@@ -17,6 +17,11 @@ import * as path from 'node:path';
 // ============ 类型定义 ============
 
 /**
+ * Token 验证状态
+ */
+export type TokenValidationStatus = 'unknown' | 'valid' | 'invalid' | 'expiring_soon' | 'expired';
+
+/**
  * 已存储的 Token 信息（含元数据）
  */
 export interface StoredToken {
@@ -28,8 +33,37 @@ export interface StoredToken {
   createdAt: number;
   /** 最后使用时间戳 */
   lastUsedAt?: number;
+  /** 最后验证时间戳 */
+  lastValidatedAt?: number;
+  /** 验证状态 */
+  validationStatus?: TokenValidationStatus;
+  /** Token 关联用户信息 */
+  userInfo?: {
+    id: string;
+    email: string;
+    handle: string;
+  };
   /** 备注/描述 */
   note?: string;
+}
+
+/**
+ * Token 验证结果
+ */
+export interface TokenValidationResult {
+  /** 是否有效 */
+  valid: boolean;
+  /** 验证状态 */
+  status: TokenValidationStatus;
+  /** 用户信息（有效时返回） */
+  user?: {
+    id: string;
+    email: string;
+    handle: string;
+    img_url: string;
+  };
+  /** 错误消息（无效时返回） */
+  error?: string;
 }
 
 /**
@@ -37,24 +71,33 @@ export interface StoredToken {
  */
 export interface TokenStore {
   /**
-   * 保存 Token（会加密存储）
+   * 保存 Token（会加密存储，并立即验证有效性）
    * @param name - Token 名称（如 'default', 'work', 'personal'）
    * @param token - Figma Access Token 值
    * @param note - 可选备注
+   * @throws {Error} 当 Token 无效时抛出错误
    */
   saveToken(name: string, token: string, note?: string): Promise<void>;
 
   /**
    * 获取 Token
    * @param name - Token 名称，默认 'default'
-   * @returns Token 值，如果不存在返回 null
+   * @param validate - 是否强制验证有效性，默认 false（仅在过期时验证）
+   * @returns Token 值，如果不存在或无效返回 null
    */
-  getToken(name?: string): Promise<string | null>;
+  getToken(name?: string, validate?: boolean): Promise<string | null>;
 
   /**
    * 获取指定 Token 的完整信息（含元数据）
    */
   getTokenInfo(name?: string): Promise<StoredToken | null>;
+
+  /**
+   * 验证指定 Token 的有效性
+   * @param name - Token 名称，默认 'default'
+   * @param force - 是否强制验证（忽略缓存），默认 false
+   */
+  validateToken(name?: string, force?: boolean): Promise<TokenValidationResult>;
 
   /**
    * 删除 Token
@@ -85,6 +128,12 @@ export interface TokenStore {
    * 获取当前使用的存储后端（'keytar' | 'encrypted-file' | 'none'）
    */
   getBackend(): Promise<'keytar' | 'encrypted-file' | 'none'>;
+
+  /**
+   * 检查是否有 Token 需要刷新验证（超过24小时未验证）
+   * @returns 需要验证的 Token 名称列表
+   */
+  getTokensNeedingValidation(): Promise<string[]>;
 }
 
 // ============ 内部类型定义 ============
@@ -120,8 +169,20 @@ interface EncryptedStoredToken {
   encryptedValue: string;
   createdAt: number;
   lastUsedAt?: number;
+  lastValidatedAt?: number;
+  validationStatus?: TokenValidationStatus;
+  userInfo?: {
+    id: string;
+    email: string;
+    handle: string;
+  };
   note?: string;
 }
+
+/** Token 验证间隔：24小时 */
+const TOKEN_VALIDATION_INTERVAL = 24 * 60 * 60 * 1000;
+/** Token 过期提醒提前时间：7天 */
+const TOKEN_EXPIRY_WARNING = 7 * 24 * 60 * 60 * 1000;
 
 // ============ 常量定义 ============
 
@@ -328,7 +389,23 @@ class TokenStoreImpl implements TokenStore {
       throw new Error('keytar not available');
     }
 
-    const metadata = JSON.stringify({ note, createdAt: Date.now() });
+    // 保存时先验证 Token 有效性
+    const validation = await this.validateTokenWithApi(token);
+    if (!validation.valid) {
+      throw new Error(`Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`);
+    }
+
+    const metadata = JSON.stringify({
+      note,
+      createdAt: Date.now(),
+      lastValidatedAt: Date.now(),
+      validationStatus: 'valid' as TokenValidationStatus,
+      userInfo: validation.user ? {
+        id: validation.user.id,
+        email: validation.user.email,
+        handle: validation.user.handle,
+      } : undefined,
+    });
     const password = JSON.stringify({ value: token, metadata });
 
     await keytar.setPassword(KEYTAR_SERVICE, this.keytarAccountName(name), password);
@@ -352,12 +429,23 @@ class TokenStoreImpl implements TokenStore {
       }
 
       const parsed = JSON.parse(password) as { value: string; metadata: string };
-      const metadata = JSON.parse(parsed.metadata) as { note?: string; createdAt: number };
+      const metadata = JSON.parse(parsed.metadata) as {
+        note?: string;
+        createdAt: number;
+        lastUsedAt?: number;
+        lastValidatedAt?: number;
+        validationStatus?: TokenValidationStatus;
+        userInfo?: { id: string; email: string; handle: string };
+      };
 
       return {
         name,
         value: parsed.value,
         createdAt: metadata.createdAt,
+        lastUsedAt: metadata.lastUsedAt,
+        lastValidatedAt: metadata.lastValidatedAt,
+        validationStatus: metadata.validationStatus,
+        userInfo: metadata.userInfo,
         note: metadata.note,
       };
     } catch {
@@ -414,8 +502,7 @@ class TokenStoreImpl implements TokenStore {
       if (stored) {
         return stored;
       }
-    } catch {
-    }
+    } catch {}
     return DEFAULT_TOKEN_NAME;
   }
 
@@ -448,6 +535,12 @@ class TokenStoreImpl implements TokenStore {
   }
 
   private async saveTokenEncryptedFile(name: string, token: string, note?: string): Promise<void> {
+    // 保存时先验证 Token 有效性
+    const validation = await this.validateTokenWithApi(token);
+    if (!validation.valid) {
+      throw new Error(`Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`);
+    }
+
     const data = await this.readEncryptedFile();
     const encryptedValue = encryptString(token);
     const now = Date.now();
@@ -458,6 +551,13 @@ class TokenStoreImpl implements TokenStore {
       encryptedValue,
       createdAt: existing?.createdAt ?? now,
       lastUsedAt: existing?.lastUsedAt,
+      lastValidatedAt: now,
+      validationStatus: 'valid',
+      userInfo: validation.user ? {
+        id: validation.user.id,
+        email: validation.user.email,
+        handle: validation.user.handle,
+      } : undefined,
       note: note ?? existing?.note,
     };
 
@@ -486,6 +586,9 @@ class TokenStoreImpl implements TokenStore {
       value,
       createdAt: encryptedToken.createdAt,
       lastUsedAt: encryptedToken.lastUsedAt,
+      lastValidatedAt: encryptedToken.lastValidatedAt,
+      validationStatus: encryptedToken.validationStatus,
+      userInfo: encryptedToken.userInfo,
       note: encryptedToken.note,
     };
   }
@@ -534,7 +637,15 @@ class TokenStoreImpl implements TokenStore {
     await this.saveTokenEncryptedFile(name, token, note);
   }
 
-  async getToken(name: string = DEFAULT_TOKEN_NAME): Promise<string | null> {
+  async getToken(name: string = DEFAULT_TOKEN_NAME, validate: boolean = false): Promise<string | null> {
+    // 如果需要验证，先验证
+    if (validate) {
+      const result = await this.validateToken(name, false);
+      if (!result.valid) {
+        return null;
+      }
+    }
+
     const tokenInfo = await this.getTokenInfo(name);
 
     if (tokenInfo) {
@@ -605,6 +716,163 @@ class TokenStoreImpl implements TokenStore {
       token.lastUsedAt = Date.now();
       await this.writeEncryptedFile(data);
     }
+  }
+
+  /**
+   * 更新 Token 验证状态（仅文件后端支持）
+   */
+  private async updateValidationStatus(
+    name: string,
+    status: TokenValidationStatus,
+    userInfo?: { id: string; email: string; handle: string },
+  ): Promise<void> {
+    const keytar = await this.loadKeytar();
+    if (keytar) {
+      // keytar 后端更新元数据
+      try {
+        const password = await keytar.getPassword(KEYTAR_SERVICE, this.keytarAccountName(name));
+        if (password) {
+          const parsed = JSON.parse(password) as { value: string; metadata: string };
+          const metadata = JSON.parse(parsed.metadata) as {
+            note?: string;
+            createdAt: number;
+            lastValidatedAt?: number;
+            validationStatus?: TokenValidationStatus;
+            userInfo?: { id: string; email: string; handle: string };
+          };
+          metadata.lastValidatedAt = Date.now();
+          metadata.validationStatus = status;
+          if (userInfo) {
+            metadata.userInfo = userInfo;
+          }
+          const newPassword = JSON.stringify({
+            value: parsed.value,
+            metadata: JSON.stringify(metadata),
+          });
+          await keytar.setPassword(KEYTAR_SERVICE, this.keytarAccountName(name), newPassword);
+        }
+      } catch {
+        // 忽略 keytar 更新错误
+      }
+      return;
+    }
+
+    const data = await this.readEncryptedFile();
+    const token = data.tokens[name];
+    if (token) {
+      token.lastValidatedAt = Date.now();
+      token.validationStatus = status;
+      if (userInfo) {
+        token.userInfo = userInfo;
+      }
+      await this.writeEncryptedFile(data);
+    }
+  }
+
+  /**
+   * 调用 Figma API 验证 Token 有效性
+   */
+  private async validateTokenWithApi(tokenValue: string): Promise<TokenValidationResult> {
+    try {
+      // 延迟导入避免循环依赖
+      const { createFigmaClient } = await import('./figma-client.js');
+      const client = createFigmaClient({ accessToken: tokenValue });
+      const userInfo = await client.validateToken();
+
+      if (userInfo) {
+        return {
+          valid: true,
+          status: 'valid',
+          user: userInfo,
+        };
+      }
+
+      return {
+        valid: false,
+        status: 'invalid',
+        error: 'Token 验证失败，请检查 Token 是否正确',
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        valid: false,
+        status: 'invalid',
+        error: `Token 验证失败：${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * 验证指定 Token 的有效性
+   */
+  async validateToken(name: string = DEFAULT_TOKEN_NAME, force: boolean = false): Promise<TokenValidationResult> {
+    const tokenInfo = await this.getTokenInfo(name);
+    if (!tokenInfo) {
+      return {
+        valid: false,
+        status: 'invalid',
+        error: `Token '${name}' 不存在`,
+      };
+    }
+
+    // 如果不是强制验证，且最近验证过（24小时内），直接返回缓存状态
+    if (!force && tokenInfo.lastValidatedAt) {
+      const timeSinceValidation = Date.now() - tokenInfo.lastValidatedAt;
+      if (timeSinceValidation < TOKEN_VALIDATION_INTERVAL) {
+        // 检查是否即将过期（基于验证时间和Token通常有效期）
+        if (tokenInfo.validationStatus === 'valid' && timeSinceValidation > TOKEN_EXPIRY_WARNING) {
+          return {
+            valid: true,
+            status: 'expiring_soon',
+            user: tokenInfo.userInfo ? { ...tokenInfo.userInfo, img_url: '' } : undefined,
+          };
+        }
+        return {
+          valid: tokenInfo.validationStatus === 'valid' || tokenInfo.validationStatus === 'expiring_soon',
+          status: tokenInfo.validationStatus || 'unknown',
+          user: tokenInfo.userInfo ? { ...tokenInfo.userInfo, img_url: '' } : undefined,
+        };
+      }
+    }
+
+    // 调用 API 验证
+    const result = await this.validateTokenWithApi(tokenInfo.value);
+
+    // 更新验证状态
+    if (result.valid && result.user) {
+      await this.updateValidationStatus(name, 'valid', {
+        id: result.user.id,
+        email: result.user.email,
+        handle: result.user.handle,
+      });
+    } else {
+      await this.updateValidationStatus(name, 'invalid');
+    }
+
+    return result;
+  }
+
+  /**
+   * 获取需要验证的 Token 列表
+   */
+  async getTokensNeedingValidation(): Promise<string[]> {
+    const tokens = await this.listTokens();
+    const needingValidation: string[] = [];
+
+    for (const name of tokens) {
+      const info = await this.getTokenInfo(name);
+      if (!info) continue;
+
+      const neverValidated = !info.lastValidatedAt;
+      const validationExpired = info.lastValidatedAt
+        && (Date.now() - info.lastValidatedAt) > TOKEN_VALIDATION_INTERVAL;
+
+      if (neverValidated || validationExpired || info.validationStatus === 'invalid') {
+        needingValidation.push(name);
+      }
+    }
+
+    return needingValidation;
   }
 }
 

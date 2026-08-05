@@ -94,7 +94,8 @@ export function parseFigmaUrl(url: string): ParsedFigmaUrl {
 
     const nodeIdParam = urlObj.searchParams.get('node-id');
     if (nodeIdParam) {
-      result.nodeId = nodeIdParam.replace('-', ':') as FigmaNodeId;
+      // Figma URL 中使用 "-" 替代所有 ":"，全局替换（支持多层嵌套节点 ID 如 "1547-6316-100" → "1547:6316:100"）
+      result.nodeId = nodeIdParam.replace(/-/g, ':') as FigmaNodeId;
     }
 
     result.isComponentUrl = url.includes('component') || result.nodeId !== undefined;
@@ -171,7 +172,8 @@ export function buildFigmaUrl(fileKey: FigmaFileKey, nodeId?: FigmaNodeId, fileN
   let url = `${baseUrl}/${fileKey}/${encodeURIComponent(name)}`;
 
   if (nodeId) {
-    const urlNodeId = nodeId.replace(':', '-');
+    // 全局替换 ":" 为 "-"（支持多层嵌套节点 ID）
+    const urlNodeId = nodeId.replace(/:/g, '-');
     url += `?node-id=${urlNodeId}`;
   }
 

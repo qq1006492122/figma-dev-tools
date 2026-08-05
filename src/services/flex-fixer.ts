@@ -11,8 +11,8 @@
  * @module
  */
 
-import type { ProcessedNode } from '../types/nodes.js';
 import { getI18n } from '../i18n/index.js';
+import type { ProcessedNode } from '../types/nodes.js';
 
 // ============ 类型定义 ============
 
@@ -160,11 +160,7 @@ export class FlexFixer {
       }
     }
 
-    if (
-      parent?.layout?.mode &&
-      parent.layout.mode !== 'NONE' &&
-      node.layout?.primaryAxisSizing === 'AUTO'
-    ) {
+    if (parent?.layout?.mode && parent.layout.mode !== 'NONE' && node.layout?.primaryAxisSizing === 'AUTO') {
       if (!this._hasMinW0(node) && this._mightOverflow(node)) {
         classesToAdd.push('min-w-0');
         fixes.push({
@@ -223,7 +219,12 @@ export class FlexFixer {
    */
   private _computeStats(): Pick<
     FlexFixResult,
-    'shrinkFixedCount' | 'truncateFixedCount' | 'overflowFixedCount' | 'minWidthFixedCount' | 'objectFitFixedCount' | 'totalFixedNodes'
+    | 'shrinkFixedCount'
+    | 'truncateFixedCount'
+    | 'overflowFixedCount'
+    | 'minWidthFixedCount'
+    | 'objectFitFixedCount'
+    | 'totalFixedNodes'
   > {
     let shrink = 0;
     let truncate = 0;

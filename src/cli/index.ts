@@ -18,13 +18,17 @@ import ora from 'ora';
 import { initI18nSync } from '../i18n/index.js';
 import type { Language } from '../i18n/index.js';
 import { createAssetDownloader } from '../services/asset-downloader.js';
+import { createFigmaCache } from '../services/cache.js';
 import { createCodeGenerator } from '../services/code-generator.js';
+import { createComponentMapper } from '../services/component-mapper.js';
 import { createDesignContextService } from '../services/design-context.js';
 import { createDesignLinter } from '../services/design-linter.js';
 import { createFigmaClient } from '../services/figma-client.js';
 import { createFileWriter } from '../services/file-writer.js';
 import { createTokenStore } from '../services/token-store.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
+import { createVueGenerator } from '../services/vue-generator.js';
+import { checkGitignore, getPrivacyStatement } from '../utils/security.js';
 import type {
   ProcessedAsset,
   ProcessedFill,
@@ -46,7 +50,7 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.3.2');
+  .version('1.4.0');
 
 // 全局选项
 program
@@ -67,6 +71,22 @@ async function getClient(token?: string) {
     const tokenStore = createTokenStore();
     const storedToken = await tokenStore.getToken();
     accessToken = storedToken ?? undefined;
+
+    // 检查是否有 Token 需要验证（启动时静默检查）
+    if (accessToken && !token) {
+      try {
+        const needingValidation = await tokenStore.getTokensNeedingValidation();
+        if (needingValidation.length > 0) {
+          const defaultName = await tokenStore.getDefault();
+          if (needingValidation.includes(defaultName)) {
+            // 静默验证，不阻塞用户操作
+            tokenStore.validateToken(defaultName, false).catch(() => {});
+          }
+        }
+      } catch {
+        // 忽略验证错误，不影响正常使用
+      }
+    }
   }
 
   // 回退到环境变量
@@ -93,7 +113,10 @@ async function getClient(token?: string) {
     );
     process.exit(1);
   }
-  return createFigmaClient({ accessToken });
+
+  // 创建带缓存的客户端
+  const cache = createFigmaCache();
+  return createFigmaClient({ accessToken, cache });
 }
 
 /**
@@ -531,6 +554,7 @@ program
   .command('component <url-or-figma-url>')
   .description(i18n.t('cli.commands.component.description') as string)
   .option('-n, --name <name>', i18n.t('cli.commands.component.name') as string)
+  .option('-N, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
   .option('--js', i18n.t('cli.commands.component.js') as string)
   .option('--style <format>', i18n.t('cli.commands.component.style') as string, 'tailwind')
   .option('--no-children', i18n.t('cli.commands.component.noChildren') as string)
@@ -757,7 +781,7 @@ program
   .command('lint <url-or-filekey>')
   .description(i18n.t('cli.commands.lint.description') as string)
   .option('-n, --node <nodeId>', i18n.t('cli.commands.lint.node') as string)
-  .option('-d, --depth <depth>', i18n.t('cli.commands.lint.depth') as string, '8')
+  .option('-d, --depth <depth>', i18n.t('cli.commands.lint.depth') as string, '15')
   .option('--format <format>', '输出格式 (markdown/json)', 'markdown')
   .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
   .action(async (target, cmdOptions) => {
@@ -806,15 +830,15 @@ program
 
       function getScoreEmoji(score: number): string {
         if (score >= 90) return '🎉';
-        if (score >= 75) return '✅';
-        if (score >= 60) return '⚠️';
+        if (score >= 80) return '✅';
+        if (score >= 60) return '🔶';
         if (score >= 40) return '🔶';
         return '❌';
       }
 
       function getScoreRating(score: number): string {
         if (score >= 90) return i18n.t('cli.commands.lint.scoreExcellent') as string;
-        if (score >= 75) return i18n.t('cli.commands.lint.scoreGood') as string;
+        if (score >= 80) return i18n.t('cli.commands.lint.scoreGood') as string;
         if (score >= 60) return i18n.t('cli.commands.lint.scorePass') as string;
         if (score >= 40) return i18n.t('cli.commands.lint.scorePoor') as string;
         return i18n.t('cli.commands.lint.scoreBad') as string;
@@ -873,7 +897,7 @@ program
   .command('structured <url-or-filekey>')
   .description(i18n.t('cli.commands.structured.description') as string)
   .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
-  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '8')
+  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
   .option('--format <format>', i18n.t('cli.commands.structured.format') as string, 'pretty')
   .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
   .action(async (target, cmdOptions) => {
@@ -881,14 +905,20 @@ program
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
     const nodeId = cmdOptions.node || urlNodeId;
     const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 8;
+    const isJsonFormat = cmdOptions.format === 'json';
 
     if (!nodeId) {
       console.error(chalk.red(i18n.t('cli.commands.structured.noNodeId') as string));
       process.exit(1);
     }
 
-    const spinner = ora(chalk.blue(i18n.t('cli.commands.structured.fetching') as string)).start();
-    console.log(
+    // JSON 模式下，进度信息输出到 stderr，避免污染 stdout 的 JSON 数据
+    const log = isJsonFormat ? (...args: unknown[]) => console.error(...args) : console.log;
+    const spinner = ora({
+      text: chalk.blue(i18n.t('cli.commands.structured.fetching') as string),
+      stream: isJsonFormat ? process.stderr : process.stdout,
+    }).start();
+    log(
       chalk.gray(
         `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`,
       ),
@@ -900,7 +930,7 @@ program
       const client = await getClient(opts.token);
       const ctxService = createDesignContextService(client);
 
-      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.structured.getContext')) as string));
+      log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.structured.getContext')) as string));
       const context = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -914,7 +944,7 @@ program
       const nodeCount = countNodes(context.node);
       const structuredNode = toStructuredNode(context.node);
       const output =
-        cmdOptions.format === 'json' ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
+        isJsonFormat ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
 
       if (cmdOptions.output) {
         const outPath = path.resolve(cmdOptions.output);
@@ -923,26 +953,30 @@ program
         spinner.succeed(
           chalk.green((i18n.t('cli.commands.structured.saved') as string) + ` (${duration}s): ${outPath}`),
         );
-        console.log(
+        log(
           chalk.gray(
             `   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`,
           ),
         );
+      } else if (isJsonFormat) {
+        // JSON 模式：停止 spinner 到 stderr，仅输出纯 JSON 到 stdout
+        spinner.stop();
+        process.stdout.write(output + '\n');
       } else {
         spinner.succeed(
           chalk.green(
             (i18n.t('cli.commands.structured.completed') as string) + ` (${duration}s): ${context.node.name}`,
           ),
         );
-        console.log(
+        log(
           chalk.gray(
             `   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${nodeCount}, ${i18n.t('cli.commands.structured.assets') as string}: ${context.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${context.textNodes.length}`,
           ),
         );
-        console.log('');
-        console.log(chalk.cyan('─'.repeat(70)));
-        console.log(output);
-        console.log(chalk.cyan('─'.repeat(70)));
+        log('');
+        log(chalk.cyan('─'.repeat(70)));
+        log(output);
+        log(chalk.cyan('─'.repeat(70)));
       }
     } catch (error) {
       spinner.fail(
@@ -1061,7 +1095,7 @@ function toStructuredNode(node: ProcessedNode): StructuredNode {
   return result;
 }
 
-// ============= 命令: 一键生成 JSX (v2.0) =============
+// ============= 命令: 一键生成 JSX/Vue (v2.0) =============
 
 program
   .command('jsx <url-or-filekey>')
@@ -1069,24 +1103,29 @@ program
   .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
   .option('--name <name>', i18n.t('cli.commands.component.name') as string)
   .option('--scene <scene>', i18n.t('cli.commands.jsx.scene') as string)
-  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '8')
+  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
   .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
-  .option('--skip-lint', '跳过设计规范检查提示')
+  .option('--framework <framework>', i18n.t('cli.commands.jsx.framework') as string, 'react')
+  .option('--style <styleFormat>', i18n.t('cli.commands.jsx.style') as string, 'tailwind')
+  .option('--skip-lint', i18n.t('cli.commands.jsx.skipLint') as string)
+  .option('--inline-svg', '内联渲染 SVG 图标节点（v1.4.0 新增，默认开启）', true)
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
     const nodeId = cmdOptions.node || urlNodeId;
-    const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 8;
+    // 默认深度提高到 15 层，支持深层嵌套节点（v1.4.0 优化）
+    const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 15;
+    const framework = cmdOptions.framework === 'vue' ? 'vue' : 'react';
 
     if (!nodeId) {
       console.error(chalk.red(i18n.t('cli.commands.jsx.noNodeId') as string));
       process.exit(1);
     }
 
-    const spinner = ora(chalk.blue(i18n.t('cli.commands.jsx.generating') as string)).start();
+    const spinner = ora(chalk.blue(`Generating ${framework.toUpperCase()} component...`)).start();
     console.log(
       chalk.gray(
-        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}`,
+        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}, framework: ${framework}, style: ${cmdOptions.style}`,
       ),
     );
 
@@ -1096,10 +1135,27 @@ program
       const client = await getClient(opts.token);
       const ctxService = createDesignContextService(client);
       const codeGen = createCodeGenerator(client);
+      const vueGen = createVueGenerator(client);
+      const componentMapper = createComponentMapper();
 
       // 1. 获取精简设计上下文
       console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.jsx.getContext')) as string));
       const ctx = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
+
+      // v1.4.0 新增：自动检测组件库
+      const libDetection = componentMapper.detectLibrary();
+      if (libDetection.library !== 'none') {
+        console.log(
+          chalk.cyan(`  ↳ 检测到组件库: ${libDetection.library} (${libDetection.reason})`),
+        );
+        const matches = componentMapper.matchComponentsInTree(ctx.node, libDetection.library);
+        if (matches.length > 0) {
+          console.log(chalk.green(`     匹配到 ${matches.length} 个可复用组件:`));
+          matches.slice(0, 5).forEach((m) => {
+            console.log(`     • ${m.componentName} (置信度: ${Math.round(m.confidence * 100)}%) → import from ${m.importPath}`);
+          });
+        }
+      }
 
       // 2. 可选：设计规范检查
       if (!cmdOptions.skipLint) {
@@ -1108,7 +1164,7 @@ program
           const linter = createDesignLinter();
           const lintResult = linter.lint(ctx.node);
           if (lintResult.errorCount > 0 || lintResult.warningCount > 3) {
-            const scoreEmoji = lintResult.score >= 75 ? '✅' : lintResult.score >= 60 ? '⚠️' : '❌';
+            const scoreEmoji = lintResult.score >= 90 ? '🎉' : lintResult.score >= 80 ? '✅' : lintResult.score >= 60 ? '🔶' : '❌';
             console.log(
               chalk.yellow(
                 `  ${scoreEmoji} 代码还原质量评分: ${lintResult.score}/100，发现 ${lintResult.errorCount} 个错误、${lintResult.warningCount} 个警告`,
@@ -1121,13 +1177,25 @@ program
         } catch {}
       }
 
-      // 3. 生成 JSX
-      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.jsx.generateCode')) as string));
-      const result = await codeGen.generateJsxFromContext(ctx, {
-        componentName: cmdOptions.name,
-        sceneName: cmdOptions.scene,
-        usePublicCdn: true,
-      });
+      // 3. 生成代码（React 或 Vue）
+      console.log(chalk.gray(`  ↳ Generating ${framework.toUpperCase()} code...`));
+      let result: any;
+
+      if (framework === 'vue') {
+        const vueResult = await vueGen.generateFromContext(ctx, {
+          componentName: cmdOptions.name,
+          sceneName: cmdOptions.scene,
+          usePublicCdn: true,
+          styleFormat: cmdOptions.style === 'unocss' ? 'unocss' : 'tailwind',
+        });
+        result = vueResult;
+      } else {
+        result = await codeGen.generateJsxFromContext(ctx, {
+          componentName: cmdOptions.name,
+          sceneName: cmdOptions.scene,
+          usePublicCdn: true,
+        });
+      }
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
@@ -1149,10 +1217,10 @@ program
 
       if (result.reports) {
         // v1.2.0 新增：显示增强报告
-        const reports = result.reports;
+        const reports: any = result.reports;
         const flexFixes = reports.flexFixes;
-        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes) > 0) {
-          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes;
+        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
+          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
           console.log(
             chalk.green(
               `\n🔧 ${i18n.t('reports.flex.title') as string}: ${flexCount} ${i18n.t('reports.flex.fixesApplied') as string}`,
@@ -1162,7 +1230,7 @@ program
         const a11y = reports.a11y;
         if (a11y) {
           const a11yCount =
-            a11y.enhancementsCount ?? a11y.semanticTagsCount + a11y.buttonsIdentifiedCount + a11y.ariaAddedCount;
+            a11y.enhancementsCount ?? (a11y.semanticTagsCount || 0) + (a11y.buttonsIdentifiedCount || 0) + (a11y.ariaAddedCount || 0);
           if (a11yCount > 0) {
             console.log(
               chalk.green(
@@ -1175,10 +1243,10 @@ program
         if (ds) {
           const dsCount =
             ds.suggestionsCount ??
-            ds.colorSuggestions.length +
-              ds.spacingTokens.length +
-              ds.radiusTokens.length +
-              ds.typographySuggestions.length;
+            (ds.colorSuggestions?.length || 0) +
+              (ds.spacingTokens?.length || 0) +
+              (ds.radiusTokens?.length || 0) +
+              (ds.typographySuggestions?.length || 0);
           if (dsCount > 0) {
             console.log(
               chalk.cyan(
@@ -1191,7 +1259,7 @@ program
         if (resp) {
           const respCount =
             resp.suggestionsCount ??
-            resp.recommendations.length + resp.classSuggestions.length + resp.layoutSuggestions.length;
+            (resp.recommendations?.length || 0) + (resp.classSuggestions?.length || 0) + (resp.layoutSuggestions?.length || 0);
           if (respCount > 0) {
             console.log(
               chalk.cyan(
@@ -1202,22 +1270,42 @@ program
         }
       }
 
-      if (result.extensionsNeeded.length > 0) {
+      if ((result.extensionsNeeded || []).length > 0) {
+        // 按 type:originalValue 去重，相同值只显示一次
+        const seen = new Set<string>();
+        const unique = (result.extensionsNeeded as any[]).filter((ext) => {
+          const key = `${ext.type}:${ext.originalValue}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        // Tailwind v4 @theme 变量前缀映射
+        const prefixMap: Record<string, string> = {
+          color: '--color-',
+          spacing: '--spacing-',
+          radius: '--radius-',
+          shadow: '--shadow-',
+          'font-size': '--text-',
+          'font-weight': '--font-weight-',
+        };
+
         console.log(
           chalk.yellow(
-            `\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${result.extensionsNeeded.length}):`,
+            `\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${unique.length}):`,
           ),
         );
-        const unique = result.extensionsNeeded.filter(
-          (v, i, a) => a.findIndex((x) => x.originalValue === v.originalValue) === i,
-        );
         unique.slice(0, 10).forEach((ext) => {
-          console.log(`  - @theme inline { --color-${ext.suggestedName}: ${ext.originalValue}; }`);
+          const prefix = prefixMap[ext.type] || '--color-';
+          console.log(`  - @theme inline { ${prefix}${ext.suggestedName}: ${ext.originalValue}; }`);
         });
+        if (unique.length > 10) {
+          console.log(`  - ... and ${unique.length - 10} more`);
+        }
       }
 
-      if (result.pendingAssets.length > 0) {
-        const uniqueAssets = result.pendingAssets.filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
+      if ((result.pendingAssets || []).length > 0) {
+        const uniqueAssets = (result.pendingAssets as any[]).filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
         console.log(chalk.cyan(`\n🖼️  ${i18n.t('cli.commands.jsx.assetsNeeded') as string} (${uniqueAssets.length}):`));
         uniqueAssets.forEach((a) => {
           console.log(`  - ${a.nodeId}: ${a.name} (${a.type})`);
@@ -1463,7 +1551,7 @@ program
     }
     console.log(
       boxen(
-        chalk.cyan.bold((('🎨 ' + i18n.t('cli.commands.wizard.title')) as string) + ' v1.3.2\n\n') +
+        chalk.cyan.bold((('🎨 ' + i18n.t('cli.commands.wizard.title')) as string) + ' v1.4.0\n\n') +
           chalk.white(i18n.t('cli.commands.wizard.subtitle') as string),
         {
           padding: 1,
@@ -1559,9 +1647,9 @@ program
 
       try {
         const client = createFigmaClient({ accessToken: tokenValue });
-        const isValid = await client.validateToken();
-        if (isValid) {
-          spinner.succeed(chalk.green(i18n.t('cli.commands.token.validateSuccess') as string));
+        const userInfo = await client.validateToken();
+        if (userInfo) {
+          spinner.succeed(chalk.green((i18n.t('cli.commands.token.validateSuccess') as string) + ` (${userInfo.email})`));
           selectedToken = tokenName;
         } else {
           spinner.fail(chalk.red(i18n.t('cli.commands.token.validateFailed') as string));
@@ -1680,6 +1768,99 @@ program
     }
   });
 
+// ============= 命令: 缓存管理 (v1.4.0 新增) =============
+
+const cacheCmd = program.command('cache').description('管理本地缓存');
+
+cacheCmd
+  .command('status')
+  .alias('stats')
+  .description('查看缓存统计信息')
+  .action(async () => {
+    const cache = createFigmaCache();
+    const stats = await cache.getStats();
+
+    console.log(
+      boxen(
+        chalk.cyan.bold('📦 本地缓存统计\n\n') +
+          chalk.white(`条目数量: ${chalk.bold(stats.totalEntries)}\n`) +
+          chalk.white(`缓存大小: ${chalk.bold(formatBytes(stats.totalSize))}\n`) +
+          chalk.white(`命中次数: ${chalk.green(stats.hits)}\n`) +
+          chalk.white(`未命中次数: ${chalk.yellow(stats.misses)}\n`) +
+          chalk.white(`命中率: ${chalk.bold((stats.hitRate * 100).toFixed(1))}%\n`) +
+          chalk.white(`LRU 驱逐: ${chalk.gray(stats.evictions)} 次`),
+        { padding: 1, borderColor: 'cyan', margin: { top: 1 } },
+      ),
+    );
+  });
+
+cacheCmd
+  .command('clear')
+  .alias('clean')
+  .description('清空所有缓存')
+  .option('-f, --force', '强制清空，不确认')
+  .action(async (cmdOptions) => {
+    if (!cmdOptions.force) {
+      const confirmed = await confirm({
+        message: '确定要清空所有本地缓存吗？',
+        default: false,
+      });
+      if (!confirmed) {
+        console.log(chalk.gray('已取消'));
+        return;
+      }
+    }
+
+    const spinner = ora('正在清空缓存...').start();
+    const cache = createFigmaCache();
+    await cache.clear();
+    spinner.succeed(chalk.green('缓存已清空'));
+  });
+
+/**
+ * 格式化字节大小
+ */
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
+
+// ============= 命令: 隐私声明 (v1.4.0 新增) =============
+
+program
+  .command('privacy')
+  .description('查看隐私承诺声明')
+  .action(() => {
+    console.log(
+      boxen(getPrivacyStatement(), {
+        padding: 1,
+        borderColor: 'green',
+        margin: { top: 1 },
+      }),
+    );
+
+    // 检查当前目录 .gitignore
+    checkGitignore(process.cwd()).then((result) => {
+      if (result.exists && result.envIgnored && result.credentialsIgnored) {
+        console.log(chalk.green('✅ 当前项目 .gitignore 配置正确，敏感文件已被忽略'));
+      } else {
+        console.log(chalk.yellow('\n⚠️  安全建议：'));
+        if (!result.exists) {
+          console.log(chalk.yellow('  - 未找到 .gitignore 文件，建议创建'));
+        }
+        if (result.suggestedRules.length > 0) {
+          console.log(chalk.yellow('  - 建议在 .gitignore 中添加以下规则：'));
+          result.suggestedRules.forEach((rule) => {
+            console.log(chalk.cyan(`    ${rule}`));
+          });
+        }
+      }
+    });
+  });
+
 // ============= Shell 自动补全 =============
 
 program.addHelpText(
@@ -1713,8 +1894,8 @@ program
       compLog(`_figma_dev_completion() {`);
       compLog(`  local -a commands`);
       compLog(`  commands=(`);
-      compLog(`    'wizard:交互式配置向导'
-      'gui:GUI 可视化配置向导'`);
+      compLog(`    'wizard:交互式配置向导'`);
+      compLog(`    'gui:GUI 可视化配置向导'`);
       compLog(`    'lang:语言设置'`);
       compLog(`    'validate:验证 Figma Token'`);
       compLog(`    'token:管理 Access Token（set/get/list/delete/default）'`);
@@ -1727,6 +1908,8 @@ program
       compLog(`    'structured:获取结构化设计数据'`);
       compLog(`    'screenshot:获取节点截图'`);
       compLog(`    'info:查看文件信息'`);
+      compLog(`    'cache:管理本地缓存（status/clear）'`);
+      compLog(`    'privacy:查看隐私承诺声明'`);
       compLog(`    'mcp:启动 MCP 服务器'`);
       compLog(`    'tutorial:查看教程文档'`);
       compLog(`    'completion:生成补全脚本'`);
@@ -1742,7 +1925,7 @@ program
       compLog(`  cur="\${COMP_WORDS[COMP_CWORD]}"`);
       compLog(`  prev="\${COMP_WORDS[COMP_CWORD-1]}"`);
       compLog(
-        `  commands="wizard lang validate token sync lint jsx component assets metadata structured screenshot info mcp tutorial completion"`,
+        `  commands="wizard gui lang validate token sync lint jsx component assets metadata structured screenshot info cache privacy mcp tutorial completion"`,
       );
       compLog(`  COMPREPLY=( $(compgen -W "\${commands}" -- \${cur}) )`);
       compLog(`  return 0`);
@@ -1756,7 +1939,7 @@ program
       compLog(`Register-ArgumentCompleter -Native -CommandName figma-dev,figma-dev-tools -ScriptBlock {`);
       compLog(`  param($wordToComplete, $commandAst, $cursorPosition)`);
       compLog(
-        `  @('wizard','lang','validate','token','sync','lint','jsx','component','assets','metadata','structured','screenshot','info','mcp','tutorial') | Where-Object { $_ -like "$wordToComplete*" }`,
+        `  @('wizard','gui','lang','validate','token','sync','lint','jsx','component','assets','metadata','structured','screenshot','info','cache','privacy','mcp','tutorial') | Where-Object { $_ -like "$wordToComplete*" }`,
       );
       compLog(`}`);
     }

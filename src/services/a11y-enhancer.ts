@@ -11,8 +11,8 @@
  * @module
  */
 
-import type { ProcessedNode, NodeSemanticRole } from '../types/nodes.js';
 import { getI18n } from '../i18n/index.js';
+import type { ProcessedNode, NodeSemanticRole } from '../types/nodes.js';
 
 // ============ 类型定义 ============
 
@@ -625,10 +625,12 @@ export class A11yEnhancer {
    * 推断 label 文本
    */
   private _inferLabelText(node: ProcessedNode): string {
-    return node.name
-      .replace(/[_-]/g, ' ')
-      .replace(/^(input|textfield|search|email|password|textarea)\s*/i, '')
-      .trim() || '输入框';
+    return (
+      node.name
+        .replace(/[_-]/g, ' ')
+        .replace(/^(input|textfield|search|email|password|textarea)\s*/i, '')
+        .trim() || '输入框'
+    );
   }
 
   /**
@@ -636,9 +638,7 @@ export class A11yEnhancer {
    */
   private _needsAriaLabel(node: ProcessedNode): boolean {
     // 没有文本内容的按钮/链接需要 aria-label
-    const hasTextChild = node.children?.some(
-      (c) => c.role === 'text' || c.originalType === 'TEXT' || c.textContent,
-    );
+    const hasTextChild = node.children?.some((c) => c.role === 'text' || c.originalType === 'TEXT' || c.textContent);
     return !hasTextChild && !node.textContent;
   }
 

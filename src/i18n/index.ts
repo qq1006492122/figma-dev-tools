@@ -10,8 +10,9 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { zhCN } from './zh-CN.js';
+
 import { enUS } from './en-US.js';
+import { zhCN } from './zh-CN.js';
 
 // ============ 类型定义 ============
 

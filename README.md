@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.3.2
+# 🎨 Figma Dev Tools v1.4.0
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -6,17 +6,27 @@
 
 ---
 
-## ✨ v1.3.2 重磅更新
+## ✨ v1.4.0 重磅更新
 
 | 新特性 | 说明 | 版本 |
 |--------|------|------|
-| 🖥️ **GUI 可视化配置向导** | 浏览器图形界面配置，小白友好，自动检测编辑器一键安装，中英文双语 | **v1.3.0** |
+| 🔒 **XSS 安全防护** | 引入 sanitize-html 多层防护，6个安全函数覆盖文本/属性/标识符/SVG全链路XSS防护，React/Vue生成器全面应用 | **v1.4.0** |
+| 🗂️ **智能层级修复** | 新增 hierarchy-fixer，基于坐标包含+命名语义自动检测父子层级错位，高置信度问题自动修复；三重边界保护（深度≤50/节点≤20000/循环引用检测）防止栈溢出 | **v1.4.0** |
+| 🎨 **SVG 内联渲染** | VECTOR/BOOLEAN_OPERATION 等矢量节点直接导出为内联SVG，svgo优化+currentColor支持+JSX/Vue自动转换，告别位图图标模糊 | **v1.4.0** |
+| ✨ **动画动效检测** | 检测 Figma Prototype 交互动效（ON_CLICK/ON_HOVER/SMART_ANIMATE等），自动生成 CSS transition 和 Framer Motion 代码建议 | **v1.4.0** |
+| ⚡ **本地加密缓存** | AES-256-GCM 加密缓存 Figma API 响应，LRU 淘汰+TTL 过期，大幅减少重复请求，提升速度 | **v1.4.0** |
+| 📈 **评分算法优化** | 6维度加权评分（布局30%/命名20%/组件15%/间距15%/无障碍10%/结构10%），非线性曲线+保底分，解决评分两极分化问题 | **v1.4.0** |
+| 📱 **移动端H5适配建议** | 自动生成安全区域、1px边框、触屏优化、viewport设置等H5适配方案 | **v1.4.0** |
+| 🔐 **Token过期检测** | CLI启动时静默检查Token有效性，过期自动提示刷新 | **v1.4.0** |
+| 🖼️ **图片优化增强** | 图片节点自动添加loading="lazy"、decoding="async"、width/height等优化属性 | **v1.4.0** |
+| 🧹 **CLI输出统一** | 所有命令输出风格统一，使用chalk+boxen美化，错误提示更友好 | **v1.4.0** |
+| 🖥️ **GUI 可视化配置向导** | 浏览器图形界面配置，小白友好，自动检测编辑器一键安装，中英文双语 | v1.3.0 |
 | 🌍 **i18n 国际化** | 完整支持中文/英文双语界面，CLI/GUI/MCP 工具可切换语言 | v1.3.2 |
 | ♿ **无障碍(a11y)增强** | 自动识别语义标签、添加 alt 文本、注入 ARIA 属性，确保生成代码符合 WCAG 标准 | v1.3.2 |
 | 🔧 **Flex 布局自动修复** | 智能检测并修复图标变形、文本截断、溢出滚动等经典 Flex 问题，添加 `align-items: center`、`flex-shrink: 0` 等修复类 | v1.3.2 |
 | 🎨 **设计系统对齐** | 自动匹配颜色变量、间距、字体、圆角、阴影，输出与项目设计系统一致的代码 | v1.3.2 |
 | 📱 **响应式推断** | 根据设计稿尺寸智能推断设备类型，提供 sm/md/lg/xl 响应式前缀建议 | v1.3.2 |
-| ✅ **设计规范检查 (Lint)** | 代码生成前预检设计稿质量，识别 Auto Layout 问题、图层命名、规范间距等，评分低于 80 分给出修复建议 | v1.3.2 |
+| ✅ **设计规范检查 (Lint)** | 代码生成前预检设计稿质量，识别层级过深/冗余包裹/父子错位/Auto Layout问题/图层命名/规范间距等，多维度评分给出修复建议 | v1.3.2→**v1.4.0增强** |
 | 🔐 **Token 安全存储** | 支持系统 Keychain/Credential Manager 安全存储 Figma Token，避免明文泄露 | v1.3.2 |
 | 🧩 **SVG Sprite 生成** | 批量下载图标后自动合并为 SVG Sprite，生成 TypeScript 类型定义，减少 HTTP 请求 | v1.3.2 |
 | 💅 **Prettier 自动格式化** | 生成代码自动使用 Prettier 格式化，保持代码风格一致 | v1.3.2 |
@@ -668,21 +678,22 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.3.2                            │
-│                    🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive        │
+│                      figma-dev-tools MCP Server v1.4.0                            │
+│     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │
 │  │  figma-url  │───▶│figma-client  │───▶│           Figma REST API            │ │
 │  │  解析器      │    │ API 客户端    │    │            (figma.com)              │ │
 │  └─────────────┘    └──────┬───────┘    └─────────────────────────────────────┘ │
-│                            │                                                     │
+│                            │ 🔒 AES-256-GCM 本地加密缓存                         │
 │           ┌────────────────┼────────────────┐                                   │
 │           ▼                ▼                ▼                                   │
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐                          │
 │  │node-processor│ │design-context│ │tokens-extractor│                          │
 │  │ 节点精简     │ │ 渐进式上下文  │ │ Token 提取     │                          │
 │  │ GROUP扁平化  │ │ metadata概览  │ │ Variables+Styles│                         │
-│  │ 语义角色标注 │ │ context详情   │ │                │                          │
+│  │ 🗂️层级自动修复│ │ context详情   │ │                │                          │
+│  │ 语义角色标注 │ │              │ │                │                          │
 │  └──────┬──────┘  └──────┬───────┘  └───────┬───────┘                          │
 │         │                │                   │                                  │
 │         └────────┬───────┴───────────┬───────┘                                  │
@@ -692,29 +703,40 @@ Token 读取优先级：
 │         │多级Token匹配 │   │完整属性映射    │   │ ✅ 设计规范检查   │          │
 │         │codeSyntax→   │   │flex/padding/   │   │ Auto Layout/命名  │          │
 │         │精确→模糊匹配 │   │gap/shadow等    │   │ 间距/尺寸/无障碍  │          │
+│         │              │   │               │   │ 🗂️父子层级错位检测│          │
 │         └──────┬───────┘   └───────┬────────┘   └────────┬─────────┘          │
 │                │                   │                     │                    │
 │                └─────────┬─────────┘                     │                    │
 │                          ▼                               ▼                    │
 │                ┌──────────────────┐        ┌──────────────────────┐           │
-│                │  code-generator  │───────▶│ v1.3.2 Enhancements │           │
+│                │  code-generator  │───────▶│ v1.4.0 Enhancements │           │
 │                │  React JSX生成   │        │ ┌──────────────────┐ │           │
 │                │  语义标签+cn()    │        │ │ 🔧 flex-fixer    │ │           │
 │                │  TODO标记        │        │ │ ♿ a11y-enhancer  │ │           │
-│                │  Prettier格式化  │        │ │ 🎨 design-system │ │           │
-│                └────────┬─────────┘        │ │ 📱 responsive    │ │           │
-│                         │                  │ └──────────────────┘ │           │
-│         ┌───────────────┴──────────────┐   └──────────────────────┘           │
-│         ▼                              ▼                               ▼        │
-│  ┌──────────────┐             ┌────────────────┐      ┌──────────────┐ ┌─────┐│
-│  │asset-        │             │  file-writer   │      │  CLI 命令    │ │i18n ││
-│  │downloader    │             │  文件写入       │      │ gui/lint/    │ │ zh/ ││
-│  │图片/SVG下载  │             │  CSS/Tailwind/ │      │ lang/token/  │ │ en  ││
-│  │SVGO优化      │             │  JSON输出      │      │ jsx/structur │ └─────┘│
-│  │publicCdnUrl()│             │  Prettier格式化│      │ ed/sync/asset│        │
-│  └──────┬───────┘             └────────────────┘      └──────┬───────┘        │
-│         │                                                   │                │
-│         ▼                                                   ▼                │
+│                │  🔒 XSS全链路防护 │        │ │ 🎨 design-system │ │           │
+│                │  Prettier格式化  │        │ │ 📱 responsive    │ │           │
+│                └────────┬─────────┘        │ │ 🎨 svg-inline    │ │           │
+│         ┌───────────────┴──────────────┐   │ │ ✨ animation     │ │           │
+│         ▼               ▼              ▼   │ └──────────────────┘ │           │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐              │           │
+│  │asset-        │ │ vue-generator│ │ svg-inline   │              │           │
+│  │downloader    │ │ Vue SFC生成  │ │ renderer     │              │           │
+│  │图片/SVG下载  │ │              │ │ 矢量→内联SVG │              │           │
+│  │SVGO优化      │ └──────────────┘ │ svgo优化     │              │           │
+│  │publicCdnUrl()│                  └──────────────┘              │           │
+│  └──────┬───────┘                                                │           │
+│         │                                                        │           │
+│         └──────────────┬─────────────────────────────────────────┘           │
+│                        ▼                                                      │
+│              ┌────────────────┐      ┌──────────────┐  ┌─────┐              │
+│              │  file-writer   │      │  CLI 命令    │  │i18n │              │
+│              │  文件写入       │      │ gui/lint/    │  │ zh/ │              │
+│              │  CSS/Tailwind/ │      │ lang/token/  │  │ en  │              │
+│              │  JSON/TSX/Vue  │      │ jsx/structur │  └─────┘              │
+│              │  Prettier格式化│      │ ed/sync/asset│                       │
+│              └────────┬───────┘      └──────┬───────┘                       │
+│                       │                   │                                 │
+│                       ▼                   ▼                                 │
 │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────────┐ │
 │  │svg-sprite-gen    │  │  token-store     │  │ 🖥️ GUI 服务器 (v1.3.0)       │ │
 │  │SVG Sprite生成    │  │  🔐 安全存储      │  │ ┌───────┐ ┌───────┐ ┌──────┐ │ │
@@ -741,35 +763,38 @@ figma-dev-tools/
 │   ├── app.js                 # 前端交互逻辑
 │   └── styles.css             # GUI 样式
 ├── src/
-│   ├── index.ts               # MCP 服务器入口（v1.3.2 新增 lint/sprite 工具）
+│   ├── index.ts               # MCP 服务器入口（v1.4.0 新增 svg-inline/hierarchy/cache）
 │   ├── types.ts               # TypeScript 类型定义
 │   ├── i18n/                  # 🌍 v1.3.2 新：国际化
 │   │   ├── index.ts           # i18n 核心
 │   │   ├── zh-CN.ts           # 中文语言包
 │   │   └── en-US.ts           # 英文语言包
 │   ├── cli/
-│   │   └── index.ts           # CLI 命令定义（v1.3.0 新增 gui/wizard --gui 命令，v1.3.2 新增 lang/token/lint）
-│   ├── gui/                   # 🖥️ v1.3.0 新：GUI 服务器端
-│   │   ├── server.ts          # Express 服务器（端口 54321）
-│   │   └── handlers.ts        # GUI API 处理器（Token验证/编辑器检测/安装）
+│   │   └── index.ts           # CLI 命令定义
 │   ├── services/
-│   │   ├── figma-client.ts    # Figma REST API 客户端
-│   │   ├── node-processor.ts  # ⭐ 节点树精简 + 语义标注
+│   │   ├── figma-client.ts    # Figma REST API 客户端（含本地加密缓存）
+│   │   ├── node-processor.ts  # ⭐ 节点树精简 + 语义标注 + 🗂️层级自动修复
 │   │   ├── design-context.ts  # ⭐ 渐进式上下文服务
-│   │   ├── structured-data.ts # ⭐ 框架无关结构化数据构建（v1.1.0 新）
 │   │   ├── token-matcher.ts   # ⭐ 多级 Token 匹配
 │   │   ├── tailwind-mapper.ts # ⭐ Tailwind 属性映射
-│   │   ├── code-generator.ts  # ⭐ JSX 代码生成（v1.3.2 增强）
-│   │   ├── flex-fixer.ts      # 🔧 v1.3.2 新：Flex 布局修复
-│   │   ├── a11y-enhancer.ts   # ♿ v1.3.2 新：无障碍增强
-│   │   ├── design-system.ts   # 🎨 v1.3.2 新：设计系统对齐
-│   │   ├── responsive-inferrer.ts # 📱 v1.3.2 新：响应式推断
-│   │   ├── design-linter.ts   # ✅ v1.3.2 新：设计规范检查
-│   │   ├── code-formatter.ts  # 💅 v1.3.2 新：Prettier 代码格式化
+│   │   ├── code-generator.ts  # ⭐ JSX 代码生成（v1.4.0：XSS防护+import分组排序+交互推断+语义标签）
+│   │   ├── vue-generator.ts   # 🟢 v1.4.0：Vue SFC 代码生成
+│   │   ├── flex-fixer.ts      # 🔧 Flex 布局修复
+│   │   ├── a11y-enhancer.ts   # ♿ 无障碍增强
+│   │   ├── design-system.ts   # 🎨 设计系统对齐
+│   │   ├── responsive-inferrer.ts # 📱 响应式推断
+│   │   ├── design-linter.ts   # ✅ 设计规范检查（含🗂️层级错位检测）
+│   │   ├── hierarchy-fixer.ts # 🗂️ v1.4.0：智能层级修复（父子错位自动修复）
+│   │   ├── svg-inline-renderer.ts # 🎨 v1.4.0：SVG内联渲染（svgo优化+LRU缓存）
+│   │   ├── animation-detector.ts  # ✨ v1.4.0：动效检测（基础框架，预留扩展）
+│   │   ├── component-mapper.ts    # 🧩 v1.4.0：组件库映射（shadcn/ui等检测提示）
+│   │   ├── interaction-inferrer.ts # 🤖 v1.4.0：交互逻辑推断（按钮/表单/Tab/弹窗状态自动推断）
+│   │   ├── watch-mode.ts     # 👁️ v1.4.0：Watch模式（轮询Figma变更自动重生成代码）
+│   │   ├── cache.ts           # ⚡ v1.4.0：AES-256-GCM本地加密缓存（LRU+TTL）
+│   │   ├── code-formatter.ts  # 💅 Prettier 代码格式化
 │   │   ├── asset-downloader.ts# ⭐ 资源下载管线（SVGO 优化）
-│   │   ├── svg-sprite-generator.ts # 🧩 v1.3.2 新：SVG Sprite 生成
-│   │   ├── token-store.ts     # 🔐 v1.3.2 新：Token 安全存储
-│   │   ├── editor-detector.ts # 🖥️ v1.3.0 新：编辑器自动检测
+│   │   ├── svg-sprite-generator.ts # 🧩 SVG Sprite 生成
+│   │   ├── token-store.ts     # 🔐 Token 安全存储
 │   │   ├── tokens-extractor.ts# Tokens 提取
 │   │   └── file-writer.ts     # 文件写入
 │   ├── types/
@@ -778,15 +803,14 @@ figma-dev-tools/
 │       ├── figma-url.ts       # URL 解析
 │       ├── color.ts           # 颜色转换 + CIE76 色差
 │       ├── cn.ts              # className 合并工具（tailwind-merge + clsx）
+│       ├── security.ts        # 🔒 v1.4.0：XSS安全防护（6个安全函数）
 │       └── errors.ts          # 错误处理
 ├── dist/                      # 编译输出
-├── install.mjs                # 一键安装脚本（v1.1.0 支持多包管理器/多编辑器）
-├── uninstall.mjs              # 卸载脚本
-├── .env.example               # 环境变量模板（v1.3.0 新增 GUI 端口，v1.3.2 新增语言配置）
-├── FIGMA-DESIGN-GUIDELINES.md # 📖 v1.3.2 新：Figma 设计规范指南
+├── .env.example               # 环境变量模板
+├── FIGMA-DESIGN-GUIDELINES.md # 📖 Figma 设计规范指南
 ├── DEVELOPMENT.md             # 开发文档
 ├── OPTIMIZATION-ANALYSIS.md   # 优化分析
-├── package.json               # v1.3.2
+├── package.json               # v1.4.0
 ├── tsconfig.json
 ├── README.md                  # 本文件
 ├── LICENSE                    # MIT 许可证

@@ -183,7 +183,7 @@ export class TailwindMapper {
     }
 
     // ============ 4. Flex 布局 ============
-    this._mapLayout(node.layout, node.alignSelf, node.flexGrow, classes);
+    this._mapLayout(node, node.alignSelf, node.flexGrow, classes);
 
     // ============ 5. 尺寸（width/height） ============
     this._mapSize(node.size, node.layout, classes);
@@ -248,8 +248,8 @@ export class TailwindMapper {
       if (stdOpacityValues.includes(pct)) {
         classes.push(`opacity-${pct}`);
       } else {
-        // 非标准透明度使用任意值语法
-        classes.push(`opacity-[${pct}]`);
+        // 非标准透明度使用任意值语法（百分比形式，如 opacity-[12%]）
+        classes.push(`opacity-[${pct}%]`);
       }
     }
   }
@@ -259,19 +259,38 @@ export class TailwindMapper {
   /**
    * 映射 Flex 布局属性：方向、对齐、gap、padding、wrap、align-self、flex-grow
    *
-   * @param layout - Auto Layout 数据
+   * @param node - 当前节点（用于启发式推断非Auto Layout容器的布局）
    * @param alignSelf - 子项自身对齐方式
    * @param flexGrow - flex-grow 值
    * @param classes - 类名数组（输出参数）
    */
   private _mapLayout(
-    layout: ProcessedAutoLayout | undefined,
+    node: ProcessedNode,
     alignSelf: ProcessedNode['alignSelf'],
     flexGrow: number | undefined,
     classes: string[],
   ): void {
-    if (!layout || layout.mode === 'NONE') return;
+    const layout = node.layout;
 
+    // 如果是Auto Layout，按标准处理
+    if (layout && layout.mode !== 'NONE') {
+      this._mapAutoLayout(layout, alignSelf, flexGrow, classes);
+      return;
+    }
+
+    // 启发式推断：对于非Auto Layout容器（普通Group/Frame），根据子元素位置推断布局
+    this._inferLayoutFromChildren(node, classes);
+  }
+
+  /**
+   * 映射Auto Layout属性
+   */
+  private _mapAutoLayout(
+    layout: ProcessedAutoLayout,
+    alignSelf: ProcessedNode['alignSelf'],
+    flexGrow: number | undefined,
+    classes: string[],
+  ): void {
     // ============ Flex 方向 ============
     if (layout.mode === 'HORIZONTAL') {
       classes.push('flex', 'flex-row');
@@ -362,6 +381,162 @@ export class TailwindMapper {
       // flex-1 对应 flex-grow: 1（最常用场景）
       classes.push(flexGrow === 1 ? 'flex-1' : `grow-[${flexGrow}]`);
     }
+  }
+
+  /**
+   * 启发式推断：根据子元素位置推断容器布局
+   *
+   * 适用于非Auto Layout的普通Group/Frame，通过分析子元素的相对位置，
+   * 自动添加flex类名，避免所有子元素堆叠在左上角。
+   */
+  private _inferLayoutFromChildren(node: ProcessedNode, classes: string[]): void {
+    if (!node.children || node.children.length < 2) return;
+
+    // 过滤掉不可见子元素
+    const visibleChildren = node.children.filter((c) => c.visible !== false && c.size);
+    if (visibleChildren.length < 2) return;
+
+    // 计算子元素在容器内的相对位置
+    // 注意：Figma中子元素的position/absolutePosition是相对于父容器的
+    const childPositions = visibleChildren.map((child) => {
+      const pos = child.position;
+      const absPos = child.absolutePosition;
+      return {
+        x: pos?.x ?? absPos?.left ?? 0,
+        y: pos?.y ?? absPos?.top ?? 0,
+        w: child.size?.width ?? 0,
+        h: child.size?.height ?? 0,
+      };
+    });
+
+    // 计算父容器的偏移
+    const parentPos = node.position;
+    const parentAbsPos = node.absolutePosition;
+    const parentX = parentPos?.x ?? parentAbsPos?.left ?? 0;
+    const parentY = parentPos?.y ?? parentAbsPos?.top ?? 0;
+
+    // 转换为相对于父容器的坐标
+    const relPositions = childPositions.map((p) => ({
+      x: p.x - parentX,
+      y: p.y - parentY,
+      w: p.w,
+      h: p.h,
+      centerY: p.y - parentY + p.h / 2,
+      centerX: p.x - parentX + p.w / 2,
+    }));
+
+    // 分析布局方向
+    // 水平排列检测：子元素y坐标中心差异小，x坐标依次递增
+    const yCenters = relPositions.map((p) => p.centerY);
+    const xCoords = relPositions.map((p) => p.x);
+    const avgH = relPositions.reduce((s, p) => s + p.h, 0) / relPositions.length;
+
+    const yCenterVariance = this._variance(yCenters);
+    const xIsIncreasing = this._isMonotonicIncreasing(xCoords);
+    const isHorizontal = yCenterVariance < avgH * 0.5 && xIsIncreasing;
+
+    // 垂直排列检测：子元素x坐标中心差异小，y坐标依次递增
+    const xCenters = relPositions.map((p) => p.centerX);
+    const yCoords = relPositions.map((p) => p.y);
+    const avgW = relPositions.reduce((s, p) => s + p.w, 0) / relPositions.length;
+
+    const xCenterVariance = this._variance(xCenters);
+    const yIsIncreasing = this._isMonotonicIncreasing(yCoords);
+    const isVertical = xCenterVariance < avgW * 0.5 && yIsIncreasing;
+
+    // 检测是否应该使用flex
+    if (isHorizontal || isVertical) {
+      classes.push('flex');
+
+      if (isHorizontal) {
+        classes.push('flex-row');
+
+        // 检测垂直对齐
+        // 如果所有子元素中心y偏差很小，说明垂直居中对齐
+        if (yCenterVariance < avgH * 0.2) {
+          classes.push('items-center');
+        } else if (yCenterVariance < avgH * 0.5) {
+          classes.push('items-start');
+        }
+
+        // 计算gap（子元素之间的水平间距）
+        const sortedByX = [...relPositions].sort((a, b) => a.x - b.x);
+        const gaps: number[] = [];
+        for (let i = 1; i < sortedByX.length; i++) {
+          const prev = sortedByX[i - 1];
+          const curr = sortedByX[i];
+          if (!prev || !curr) continue;
+          const gap = curr.x - (prev.x + prev.w);
+          if (gap >= 0 && gap < 100) {
+            gaps.push(gap);
+          }
+        }
+        if (gaps.length > 0) {
+          const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+          if (avgGap > 0.5) {
+            const match = this._matcher.matchSpacing(Math.round(avgGap), 'gap');
+            classes.push(this._cls(match, `gap-[${Math.round(avgGap)}px]`));
+          }
+        }
+      } else {
+        classes.push('flex-col');
+
+        // 检测水平对齐
+        if (xCenterVariance < avgW * 0.2) {
+          classes.push('items-center');
+        } else if (xCenterVariance < avgW * 0.5) {
+          classes.push('items-start');
+        }
+
+        // 计算gap（子元素之间的垂直间距）
+        const sortedByY = [...relPositions].sort((a, b) => a.y - b.y);
+        const gaps: number[] = [];
+        for (let i = 1; i < sortedByY.length; i++) {
+          const prev = sortedByY[i - 1];
+          const curr = sortedByY[i];
+          if (!prev || !curr) continue;
+          const gap = curr.y - (prev.y + prev.h);
+          if (gap >= 0 && gap < 200) {
+            gaps.push(gap);
+          }
+        }
+        if (gaps.length > 0) {
+          const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+          if (avgGap > 0.5) {
+            const match = this._matcher.matchSpacing(Math.round(avgGap), 'gap');
+            classes.push(this._cls(match, `gap-[${Math.round(avgGap)}px]`));
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 计算数组方差
+   */
+  private _variance(arr: number[]): number {
+    if (arr.length === 0) return 0;
+    const mean = arr.reduce((s, v) => s + v, 0) / arr.length;
+    const squaredDiffs = arr.map((v) => (v - mean) ** 2);
+    return squaredDiffs.reduce((s, v) => s + v, 0) / arr.length;
+  }
+
+  /**
+   * 检测数组是否单调递增（允许微小误差）
+   */
+  private _isMonotonicIncreasing(arr: number[]): boolean {
+    if (arr.length < 2) return true;
+    // 允许1px的误差
+    const tolerance = 1;
+    for (let i = 1; i < arr.length; i++) {
+      const prev = arr[i - 1];
+      const curr = arr[i];
+      if (prev === undefined || curr === undefined) continue;
+      if (curr < prev - tolerance) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -539,7 +714,7 @@ export class TailwindMapper {
       if (match.needsExtension) {
         extensions.push({
           type: 'radius',
-          suggestedName: `radius-${Math.round(px)}`,
+          suggestedName: `${Math.round(px)}`,
           originalValue: `${px}px`,
         });
       }
@@ -578,7 +753,8 @@ export class TailwindMapper {
       } else {
         const hex = this._colorToHex(stroke.color);
         if (this._options.allowArbitrary) classes.push(`border-[${hex}]`);
-        extensions.push({ type: 'color', suggestedName: 'border-custom', originalValue: hex });
+        const colorSuffix = hex.replace(/[^a-f0-9]/gi, '').slice(0, 6);
+        extensions.push({ type: 'color', suggestedName: `border-${colorSuffix}`, originalValue: hex });
       }
 
       // 仅处理第一个描边（多层描边罕见，暂不支持）
@@ -628,7 +804,9 @@ export class TailwindMapper {
           } else {
             const hex = this._colorToHex(fill.color, fill.opacity);
             if (this._options.allowArbitrary) classes.push(`${purpose}-[${hex}]`);
-            extensions.push({ type: 'color', suggestedName: `${purpose}-custom`, originalValue: hex });
+            // 使用颜色hex值生成唯一名称，避免重复
+            const colorSuffix = hex.replace(/[^a-f0-9]/gi, '').slice(0, 6);
+            extensions.push({ type: 'color', suggestedName: `${purpose}-${colorSuffix}`, originalValue: hex });
           }
           break;
         }
@@ -671,7 +849,7 @@ export class TailwindMapper {
     const direction = this._gradientDirection(handles);
     if (direction && stops.length <= 3) {
       // ============ 简单渐变：使用 Tailwind 内置语法 ============
-      classes.push('bg-gradient-to', direction);
+      classes.push(`bg-gradient-to-${direction}`);
 
       // from 色标（起点）
       const fromMatch = this._matcher.matchColor(stops[0]!.color, 'bg');
@@ -734,7 +912,7 @@ export class TailwindMapper {
         inlineStyle.boxShadow = `${eff.x}px ${eff.y}px ${eff.blur}px${spreadPart} ${this._colorToRgba(eff.color)}`;
         extensions.push({
           type: 'shadow',
-          suggestedName: `shadow-${Math.round(eff.blur)}`,
+          suggestedName: `${Math.round(eff.blur)}`,
           originalValue: inlineStyle.boxShadow as string,
         });
       }
@@ -782,7 +960,7 @@ export class TailwindMapper {
         classes.push(`font-[${style.fontWeight}]`);
         extensions.push({
           type: 'font-weight',
-          suggestedName: `font-${style.fontWeight}`,
+          suggestedName: `${style.fontWeight}`,
           originalValue: String(style.fontWeight),
         });
       }
@@ -797,7 +975,7 @@ export class TailwindMapper {
         classes.push(`text-[${style.fontSize}px]`);
         extensions.push({
           type: 'font-size',
-          suggestedName: `text-${Math.round(style.fontSize)}`,
+          suggestedName: `${Math.round(style.fontSize)}`,
           originalValue: `${style.fontSize}px`,
         });
       }

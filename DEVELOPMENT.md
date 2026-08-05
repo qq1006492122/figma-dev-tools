@@ -1,7 +1,7 @@
-# figma-dev-tools 开发指南
+# figma-dev-tools v1.4.0 开发指南
 
 ## 项目概述
-figma-dev-tools 是一个 Figma 设计稿转代码的 MCP 工具，支持 React + Tailwind CSS 代码生成。
+figma-dev-tools 是一个 Figma 设计稿转代码的 MCP 工具，支持 React + Tailwind CSS / Vue + UnoCSS 代码生成，提供 GUI 配置向导、XSS 安全防护、智能层级修复、SVG 内联渲染、动画检测等完整工具链。
 
 ## 环境要求
 - Node.js >= 20
@@ -24,39 +24,49 @@ figma-dev-tools/
 ├── bin/                    # CLI 入口
 │   └── figma-dev.js
 ├── src/
-│   ├── index.ts           # MCP 服务器入口
+│   ├── index.ts           # MCP 服务器入口（14个MCP工具）
 │   ├── cli/               # CLI 命令实现
 │   │   └── index.ts
 │   ├── i18n/              # 国际化（zh-CN/en-US）
 │   │   ├── index.ts
 │   │   ├── zh-CN.ts
 │   │   └── en-US.ts
-│   ├── services/          # 核心服务
-│   │   ├── figma-client.ts      # Figma API 客户端
-│   │   ├── node-processor.ts    # 节点处理
+│   ├── services/          # 核心服务（v1.4.0 新增标注）
+│   │   ├── figma-client.ts      # Figma API 客户端（v1.4.0：getImages自动分批，URL长度保护）
+│   │   ├── node-processor.ts    # 节点处理（v1.4.0：层级修复+三重边界保护）
 │   │   ├── tailwind-mapper.ts   # Figma → Tailwind 映射
-│   │   ├── code-generator.ts    # React 代码生成
+│   │   ├── code-generator.ts    # React 代码生成（v1.4.0：XSS防护+import分组排序+交互推断+语义标签+Props泛型）
+│   │   ├── vue-generator.ts     # Vue 3 SFC 代码生成（v1.4.0：XSS防护+SVG内联渲染集成）
 │   │   ├── code-formatter.ts    # Prettier 格式化
 │   │   ├── flex-fixer.ts        # Flex 布局自动修复
 │   │   ├── a11y-enhancer.ts     # 无障碍增强
 │   │   ├── design-system.ts     # 设计系统自动化
-│   │   ├── responsive-inferrer.ts # 响应式推断
-│   │   ├── design-linter.ts     # 设计规范检查
+│   │   ├── responsive-inferrer.ts # 响应式推断+H5适配建议
+│   │   ├── design-linter.ts     # 设计规范检查（v1.4.0：层级问题检测）
 │   │   ├── asset-downloader.ts  # 资源下载
+│   │   ├── svg-inline-renderer.ts # v1.4.0：SVG内联渲染+svgo优化+currentColor+LRU缓存+XSS清理
 │   │   ├── svg-sprite-generator.ts # SVG Sprite
+│   │   ├── animation-detector.ts # v1.4.0新增：动画动效检测（基础框架）
+│   │   ├── hierarchy-fixer.ts   # v1.4.0新增：智能层级修复
+│   │   ├── component-mapper.ts  # v1.4.0新增：组件库映射（shadcn/ui等检测）
+│   │   ├── interaction-inferrer.ts # v1.4.0新增：交互逻辑推断（按钮/表单/Tab/弹窗等状态自动推断）
+│   │   ├── watch-mode.ts        # v1.4.0新增：Watch模式（轮询Figma变更自动重生代码）
+│   │   ├── cache.ts             # v1.4.0新增：AES加密本地缓存
+│   │   ├── gui-server.ts        # GUI配置向导服务器
 │   │   ├── token-store.ts       # Token 安全存储
 │   │   ├── tokens-extractor.ts  # Token 提取
 │   │   ├── token-matcher.ts     # Token 匹配
-│   │   ├── design-context.ts    # 设计上下文
+│   │   ├── design-context.ts    # 设计上下文（v1.4.0：添加fileKey字段支持SVG渲染）
 │   │   └── file-writer.ts       # 文件写入
 │   ├── types/             # TypeScript 类型定义
 │   │   └── nodes.ts
-│   ├── utils/             # 工具函数
-│   │   ├── cn.ts
-│   │   ├── color.ts
-│   │   ├── errors.ts
-│   │   └── figma-url.ts
-│   └── types.ts
+│   ├── utils/             # 工具函数（v1.4.0 新增标注）
+│   │   ├── cn.ts                # className 合并
+│   │   ├── color.ts             # 颜色处理
+│   │   ├── errors.ts            # 错误码系统
+│   │   ├── figma-url.ts         # Figma URL解析
+│   │   └── security.ts          # v1.4.0新增：XSS安全防护工具
+│   └── types.ts           # Figma API 类型
 ├── dist/                  # TypeScript 编译输出
 ├── install.mjs            # 安装脚本
 ├── uninstall.mjs          # 卸载脚本

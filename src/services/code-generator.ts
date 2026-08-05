@@ -65,13 +65,16 @@ import type { FigmaNode, CodeGenOptions, GeneratedComponent } from '../types.js'
 import type { ProcessedNode, DesignContext } from '../types/nodes.js';
 import { cn } from '../utils/cn.js';
 import { convertFigmaColor } from '../utils/color.js';
-import type { FigmaClient } from './figma-client.js';
-import { createTailwindMapper, type TailwindMapping } from './tailwind-mapper.js';
-import { formatCode } from './code-formatter.js';
-import { createFlexFixer, type FlexFixResult } from './flex-fixer.js';
+import { escapeAttribute, escapeJsString, sanitizeIdentifier, sanitizeText } from '../utils/security.js';
 import { createA11yEnhancer, type A11yEnhancerResult } from './a11y-enhancer.js';
+import { formatCode } from './code-formatter.js';
 import { createDesignSystemAnalyzer, type DesignSystemResult } from './design-system.js';
+import type { FigmaClient } from './figma-client.js';
+import { createFlexFixer, type FlexFixResult } from './flex-fixer.js';
+import { createInteractionInferrer, type InteractionInferrerResult } from './interaction-inferrer.js';
 import { createResponsiveInferrer, type ResponsiveResult } from './responsive-inferrer.js';
+import { SvgInlineRenderer, isVectorNode, type InlineSvgResult } from './svg-inline-renderer.js';
+import { createTailwindMapper, type TailwindMapping } from './tailwind-mapper.js';
 
 // ============ 类型定义 ============
 
@@ -115,6 +118,10 @@ interface ProcessedNodeContext {
   sceneName: string;
   /** 组件使用统计映射 */
   componentMap: DesignContext['componentsUsed'];
+  /** Figma 文件 Key（用于 SVG 内联渲染） */
+  fileKey: string;
+  /** SVG 内联渲染器实例 */
+  svgRenderer: SvgInlineRenderer;
 }
 
 /**
@@ -131,6 +138,8 @@ export interface EnhancementReports {
   designSystem?: DesignSystemResult;
   /** 响应式推断报告 */
   responsive?: ResponsiveResult;
+  /** 交互逻辑推断报告（v1.4.0 新增） */
+  interaction?: InteractionInferrerResult;
 }
 
 // ============ 常量定义 ============
@@ -183,6 +192,8 @@ export class CodeGenerator {
   private readonly _client: FigmaClient;
   /** 代码生成选项（已合并默认值） */
   private _options: Required<CodeGenOptions>;
+  /** SVG 内联渲染器实例 */
+  private readonly _svgRenderer: SvgInlineRenderer;
 
   /**
    * 构造函数 - 初始化代码生成器
@@ -193,6 +204,12 @@ export class CodeGenerator {
   constructor(client: FigmaClient, options: Partial<CodeGenOptions> = {}) {
     this._client = client;
     this._options = { ...DEFAULT_CODE_GEN_OPTIONS, ...options };
+    this._svgRenderer = new SvgInlineRenderer(client, {
+      inline: true,
+      scale: 1,
+      optimize: true,
+      currentColor: true,
+    });
   }
 
   // ============ 旧版管道（基于原始 FigmaNode） ============
@@ -415,6 +432,7 @@ export class CodeGenerator {
     const extensionsNeeded: TailwindMapping['extensionsNeeded'] = [];
     const pendingAssets: Array<{ nodeId: string; name: string; type: string }> = [];
     const reports: EnhancementReports = {};
+    let needsPublicCdnUrl = false;
 
     // ============ 0. 应用增强器链（v1.2.0 新增） ============
     if (!options.skipEnhancements) {
@@ -433,10 +451,25 @@ export class CodeGenerator {
       // 响应式推断
       const responsiveInferrer = createResponsiveInferrer();
       reports.responsive = responsiveInferrer.infer(context);
+
+      // 交互逻辑推断（v1.4.0 新增）
+      const interactionInferrer = createInteractionInferrer();
+      reports.interaction = interactionInferrer.infer(context.node);
+
+      // 添加 useState 等 React hooks import
+      if (reports.interaction.requiredReactImports.length > 0) {
+        // 检查是否已有 useState import
+        const hooksStr = reports.interaction.requiredReactImports.join(', ');
+        const existingReactImport = Array.from(imports).find((i) => i.startsWith('import React'));
+        if (existingReactImport) {
+          imports.delete(existingReactImport);
+        }
+        imports.add(`import React, { ${hooksStr} } from "react";`);
+      }
     }
 
-    // ============ 递归生成 JSX 主体 ============
-    const jsxBody = this._generateProcessedNodeJsx(context.node, twMapper, {
+    // ============ 递归生成 JSX 主体（异步，支持 SVG 内联渲染） ============
+    const jsxBody = await this._generateProcessedNodeJsx(context.node, twMapper, {
       depth: 1,
       isRoot: true,
       imports,
@@ -445,13 +478,50 @@ export class CodeGenerator {
       usePublicCdn: options.usePublicCdn !== false,
       sceneName: options.sceneName || '',
       componentMap: context.componentsUsed,
+      fileKey: context.fileKey,
+      svgRenderer: this._svgRenderer,
     });
+
+    // 检测是否需要 publicCdnUrl import
+    if (jsxBody.includes('publicCdnUrl')) {
+      needsPublicCdnUrl = true;
+    }
 
     // ============ 组装完整 TSX 文件 ============
     const propsName = `${componentName}Props`;
     const lines: string[] = [];
-    lines.push('import React from "react";');
-    lines.push('import { cn } from "@/lib/utils";');
+
+    // imports 按规范排序分组：React (external) → 第三方 → @/ 内部路径 (internal)
+    const allImports = new Set(imports);
+    allImports.add('import { cn } from "@/lib/utils";');
+    if (needsPublicCdnUrl) {
+      allImports.add('import { publicCdnUrl } from "@/lib/asset-path";');
+    }
+
+    const reactImports: string[] = [];
+    const internalImports: string[] = [];
+    const otherImports: string[] = [];
+
+    for (const imp of allImports) {
+      if (imp.includes('from "react"')) {
+        reactImports.push(imp);
+      } else if (imp.includes('from "@/')) {
+        internalImports.push(imp);
+      } else {
+        otherImports.push(imp);
+      }
+    }
+
+    // 各组内按字母排序
+    reactImports.sort();
+    otherImports.sort();
+    internalImports.sort();
+
+    lines.push(...reactImports);
+    if (otherImports.length > 0) {
+      lines.push(...otherImports);
+    }
+    lines.push(...internalImports);
 
     // 添加报告注释
     const reportComments = this._generateReportComments(reports);
@@ -461,11 +531,25 @@ export class CodeGenerator {
     }
 
     lines.push('');
-    lines.push(`export interface ${propsName} extends React.HTMLAttributes<HTMLDivElement> {`);
-    lines.push('  children?: React.ReactNode;');
+    lines.push(`export interface ${propsName} extends React.HTMLAttributes<HTMLElement> {`);
     lines.push('}');
     lines.push('');
-    lines.push(`export const ${componentName}: React.FC<${propsName}> = ({ className, children, ...rest }) => {`);
+    lines.push(`export const ${componentName}: React.FC<${propsName}> = ({ className, ...rest }) => {`);
+
+    // 插入交互推断生成的 state 声明（v1.4.0 新增）
+    if (reports.interaction?.stateDeclarations.length) {
+      lines.push('  // ============ State (auto-inferred by interaction-inferrer) ============');
+      lines.push(...reports.interaction.stateDeclarations);
+      lines.push('');
+    }
+
+    // 插入交互推断生成的 handler 骨架（v1.4.0 新增）
+    if (reports.interaction?.handlerSkeletons.length) {
+      lines.push('  // ============ Event Handlers (TODO: implement business logic) ============');
+      lines.push(...reports.interaction.handlerSkeletons);
+      lines.push('');
+    }
+
     lines.push('  return (');
     lines.push(jsxBody);
     lines.push('  );');
@@ -484,6 +568,23 @@ export class CodeGenerator {
       lines.push('*/');
     }
 
+    // 去重 extensionsNeeded（按 type:originalValue 唯一键）
+    const extSeen = new Set<string>();
+    const dedupedExtensions = extensionsNeeded.filter((ext) => {
+      const key = `${ext.type}:${ext.originalValue}`;
+      if (extSeen.has(key)) return false;
+      extSeen.add(key);
+      return true;
+    });
+
+    // 去重 pendingAssets（按 nodeId）
+    const assetSeen = new Set<string>();
+    const dedupedAssets = pendingAssets.filter((a) => {
+      if (assetSeen.has(a.nodeId)) return false;
+      assetSeen.add(a.nodeId);
+      return true;
+    });
+
     const rawCode = lines.join('\n');
     const formattedCode = await formatCode(rawCode, { filePath: `${componentName}.tsx` });
 
@@ -491,8 +592,8 @@ export class CodeGenerator {
       componentName,
       code: formattedCode,
       imports,
-      extensionsNeeded,
-      pendingAssets,
+      extensionsNeeded: dedupedExtensions,
+      pendingAssets: dedupedAssets,
       reports,
     };
   }
@@ -507,12 +608,12 @@ export class CodeGenerator {
    */
   private _generateReportComments(reports: EnhancementReports): string[] {
     const comments: string[] = [];
-    const hasContent = reports.flexFixes || reports.a11y || reports.designSystem || reports.responsive;
+    const hasContent = reports.flexFixes || reports.a11y || reports.designSystem || reports.responsive || reports.interaction;
 
     if (!hasContent) return comments;
 
     comments.push('/**');
-    comments.push(' * 🤖 Generated by figma-dev-tools v1.2.0');
+    comments.push(' * 🤖 Generated by figma-dev-tools v1.4.0');
     comments.push(' *');
 
     if (reports.flexFixes && reports.flexFixes.totalFixedNodes > 0) {
@@ -544,9 +645,23 @@ export class CodeGenerator {
     }
 
     if (reports.responsive) {
+      comments.push(` * 📱 Target device: ${reports.responsive.inferredDevice} (${reports.responsive.designWidth}px)`);
+    }
+
+    if (reports.interaction && reports.interaction.interactionsCount > 0) {
+      const typeCounts = new Map<string, number>();
+      reports.interaction.interactions.forEach((i) => {
+        typeCounts.set(i.type, (typeCounts.get(i.type) || 0) + 1);
+      });
+      const typeSummary = Array.from(typeCounts.entries())
+        .map(([type, count]) => `${type}:${count}`)
+        .join(', ');
       comments.push(
-        ` * 📱 Target device: ${reports.responsive.inferredDevice} (${reports.responsive.designWidth}px)`,
+        ` * 🔄 Interactions inferred: ${reports.interaction.interactionsCount} (${typeSummary})`
       );
+      if (reports.interaction.interactions.some((i) => i.codeHint)) {
+        comments.push(' *    ⚠️  Check TODO comments for event handler wiring');
+      }
     }
 
     comments.push(' */');
@@ -557,28 +672,28 @@ export class CodeGenerator {
   // ============ 私有方法：JSX 生成核心 ============
 
   /**
-   * 递归生成 ProcessedNode 的 JSX（新版管道核心）
+   * 递归生成 ProcessedNode 的 JSX（新版管道核心，v1.4.0 改为异步支持 SVG 内联渲染）
    *
-   * 处理流程（按顺序，v1.2.0 更新）：
+   * 处理流程（按顺序，v1.4.0 更新）：
    * 1. 不可见节点 → 返回空字符串
    * 2. layout-only 节点 → 扁平化，直接渲染子节点
    * 3. reusable-component → TODO 注释占位
    * 4. TailwindMapper 映射样式 + 合并 Flex 修复类名
    * 5. 语义标签选择（_selectSemanticTag + a11y 增强覆盖）
-   * 6. 特殊节点处理（img、text、button、icon）
+   * 6. 特殊节点处理（img、svg-icon、text、button、icon）
    * 7. ARIA 属性添加
-   * 8. 递归生成子节点
+   * 8. 递归生成子节点（异步等待）
    *
    * @param node - 当前精简节点
    * @param twMapper - Tailwind 映射器实例
    * @param ctx - 生成上下文（depth、imports、extensions 等）
-   * @returns JSX 代码字符串
+   * @returns JSX 代码字符串（Promise）
    */
-  private _generateProcessedNodeJsx(
+  private async _generateProcessedNodeJsx(
     node: ProcessedNode,
     twMapper: ReturnType<typeof createTailwindMapper>,
     ctx: ProcessedNodeContext,
-  ): string {
+  ): Promise<string> {
     const indent = '  '.repeat(ctx.depth + 1);
     const nextCtx: ProcessedNodeContext = { ...ctx, depth: ctx.depth + 1, isRoot: false };
 
@@ -590,10 +705,10 @@ export class CodeGenerator {
     // 在 HTML 中不需要额外的 div 嵌套，将 flex 布局传递给子节点即可
     if (node.role === 'layout-only') {
       if (!node.children || node.children.length === 0) return '';
-      return node.children
-        .map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx))
-        .filter(Boolean)
-        .join('\n');
+      const childResults = await Promise.all(
+        node.children.map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx)),
+      );
+      return childResults.filter(Boolean).join('\n');
     }
 
     // ============ 3. 复用组件 → TODO 注释占位 ============
@@ -604,7 +719,18 @@ export class CodeGenerator {
       return `${indent}{/* TODO: 复用组件 <${compName} /> — 检查 @/components/web-official 或 componentMap */}`;
     }
 
-    // ============ 4. Tailwind 样式映射 ============
+    // ============ 4. SVG 矢量/图标节点 → 尝试内联 SVG 渲染（v1.4.0 新增） ============
+    // 检测是否为矢量图形节点（VECTOR/BOOLEAN_OPERATION/STAR/LINE 等，或标记为 icon 角色的椭圆/矩形）
+    if (isVectorNode(node)) {
+      const svgResult = await this._tryRenderInlineSvg(node, ctx);
+      if (svgResult) {
+        // SVG 内联成功，直接返回 SVG JSX 代码（不再包裹 span）
+        return `${indent}${svgResult.reactCode}`;
+      }
+      // SVG 渲染失败时，回退到普通 span 占位
+    }
+
+    // ============ 5. Tailwind 样式映射 ============
     const tw = twMapper.mapNode(node);
     ctx.extensions.push(...tw.extensionsNeeded);
 
@@ -614,20 +740,28 @@ export class CodeGenerator {
       finalClassName = cn(finalClassName, ...(node._flexFixes as string[]));
     }
 
-    // ============ 5. 语义标签选择（优先使用 a11y-enhancer 推荐的标签） ============
+    // ============ 6. 语义标签选择（优先使用 a11y-enhancer 推荐的标签） ============
     let tag = this._selectSemanticTag(node);
     const a11yEnhancements = node._a11y as
-      | { semanticTag?: string; isDecorative?: boolean; ariaLabel?: string; ariaHidden?: boolean; role?: string; isButton?: boolean; altText?: string }
+      | {
+          semanticTag?: string;
+          isDecorative?: boolean;
+          ariaLabel?: string;
+          ariaHidden?: boolean;
+          role?: string;
+          isButton?: boolean;
+          altText?: string;
+        }
       | undefined;
 
     if (a11yEnhancements?.semanticTag) {
       tag = a11yEnhancements.semanticTag;
     }
 
-    // ============ 6. 判断是否为自闭合标签 ============
+    // ============ 7. 判断是否为自闭合标签 ============
     const selfClosing = ['img', 'input', 'br', 'hr'].includes(tag);
 
-    // ============ 7. 构建 props ============
+    // ============ 8. 构建 props ============
     const props: string[] = [];
 
     // className：根节点合并外部传入的 className，其他节点直接使用
@@ -637,9 +771,9 @@ export class CodeGenerator {
       props.push(`className="${finalClassName}"`);
     }
 
-    // data 属性用于调试溯源
-    props.push(`data-figma-id="${node.figmaId}"`);
-    props.push(`data-figma-name="${node.name.replace(/"/g, '&quot;')}"`);
+    // data 属性用于调试溯源（XSS 防护：清理并转义）
+    props.push(`data-figma-id="${escapeAttribute(node.figmaId || '')}"`);
+    props.push(`data-figma-name="${escapeAttribute(sanitizeText(node.name || ''))}"`);
 
     // 内联样式兜底（复杂渐变等无法用 Tailwind 表达时使用）
     if (tw.inlineStyle) {
@@ -649,20 +783,20 @@ export class CodeGenerator {
       props.push(`style={{ ${styleEntries} }}`);
     }
 
-    // ============ 8. ARIA 属性和无障碍增强（v1.2.0 新增） ============
+    // ============ 9. ARIA 属性和无障碍增强（v1.2.0 新增） ============
     if (a11yEnhancements) {
       // aria-hidden
       if (a11yEnhancements.ariaHidden) {
         props.push('aria-hidden="true"');
       }
-      // aria-label
+      // aria-label（XSS 防护：使用 escapeAttribute 转义）
       if (a11yEnhancements.ariaLabel) {
-        const label = a11yEnhancements.ariaLabel.replace(/"/g, '&quot;');
-        props.push(`aria-label="${label}"`);
+        const safeLabel = escapeAttribute(sanitizeText(a11yEnhancements.ariaLabel));
+        props.push(`aria-label="${safeLabel}"`);
       }
       // role
       if (a11yEnhancements.role) {
-        props.push(`role="${a11yEnhancements.role}"`);
+        props.push(`role="${escapeAttribute(a11yEnhancements.role)}"`);
       }
     }
 
@@ -676,7 +810,7 @@ export class CodeGenerator {
       props.push('{...rest}');
     }
 
-    // ============ 9. 图片节点特殊处理（增强版） ============
+    // ============ 10. 图片节点特殊处理（增强版 v1.4.0） ============
     if (tag === 'img') {
       // object-cover 类（如果 flex-fixer 没加的话）
       const hasObjectFit = finalClassName.includes('object-');
@@ -690,53 +824,90 @@ export class CodeGenerator {
         }
       }
 
-      // src 优先使用已下载的本地路径，其次是 CDN URL，最后标记为待下载
-      if (node.asset?.cdnUrl) {
-        props.push(`src={publicCdnUrl('${node.asset.cdnUrl}')}`);
-      } else if (node.asset?.localPath) {
-        props.push(`src={publicCdnUrl('${node.asset.localPath}')}`);
-      } else {
-        ctx.pendingAssets.push({ nodeId: node.figmaId, name: node.name, type: node.asset?.type || 'image' });
-        props.push('src=""');
+      // src 优先使用已下载的本地路径，其次是 CDN URL，最后用透明像素占位（避免 src="" 导致请求当前页面）
+      const hasSrc = props.some((p) => p.startsWith('src='));
+      if (!hasSrc) {
+        if (node.asset?.cdnUrl) {
+          props.push(`src={publicCdnUrl('${node.asset.cdnUrl}')}`);
+        } else if (node.asset?.localPath) {
+          props.push(`src={publicCdnUrl('${node.asset.localPath}')}`);
+        } else {
+          ctx.pendingAssets.push({ nodeId: node.figmaId, name: node.name, type: node.asset?.type || 'image' });
+          // 1x1 透明 GIF data URI，避免 src="" 产生额外请求
+          props.push('src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"');
+        }
       }
 
-      // alt 文本（优先使用 a11y-enhancer 生成的）
-      let altText = node.name;
+      // alt 文本（优先使用 a11y-enhancer 生成的，XSS 防护）
+      let altText = node.name || '';
+      let isDecorative = false;
       if (a11yEnhancements) {
         if (a11yEnhancements.isDecorative) {
           altText = '';
+          isDecorative = true;
         } else if (a11yEnhancements.altText !== undefined) {
           altText = a11yEnhancements.altText;
         }
       }
-      props.push(`alt="${altText.replace(/"/g, '&quot;')}"`);
+      // 清理并转义 alt 文本，防止 XSS
+      const safeAltText = altText ? escapeAttribute(sanitizeText(altText)) : '';
+      props.push(`alt="${safeAltText}"`);
+
+      // 图片优化属性（v1.4.0 新增）
+      // 装饰性图片使用 aria-hidden
+      if (isDecorative) {
+        props.push('aria-hidden="true"');
+      }
+
+      // 懒加载：非首屏图片默认懒加载
+      // 根节点或尺寸较大的图片使用 eager，其他使用 lazy
+      const nodeWidth = node.size?.width ?? 0;
+      const nodeHeight = node.size?.height ?? 0;
+      const isLikelyHero = ctx.isRoot || nodeWidth >= 800;
+      props.push(`loading="${isLikelyHero ? 'eager' : 'lazy'}"`);
+
+      // 异步解码，不阻塞主线程
+      props.push('decoding="async"');
+
+      // 图片尺寸提示：防止 CLS（Cumulative Layout Shift）
+      if (nodeWidth > 0 && nodeHeight > 0) {
+        props.push(`width={${Math.round(nodeWidth)}}`);
+        props.push(`height={${Math.round(nodeHeight)}}`);
+      }
+
+      // 资源优先级：Hero 图片高优先级
+      if (isLikelyHero) {
+        props.push('fetchPriority="high"');
+      }
 
       return `${indent}<${tag} ${props.join(' ')} />`;
     }
 
-    // ============ 10. 输入框特殊处理 ============
+    // ============ 11. 输入框特殊处理 ============
     if (tag === 'input') {
-      const inputType = a11yEnhancements && 'inputType' in a11yEnhancements
-        ? (a11yEnhancements as { inputType?: string }).inputType
-        : 'text';
+      const inputType =
+        a11yEnhancements && 'inputType' in a11yEnhancements
+          ? (a11yEnhancements as { inputType?: string }).inputType
+          : 'text';
       props.unshift(`type="${inputType || 'text'}"`);
       return `${indent}<${tag} ${props.join(' ')} />`;
     }
 
-    // ============ 11. 文本节点 → 直接渲染内容 ============
+    // ============ 12. 文本节点 → 直接渲染内容（XSS 防护：清理文本） ============
     if (node.role === 'text' || node.originalType === 'TEXT') {
-      const text = node.textContent || '';
+      // 清理文本内容，移除 HTML 标签防止注入
+      const text = node.textContent ? sanitizeText(node.textContent) : '';
       return `${indent}<${tag} ${props.join(' ')}>${text}</${tag}>`;
     }
 
-    // ============ 12. 按钮节点 → 添加 type="button" 防止表单默认提交 ============
+    // ============ 13. 按钮节点 → 添加 type="button" 防止表单默认提交 ============
     if (tag === 'button' || a11yEnhancements?.isButton) {
       if (!props.some((p) => p.startsWith('type='))) {
         props.unshift('type="button"');
       }
     }
 
-    // ============ 13. 链接节点 → 添加安全属性 ============
+    // ============ 14. 链接节点 → 添加安全属性 ============
     if (tag === 'a') {
       // 如果没有 href，使用 # 占位并添加注释
       if (!props.some((p) => p.startsWith('href='))) {
@@ -744,16 +915,17 @@ export class CodeGenerator {
       }
     }
 
-    // ============ 14. 递归生成子节点 ============
+    // ============ 15. 递归生成子节点（异步等待） ============
     const childrenJsx =
       node.children && node.children.length > 0
-        ? node.children
-            .map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx))
+        ? (await Promise.all(
+            node.children.map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx)),
+          ))
             .filter(Boolean)
             .join('\n')
         : '';
 
-    // ============ 15. 组装最终 JSX ============
+    // ============ 16. 组装最终 JSX ============
     if (selfClosing) {
       return `${indent}<${tag} ${props.join(' ')} />`;
     }
@@ -766,11 +938,84 @@ export class CodeGenerator {
   }
 
   /**
-   * 根据语义角色选择 HTML 标签（基础版，a11y-enhancer 可能覆盖）
+   * 尝试渲染节点为内联 SVG（v1.4.0 新增）
+   *
+   * 对矢量图形节点调用 SvgInlineRenderer，下载并优化 SVG 后返回 React JSX 代码。
+   * 如果 SVG 导出失败或节点不是纯矢量图形，返回 null 回退到普通元素渲染。
+   *
+   * @param node - 要渲染的节点
+   * @param ctx - 生成上下文
+   * @returns 内联 SVG 结果，失败返回 null
+   */
+  private async _tryRenderInlineSvg(
+    node: ProcessedNode,
+    ctx: ProcessedNodeContext,
+  ): Promise<InlineSvgResult | null> {
+    try {
+      // 检查节点是否包含非矢量子节点（如文本），如果有则不内联
+      if (this._hasNonVectorDescendants(node)) {
+        return null;
+      }
+
+      const result = await ctx.svgRenderer.renderNode(ctx.fileKey, node.figmaId, node.name, {
+        inline: true,
+        scale: 1,
+        optimize: true,
+        currentColor: node.role === 'icon', // 图标节点启用 currentColor
+      });
+
+      return result;
+    } catch {
+      // 任何错误都静默回退
+      return null;
+    }
+  }
+
+  /**
+   * 检查节点是否包含非矢量子节点（文本、图片等）
+   *
+   * 如果图标容器内包含文本或其他非矢量元素，则不应该内联为纯 SVG，
+   * 而是保留容器结构，仅子矢量节点内联。
+   *
+   * @param node - 要检查的节点
+   * @returns 包含非矢量子节点返回 true
+   */
+  private _hasNonVectorDescendants(node: ProcessedNode): boolean {
+    if (!node.children || node.children.length === 0) return false;
+
+    for (const child of node.children) {
+      // 文本节点
+      if (child.role === 'text' || child.originalType === 'TEXT') return true;
+      // 图片节点
+      if (child.role === 'image' || child.originalType === 'RECTANGLE') {
+        // 检查是否有图片填充
+        const hasImageFill = child.fills?.some((f) => f.type === 'image');
+        if (hasImageFill) return true;
+      }
+      // 递归检查
+      if (this._hasNonVectorDescendants(child)) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 根据语义角色和节点名称选择 HTML 标签（增强版，v1.4.0 优化）
    *
    * **选择规则（按优先级从高到低）：**
    *
-   * 1. **自闭合元素**：
+   * 1. **名称关键词匹配**（v1.4.0 新增）：
+   *    - header/top/nav/menu/navbar → `<header>` 或 `<nav>`
+   *    - footer/bottom → `<footer>`
+   *    - main/content → `<main>`
+   *    - sidebar/aside → `<aside>`
+   *    - article/post → `<article>`
+   *    - form → `<form>`
+   *    - label → `<label>`
+   *    - textarea → `<textarea>`
+   *    - select/dropdown → `<select>`
+   *
+   * 2. **自闭合元素**：
    *    - `image` → `<img>`（图片，无闭合标签）
    *    - `input` → `<input>`（输入框，无闭合标签）
    *    - `divider` → `<hr>`（分割线，无闭合标签）
@@ -805,6 +1050,54 @@ export class CodeGenerator {
    * @returns HTML 标签名（小写）
    */
   private _selectSemanticTag(node: ProcessedNode): string {
+    // ============ 0. 基于节点名称的语义标签推断（v1.4.0 新增） ============
+    const nodeNameLower = (node.name || '').toLowerCase();
+
+    // 页眉/头部（优先于 nav 判断，header 内常包含 nav）
+    if (/^(header|top-bar|topbar|page-header)/i.test(nodeNameLower)) {
+      return 'header';
+    }
+    // 导航栏/菜单（nav/menu 开头或包含独立词 navigation）
+    if (/^(nav|navbar|navigation|menu)/i.test(nodeNameLower)) {
+      return 'nav';
+    }
+    // 页脚
+    if (/^(footer|bottom-bar|copyright)/i.test(nodeNameLower)) {
+      return 'footer';
+    }
+    // 主要内容区
+    if (/^(main|main-content)/i.test(nodeNameLower)) {
+      return 'main';
+    }
+    // 侧边栏
+    if (/^(sidebar|aside|side-panel)/i.test(nodeNameLower)) {
+      return 'aside';
+    }
+    // 文章/独立内容块
+    if (/^(article|post|blog-post)/i.test(nodeNameLower)) {
+      return 'article';
+    }
+    // 表单
+    if (/^(form|login-form|signup-form|contact-form)/i.test(nodeNameLower)) {
+      return 'form';
+    }
+    // 标签
+    if (/^(label|field-label)/i.test(nodeNameLower) && node.role === 'text') {
+      return 'label';
+    }
+    // 多行文本输入
+    if (/^(textarea|multi-line|text-area)/i.test(nodeNameLower)) {
+      return 'textarea';
+    }
+    // 下拉选择
+    if (/^(select|dropdown|picker|combobox)/i.test(nodeNameLower)) {
+      return 'select';
+    }
+    // 有序列表
+    if (/^(ol|ordered-list)/i.test(nodeNameLower)) {
+      return 'ol';
+    }
+
     switch (node.role) {
       // ============ 文本节点：根据字号推断标题级别 ============
       case 'text': {
@@ -884,9 +1177,10 @@ export class CodeGenerator {
     // 根据节点类型选择 HTML 标签
     const tag = this._getHtmlTagLegacy(node);
 
-    // 处理文本节点
+    // 处理文本节点（XSS 防护）
     if (node.type === 'TEXT' && node.characters) {
-      return `${indent}<${tag}${props}>${node.characters}</${tag}>`;
+      const safeText = sanitizeText(node.characters);
+      return `${indent}<${tag}${props}>${safeText}</${tag}>`;
     }
 
     // 处理自闭合标签
@@ -932,9 +1226,9 @@ export class CodeGenerator {
       }
     }
 
-    // 添加 data 属性用于标识
-    props.push(`data-figma-id="${node.id}"`);
-    props.push(`data-figma-name="${node.name.replace(/"/g, '&quot;')}"`);
+    // 添加 data 属性用于标识（XSS 防护）
+    props.push(`data-figma-id="${escapeAttribute(node.id || '')}"`);
+    props.push(`data-figma-name="${escapeAttribute(sanitizeText(node.name || ''))}"`);
 
     // 根节点添加 props 展开
     if (context.isRoot && context.options.includeProps) {
@@ -1282,13 +1576,8 @@ export class CodeGenerator {
    * - 每个词首字母大写
    */
   private _generateComponentName(name: string): string {
-    return (
-      name
-        .replace(/[^a-zA-Z0-9\s]/g, '')
-        .split(/[\s_-]+/)
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join('') || 'Component'
-    );
+    // 使用安全的标识符清理函数（v1.4.0 XSS 防护增强）
+    return sanitizeIdentifier(name);
   }
 
   /**

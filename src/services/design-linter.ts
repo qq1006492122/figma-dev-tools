@@ -18,16 +18,11 @@
  */
 
 import type { ProcessedNode } from '../types/nodes.js';
+import { createHierarchyFixer, type HierarchyIssue } from './hierarchy-fixer.js';
 
 export type LintSeverity = 'error' | 'warning' | 'info';
 
-export type LintCategory =
-  | 'layout'
-  | 'naming'
-  | 'spacing'
-  | 'component'
-  | 'accessibility'
-  | 'structure';
+export type LintCategory = 'layout' | 'naming' | 'spacing' | 'component' | 'accessibility' | 'structure';
 
 export interface LintIssue {
   severity: LintSeverity;
@@ -41,6 +36,14 @@ export interface LintIssue {
   autoFixable?: boolean;
 }
 
+export interface DimensionScore {
+  name: string;
+  score: number;
+  weight: number;
+  maxScore: number;
+  details: string;
+}
+
 export interface LintResult {
   score: number;
   totalNodes: number;
@@ -49,13 +52,16 @@ export interface LintResult {
   warningCount: number;
   infoCount: number;
   categoryBreakdown: Record<string, number>;
+  dimensionScores: DimensionScore[];
   summary: string;
   markdownReport: string;
+  /** v1.4.0 新增：层级结构问题 */
+  hierarchyIssues?: HierarchyIssue[];
 }
 
 const SPACING_BASE = 4;
 const MIN_INTERACTIVE_SIZE = 44;
-const MAX_NESTING_DEPTH = 8;
+const MAX_NESTING_DEPTH = 15; // v1.4.0: 从 8 提高到 15，与 CLI 默认深度一致
 const STANDARD_RADII = [0, 2, 4, 6, 8, 12, 16, 20, 24, 32, 48, 64, 9999];
 
 const MEANINGLESS_NAME_PATTERNS = [
@@ -118,6 +124,17 @@ interface LintContext {
   nodeNames: Map<string, number>;
   iconSizes: Map<string, { width: number; height: number; count: number }>;
   componentCount: number;
+  // 统计数据用于计算各维度得分率
+  layoutContainers: number;
+  layoutWithAutoLayout: number;
+  nameableNodes: number;
+  goodNamedNodes: number;
+  spacingChecks: number;
+  spacingGood: number;
+  interactiveNodes: number;
+  interactiveGoodSize: number;
+  deepNestingNodes: number;
+  iconSizeKinds: number;
 }
 
 export class DesignLinter {
@@ -130,6 +147,16 @@ export class DesignLinter {
       nodeNames: new Map(),
       iconSizes: new Map(),
       componentCount: 0,
+      layoutContainers: 0,
+      layoutWithAutoLayout: 0,
+      nameableNodes: 0,
+      goodNamedNodes: 0,
+      spacingChecks: 0,
+      spacingGood: 0,
+      interactiveNodes: 0,
+      interactiveGoodSize: 0,
+      deepNestingNodes: 0,
+      iconSizeKinds: 0,
     };
   }
 
@@ -140,16 +167,53 @@ export class DesignLinter {
       nodeNames: new Map(),
       iconSizes: new Map(),
       componentCount: 0,
+      layoutContainers: 0,
+      layoutWithAutoLayout: 0,
+      nameableNodes: 0,
+      goodNamedNodes: 0,
+      spacingChecks: 0,
+      spacingGood: 0,
+      interactiveNodes: 0,
+      interactiveGoodSize: 0,
+      deepNestingNodes: 0,
+      iconSizeKinds: 0,
     };
 
     const nodesArray = Array.isArray(nodes) ? nodes : [nodes];
+
+    // v1.4.0 新增：层级结构问题检测（在处理前先检测）
+    const hierarchyFixer = createHierarchyFixer({
+      autoFix: false,
+      maxDepth: MAX_NESTING_DEPTH,
+    });
+    const allHierarchyIssues: HierarchyIssue[] = [];
+    for (const node of nodesArray) {
+      const issues = hierarchyFixer.detectProcessedNodeIssues(node);
+      allHierarchyIssues.push(...issues);
+    }
+
+    // 将层级问题转换为 LintIssue 并加入检测
+    for (const hIssue of allHierarchyIssues) {
+      this.addIssue({
+        severity: hIssue.severity,
+        category: 'structure',
+        nodeId: hIssue.nodeId,
+        nodeName: hIssue.nodeName,
+        message: hIssue.message,
+        suggestion: hIssue.suggestion,
+        autoFixable: hIssue.autoFixable,
+      });
+    }
+
     for (const node of nodesArray) {
       this.traverseNode(node, 0, null);
     }
 
     this.checkIconConsistency();
 
-    return this.buildResult();
+    const result = this.buildResult();
+    result.hierarchyIssues = allHierarchyIssues;
+    return result;
   }
 
   private traverseNode(node: ProcessedNode, depth: number, parent: ProcessedNode | null): void {
@@ -176,9 +240,24 @@ export class DesignLinter {
     this.ctx.issues.push(issue);
   }
 
+  private recordSpacingCheck(isGood: boolean): void {
+    this.ctx.spacingChecks++;
+    if (isGood) {
+      this.ctx.spacingGood++;
+    }
+  }
+
   private checkNodeNaming(node: ProcessedNode): void {
     const name = node.name?.trim();
     if (!name) return;
+
+    // 统计可命名节点（排除根节点或自动生成的名称）
+    if (node.originalType !== 'DOCUMENT' && node.originalType !== 'CANVAS') {
+      this.ctx.nameableNodes++;
+      if (!isMeaninglessName(name)) {
+        this.ctx.goodNamedNodes++;
+      }
+    }
 
     if (isMeaninglessName(name)) {
       this.addIssue({
@@ -192,7 +271,7 @@ export class DesignLinter {
         fixSteps: [
           '1. 在 Figma 图层面板中双击该图层名称',
           '2. 输入语义化名称（如 Header、PrimaryButton、UserAvatar）',
-          '3. 使用 PascalCase 或 kebab-case 风格保持一致性'
+          '3. 使用 PascalCase 或 kebab-case 风格保持一致性',
         ],
         autoFixable: false,
       });
@@ -204,26 +283,35 @@ export class DesignLinter {
 
   private checkLayout(node: ProcessedNode, _parent: ProcessedNode | null, _depth: number): void {
     if (node.originalType === 'FRAME' || node.originalType === 'COMPONENT' || node.originalType === 'INSTANCE') {
-      if (!node.layout || node.layout.mode === 'NONE') {
-        if (node.children && node.children.length > 0) {
-          this.addIssue({
-            severity: 'warning',
-            category: 'layout',
-            nodeId: node.figmaId || node.id,
-            nodeName: node.name,
-            message: `框架"${node.name}"使用了绝对定位而非 Auto Layout`,
-            suggestion: '建议使用 Auto Layout（自动布局），这是生成高质量 Flex 代码的关键',
-            impact: '绝对定位元素会导致生成代码使用 position: absolute，难以实现响应式适配，子元素位置无法自动调整，在不同屏幕尺寸下容易错位。',
-            fixSteps: [
-              '1. 选中该 Frame 图层',
-              '2. 在右侧属性面板点击 "Auto Layout"（或按 Shift+A）',
-              '3. 根据布局方向选择 Horizontal（水平）或 Vertical（垂直）',
-              '4. 使用 gap 属性设置子元素间距',
-              '5. 设置 padding 控制内边距'
-            ],
-            autoFixable: false,
-          });
+      const hasChildren = node.children && node.children.length > 0;
+      const hasAutoLayout = node.layout && node.layout.mode !== 'NONE';
+
+      if (hasChildren) {
+        this.ctx.layoutContainers++;
+        if (hasAutoLayout) {
+          this.ctx.layoutWithAutoLayout++;
         }
+      }
+
+      if (!hasAutoLayout && hasChildren) {
+        this.addIssue({
+          severity: 'warning',
+          category: 'layout',
+          nodeId: node.figmaId || node.id,
+          nodeName: node.name,
+          message: `框架"${node.name}"使用了绝对定位而非 Auto Layout`,
+          suggestion: '建议使用 Auto Layout（自动布局），这是生成高质量 Flex 代码的关键',
+          impact:
+            '绝对定位元素会导致生成代码使用 position: absolute，难以实现响应式适配，子元素位置无法自动调整，在不同屏幕尺寸下容易错位。',
+          fixSteps: [
+            '1. 选中该 Frame 图层',
+            '2. 在右侧属性面板点击 "Auto Layout"（或按 Shift+A）',
+            '3. 根据布局方向选择 Horizontal（水平）或 Vertical（垂直）',
+            '4. 使用 gap 属性设置子元素间距',
+            '5. 设置 padding 控制内边距',
+          ],
+          autoFixable: false,
+        });
       }
     }
   }
@@ -249,23 +337,28 @@ export class DesignLinter {
     }
 
     for (const { name, value } of spacingValues) {
-      if (value > 0 && !isAlignedToGrid(value)) {
-        const nearest = nearestGridValue(value);
-        this.addIssue({
-          severity: 'info',
-          category: 'spacing',
-          nodeId: node.figmaId || node.id,
-          nodeName: node.name,
-          message: `节点"${node.name}"的${name}为 ${value}px，不符合 4px 网格系统`,
-          suggestion: `建议调整为 ${nearest}px（最近的 4px 网格值）`,
-          impact: '非 4px 倍数的间距无法匹配 Tailwind 默认 spacing scale，会生成任意值的 inline style 或自定义 padding/margin，降低代码一致性。',
-          fixSteps: [
-            `1. 选中该图层，在右侧 Auto Layout 面板找到${name}`,
-            `2. 将数值修改为 ${nearest}px`,
-            '3. 确保所有间距都使用 4/8/12/16/20/24/32px 等规范值'
-          ],
-          autoFixable: true,
-        });
+      if (value > 0) {
+        const isGood = isAlignedToGrid(value);
+        this.recordSpacingCheck(isGood);
+        if (!isGood) {
+          const nearest = nearestGridValue(value);
+          this.addIssue({
+            severity: 'info',
+            category: 'spacing',
+            nodeId: node.figmaId || node.id,
+            nodeName: node.name,
+            message: `节点"${node.name}"的${name}为 ${value}px，不符合 4px 网格系统`,
+            suggestion: `建议调整为 ${nearest}px（最近的 4px 网格值）`,
+            impact:
+              '非 4px 倍数的间距无法匹配 Tailwind 默认 spacing scale，会生成任意值的 inline style 或自定义 padding/margin，降低代码一致性。',
+            fixSteps: [
+              `1. 选中该图层，在右侧 Auto Layout 面板找到${name}`,
+              `2. 将数值修改为 ${nearest}px`,
+              '3. 确保所有间距都使用 4/8/12/16/20/24/32px 等规范值',
+            ],
+            autoFixable: true,
+          });
+        }
       }
     }
   }
@@ -275,42 +368,42 @@ export class DesignLinter {
 
     const { width, height } = node.size;
 
-    if (width > 0 && !isAlignedToGrid(width)) {
-      const nearest = nearestGridValue(width);
-      this.addIssue({
-        severity: 'info',
-        category: 'spacing',
-        nodeId: node.figmaId || node.id,
-        nodeName: node.name,
-        message: `节点"${node.name}"的宽度为 ${Math.round(width)}px，不符合 4px 网格系统`,
-        suggestion: `建议调整为 ${nearest}px（最近的 4px 网格值）`,
-        impact: `不规则宽度无法匹配 Tailwind 的 w-* 尺寸类，会生成任意 w-[${Math.round(width)}px] 值，影响设计系统一致性。`,
-        fixSteps: [
-          '1. 选中该图层',
-          '2. 在右侧面板找到 W（宽度）属性',
-          `3. 将数值修改为 ${nearest}px`
-        ],
-        autoFixable: true,
-      });
+    if (width > 0) {
+      const isGood = isAlignedToGrid(width);
+      this.recordSpacingCheck(isGood);
+      if (!isGood) {
+        const nearest = nearestGridValue(width);
+        this.addIssue({
+          severity: 'info',
+          category: 'spacing',
+          nodeId: node.figmaId || node.id,
+          nodeName: node.name,
+          message: `节点"${node.name}"的宽度为 ${Math.round(width)}px，不符合 4px 网格系统`,
+          suggestion: `建议调整为 ${nearest}px（最近的 4px 网格值）`,
+          impact: `不规则宽度无法匹配 Tailwind 的 w-* 尺寸类，会生成任意 w-[${Math.round(width)}px] 值，影响设计系统一致性。`,
+          fixSteps: ['1. 选中该图层', '2. 在右侧面板找到 W（宽度）属性', `3. 将数值修改为 ${nearest}px`],
+          autoFixable: true,
+        });
+      }
     }
 
-    if (height > 0 && !isAlignedToGrid(height)) {
-      const nearest = nearestGridValue(height);
-      this.addIssue({
-        severity: 'info',
-        category: 'spacing',
-        nodeId: node.figmaId || node.id,
-        nodeName: node.name,
-        message: `节点"${node.name}"的高度为 ${Math.round(height)}px，不符合 4px 网格系统`,
-        suggestion: `建议调整为 ${nearest}px（最近的 4px 网格值）`,
-        impact: `不规则高度无法匹配 Tailwind 的 h-* 尺寸类，会生成任意 h-[${Math.round(height)}px] 值，影响设计系统一致性。`,
-        fixSteps: [
-          '1. 选中该图层',
-          '2. 在右侧面板找到 H（高度）属性',
-          `3. 将数值修改为 ${nearest}px`
-        ],
-        autoFixable: true,
-      });
+    if (height > 0) {
+      const isGood = isAlignedToGrid(height);
+      this.recordSpacingCheck(isGood);
+      if (!isGood) {
+        const nearest = nearestGridValue(height);
+        this.addIssue({
+          severity: 'info',
+          category: 'spacing',
+          nodeId: node.figmaId || node.id,
+          nodeName: node.name,
+          message: `节点"${node.name}"的高度为 ${Math.round(height)}px，不符合 4px 网格系统`,
+          suggestion: `建议调整为 ${nearest}px（最近的 4px 网格值）`,
+          impact: `不规则高度无法匹配 Tailwind 的 h-* 尺寸类，会生成任意 h-[${Math.round(height)}px] 值，影响设计系统一致性。`,
+          fixSteps: ['1. 选中该图层', '2. 在右侧面板找到 H（高度）属性', `3. 将数值修改为 ${nearest}px`],
+          autoFixable: true,
+        });
+      }
     }
 
     if (node.absolutePosition) {
@@ -322,24 +415,28 @@ export class DesignLinter {
         { name: 'bottom', value: bottom },
       ];
       for (const { name, value } of positions) {
-        if (value !== undefined && !isAlignedToGrid(value)) {
-          const nearest = nearestGridValue(value);
-          this.addIssue({
-            severity: 'info',
-            category: 'spacing',
-            nodeId: node.figmaId || node.id,
-            nodeName: node.name,
-            message: `节点"${node.name}"的绝对定位 ${name} 为 ${value}px，不符合 4px 网格系统`,
-            suggestion: `建议调整为 ${nearest}px`,
-            impact: '绝对定位坐标的不规则值会导致生成的代码使用非标准 left/top 值，增加维护难度。',
-            fixSteps: [
-              `1. 选中该绝对定位图层`,
-              `2. 在右侧面板找到 ${name} 属性`,
-              `3. 将数值修改为 ${nearest}px`,
-              '4. 优先考虑使用 Auto Layout 替代绝对定位'
-            ],
-            autoFixable: true,
-          });
+        if (value !== undefined) {
+          const isGood = isAlignedToGrid(value);
+          this.recordSpacingCheck(isGood);
+          if (!isGood) {
+            const nearest = nearestGridValue(value);
+            this.addIssue({
+              severity: 'info',
+              category: 'spacing',
+              nodeId: node.figmaId || node.id,
+              nodeName: node.name,
+              message: `节点"${node.name}"的绝对定位 ${name} 为 ${value}px，不符合 4px 网格系统`,
+              suggestion: `建议调整为 ${nearest}px`,
+              impact: '绝对定位坐标的不规则值会导致生成的代码使用非标准 left/top 值，增加维护难度。',
+              fixSteps: [
+                `1. 选中该绝对定位图层`,
+                `2. 在右侧面板找到 ${name} 属性`,
+                `3. 将数值修改为 ${nearest}px`,
+                '4. 优先考虑使用 Auto Layout 替代绝对定位',
+              ],
+              autoFixable: true,
+            });
+          }
         }
       }
     }
@@ -356,25 +453,29 @@ export class DesignLinter {
     ];
 
     for (const { name, value } of radii) {
-      if (value > 0 && !isStandardRadius(value)) {
-        const nearest = nearestStandardRadius(value);
-        const nearestText = nearest >= 9999 ? '9999px (全圆角)' : `${nearest}px`;
-        this.addIssue({
-          severity: 'info',
-          category: 'spacing',
-          nodeId: node.figmaId || node.id,
-          nodeName: node.name,
-          message: `节点"${node.name}"的${name}圆角为 ${Math.round(value)}px，不是标准圆角值`,
-          suggestion: `建议使用标准圆角值：${nearestText}（2px/4px/6px/8px/12px/16px/20px/24px/32px/48px 或全圆角）`,
-          impact: `非标准圆角无法匹配 Tailwind 的 rounded-* 类名，会生成任意 rounded-[${Math.round(value)}px] 值，增加自定义 CSS 需求。`,
-          fixSteps: [
-            '1. 选中该图层',
-            '2. 在右侧面板找到 Corner radius 属性',
-            `3. 将${name}圆角修改为 ${nearestText}`,
-            '4. 如需统一圆角，点击"Independent corners"取消独立角设置'
-          ],
-          autoFixable: true,
-        });
+      if (value > 0) {
+        const isGood = isStandardRadius(value);
+        this.recordSpacingCheck(isGood);
+        if (!isGood) {
+          const nearest = nearestStandardRadius(value);
+          const nearestText = nearest >= 9999 ? '9999px (全圆角)' : `${nearest}px`;
+          this.addIssue({
+            severity: 'info',
+            category: 'spacing',
+            nodeId: node.figmaId || node.id,
+            nodeName: node.name,
+            message: `节点"${node.name}"的${name}圆角为 ${Math.round(value)}px，不是标准圆角值`,
+            suggestion: `建议使用标准圆角值：${nearestText}（2px/4px/6px/8px/12px/16px/20px/24px/32px/48px 或全圆角）`,
+            impact: `非标准圆角无法匹配 Tailwind 的 rounded-* 类名，会生成任意 rounded-[${Math.round(value)}px] 值，增加自定义 CSS 需求。`,
+            fixSteps: [
+              '1. 选中该图层',
+              '2. 在右侧面板找到 Corner radius 属性',
+              `3. 将${name}圆角修改为 ${nearestText}`,
+              '4. 如需统一圆角，点击"Independent corners"取消独立角设置',
+            ],
+            autoFixable: true,
+          });
+        }
       }
     }
   }
@@ -390,6 +491,8 @@ export class DesignLinter {
     if (!interactiveRoles.includes(node.role)) return;
 
     if (!node.size) return;
+
+    this.ctx.interactiveNodes++;
 
     const { width, height } = node.size;
     const minDimension = Math.min(width, height);
@@ -407,15 +510,18 @@ export class DesignLinter {
           '1. 选中该可交互元素（按钮/链接/输入框）',
           '2. 检查是否使用了 Auto Layout',
           `3. 增加 padding 或最小尺寸，确保宽高至少 ${MIN_INTERACTIVE_SIZE}px`,
-          '4. 图标按钮建议保持 44×44px 的点击热区'
+          '4. 图标按钮建议保持 44×44px 的点击热区',
         ],
         autoFixable: false,
       });
+    } else {
+      this.ctx.interactiveGoodSize++;
     }
   }
 
   private checkNestingDepth(node: ProcessedNode, depth: number): void {
     if (depth > MAX_NESTING_DEPTH) {
+      this.ctx.deepNestingNodes++;
       this.addIssue({
         severity: 'warning',
         category: 'structure',
@@ -429,7 +535,7 @@ export class DesignLinter {
           '2. 删除无意义的空 Frame 包裹层',
           '3. 将相关元素编组为 Component 复用',
           '4. 使用 Auto Layout 减少不必要的嵌套',
-          `5. 保持层级不超过 ${MAX_NESTING_DEPTH} 层`
+          `5. 保持层级不超过 ${MAX_NESTING_DEPTH} 层`,
         ],
         autoFixable: false,
       });
@@ -452,6 +558,8 @@ export class DesignLinter {
   }
 
   private checkIconConsistency(): void {
+    this.ctx.iconSizeKinds = this.ctx.iconSizes.size;
+
     if (this.ctx.iconSizes.size <= 1) return;
 
     const sizes = Array.from(this.ctx.iconSizes.entries())
@@ -470,43 +578,118 @@ export class DesignLinter {
         category: 'structure',
         message: `图标尺寸不统一，检测到多种尺寸：${sizeList}`,
         suggestion: `建议统一图标尺寸为 ${mostCommonSize.width}×${mostCommonSize.height}px（使用最多的尺寸）`,
-        impact: '图标尺寸不统一会导致生成代码时无法复用同一个图标组件类名，需要为不同尺寸图标编写不同样式，增加代码冗余。',
+        impact:
+          '图标尺寸不统一会导致生成代码时无法复用同一个图标组件类名，需要为不同尺寸图标编写不同样式，增加代码冗余。',
         fixSteps: [
           `1. 确定统一的图标尺寸标准（推荐 ${mostCommonSize.width}×${mostCommonSize.height}px）`,
           '2. 选中所有非标准尺寸的图标',
           '3. 使用 Scale 工具（K 键）等比缩放至标准尺寸',
-          '4. 建议使用标准尺寸：16×16px、20×20px、24×24px、32×32px'
+          '4. 建议使用标准尺寸：16×16px、20×20px、24×24px、32×32px',
         ],
         autoFixable: false,
       });
     }
   }
 
-  private calculateScore(): number {
-    let score = 100;
+  private calculateScore(): { score: number; dimensions: DimensionScore[] } {
+    const dimensions: DimensionScore[] = [];
 
-    const errorWeight = 8;
-    const warningWeight = 4;
-    const infoWeight = 1;
-
-    const errorCount = this.ctx.issues.filter((i) => i.severity === 'error').length;
-    const warningCount = this.ctx.issues.filter((i) => i.severity === 'warning').length;
-    const infoCount = this.ctx.issues.filter((i) => i.severity === 'info').length;
-
-    score -= errorCount * errorWeight;
-    score -= warningCount * warningWeight;
-    score -= infoCount * infoWeight;
-
-    if (this.ctx.componentCount === 0 && this.ctx.totalNodes > 20) {
-      score -= 15;
+    // 1. 布局得分 (30%) - Auto Layout 使用率
+    const layoutWeight = 30;
+    let layoutScore = layoutWeight;
+    let layoutDetail = '';
+    if (this.ctx.layoutContainers > 0) {
+      const layoutRatio = this.ctx.layoutWithAutoLayout / this.ctx.layoutContainers;
+      layoutScore = Math.round(layoutRatio * layoutWeight);
+      layoutDetail = `${this.ctx.layoutWithAutoLayout}/${this.ctx.layoutContainers} 个容器使用 Auto Layout (${Math.round(layoutRatio * 100)}%)`;
+    } else {
+      layoutDetail = '无需要布局的容器';
     }
+    dimensions.push({ name: '布局规范 (Auto Layout)', score: layoutScore, weight: layoutWeight, maxScore: layoutWeight, details: layoutDetail });
 
-    const layoutIssues = this.ctx.issues.filter((i) => i.category === 'layout').length;
-    if (layoutIssues > 3) {
-      score -= 5;
+    // 2. 命名得分 (20%) - 语义化命名比例
+    const namingWeight = 20;
+    let namingScore = namingWeight;
+    let namingDetail = '';
+    if (this.ctx.nameableNodes > 0) {
+      const namingRatio = this.ctx.goodNamedNodes / this.ctx.nameableNodes;
+      namingScore = Math.round(namingRatio * namingWeight);
+      namingDetail = `${this.ctx.goodNamedNodes}/${this.ctx.nameableNodes} 个节点有语义化名称 (${Math.round(namingRatio * 100)}%)`;
+    } else {
+      namingDetail = '无可命名节点';
     }
+    dimensions.push({ name: '命名规范', score: namingScore, weight: namingWeight, maxScore: namingWeight, details: namingDetail });
 
-    return Math.max(0, Math.min(100, Math.round(score)));
+    // 3. 组件复用得分 (15%)
+    const componentWeight = 15;
+    let componentScore = componentWeight;
+    let componentDetail = '';
+    if (this.ctx.totalNodes > 20 && this.ctx.componentCount === 0) {
+      componentScore = Math.round(componentWeight * 0.3);
+      componentDetail = '节点较多但未创建任何 Component，建议将重复元素封装为组件';
+    } else if (this.ctx.componentCount > 0) {
+      // 组件越多得分越高，最多满分
+      const componentBonus = Math.min(1, this.ctx.componentCount / 5);
+      componentScore = Math.round(componentWeight * (0.5 + 0.5 * componentBonus));
+      componentDetail = `已创建 ${this.ctx.componentCount} 个 Component`;
+    } else {
+      componentDetail = '节点较少，暂无组件复用需求';
+    }
+    dimensions.push({ name: '组件复用', score: componentScore, weight: componentWeight, maxScore: componentWeight, details: componentDetail });
+
+    // 4. 间距/尺寸/圆角得分 (15%) - 4px 网格符合率（info 类问题，给保底分）
+    const spacingWeight = 15;
+    let spacingScore = spacingWeight;
+    let spacingDetail = '';
+    if (this.ctx.spacingChecks > 0) {
+      const spacingRatio = this.ctx.spacingGood / this.ctx.spacingChecks;
+      // 使用平缓曲线，并给 30% 保底分（因为这些是优化建议，不是严重问题）
+      const adjustedRatio = Math.pow(spacingRatio, 0.5);
+      spacingScore = Math.round(spacingWeight * (0.3 + 0.7 * adjustedRatio));
+      spacingDetail = `${this.ctx.spacingGood}/${this.ctx.spacingChecks} 项符合 4px 网格/标准圆角 (${Math.round(spacingRatio * 100)}%)`;
+    } else {
+      spacingDetail = '无间距/尺寸检查项';
+    }
+    dimensions.push({ name: '间距/尺寸规范', score: spacingScore, weight: spacingWeight, maxScore: spacingWeight, details: spacingDetail });
+
+    // 5. 无障碍得分 (10%) - 可交互元素尺寸
+    const a11yWeight = 10;
+    let a11yScore = a11yWeight;
+    let a11yDetail = '';
+    if (this.ctx.interactiveNodes > 0) {
+      const a11yRatio = this.ctx.interactiveGoodSize / this.ctx.interactiveNodes;
+      a11yScore = Math.round(a11yRatio * a11yWeight);
+      a11yDetail = `${this.ctx.interactiveGoodSize}/${this.ctx.interactiveNodes} 个可交互元素尺寸合规 (${Math.round(a11yRatio * 100)}%)`;
+    } else {
+      a11yDetail = '未检测到可交互元素（按钮/链接/输入框）';
+    }
+    dimensions.push({ name: '无障碍 (A11y)', score: a11yScore, weight: a11yWeight, maxScore: a11yWeight, details: a11yDetail });
+
+    // 6. 结构得分 (10%) - 嵌套深度 + 图标一致性
+    const structureWeight = 10;
+    let structureScore = structureWeight;
+    let structureDetail = '';
+    let structurePenalty = 0;
+    // 嵌套过深扣分
+    if (this.ctx.deepNestingNodes > 0) {
+      structurePenalty += Math.min(5, this.ctx.deepNestingNodes * 2);
+    }
+    // 图标尺寸过多扣分
+    if (this.ctx.iconSizeKinds > 3) {
+      structurePenalty += Math.min(5, (this.ctx.iconSizeKinds - 3));
+    }
+    structureScore = Math.max(0, structureWeight - structurePenalty);
+    const structureIssues: string[] = [];
+    if (this.ctx.deepNestingNodes > 0) structureIssues.push(`${this.ctx.deepNestingNodes} 个节点嵌套过深`);
+    if (this.ctx.iconSizeKinds > 1) structureIssues.push(`图标有 ${this.ctx.iconSizeKinds} 种尺寸`);
+    structureDetail = structureIssues.length > 0 ? structureIssues.join('，') : '结构良好';
+    dimensions.push({ name: '结构合理性', score: structureScore, weight: structureWeight, maxScore: structureWeight, details: structureDetail });
+
+    // 计算总分
+    const totalScore = dimensions.reduce((sum, d) => sum + d.score, 0);
+    const score = Math.max(0, Math.min(100, totalScore));
+
+    return { score, dimensions };
   }
 
   private getScoreEmoji(score: number): string {
@@ -517,12 +700,20 @@ export class DesignLinter {
     return '❌';
   }
 
+  private getScoreBar(score: number, max: number): string {
+    const ratio = max > 0 ? score / max : 1;
+    const filled = Math.round(ratio * 10);
+    const empty = 10 - filled;
+    const color = ratio >= 0.8 ? '🟢' : ratio >= 0.6 ? '🟡' : ratio >= 0.4 ? '🟠' : '🔴';
+    return color + '█'.repeat(filled) + '░'.repeat(empty);
+  }
+
   private getScoreRating(score: number): string {
     if (score >= 90) return '优秀';
     if (score >= 80) return '良好';
-    if (score >= 60) return '可接受';
+    if (score >= 60) return '一般';
     if (score >= 40) return '较差';
-    return '急需改进';
+    return '很差';
   }
 
   private getCategoryBreakdown(): Record<string, number> {
@@ -556,7 +747,9 @@ export class DesignLinter {
     lines.push(`## ${emoji} 代码还原质量评分: ${result.score}/100 (${rating})`);
     lines.push('');
 
-    if (result.score >= 80) {
+    if (result.score >= 90) {
+      lines.push(`🎉 **评分优秀**：设计稿质量非常高，代码还原效果预期极佳。`);
+    } else if (result.score >= 80) {
       lines.push(`✅ **评分良好**：设计稿质量较高，可以直接生成代码，还原效果预期良好。`);
     } else {
       lines.push(`⚠️ **建议修复**：评分低于 80 分，建议先修复以下问题再生成代码，以获得最佳还原效果。`);
@@ -570,6 +763,17 @@ export class DesignLinter {
     lines.push(`| 警告 (warning) | ${result.warningCount} |`);
     lines.push(`| 优化建议 (info) | ${result.infoCount} |`);
     lines.push(`| 问题总数 | ${result.issues.length} |`);
+    lines.push('');
+
+    // 各维度得分详情
+    lines.push(`## 📈 各维度得分详情`);
+    lines.push('');
+    lines.push(`| 维度 | 得分/满分 | 权重 | 详情 |`);
+    lines.push(`|------|----------|------|------|`);
+    for (const dim of result.dimensionScores) {
+      const scoreBar = this.getScoreBar(dim.score, dim.maxScore);
+      lines.push(`| ${dim.name} | ${scoreBar} ${dim.score}/${dim.maxScore} | ${dim.weight}% | ${dim.details} |`);
+    }
     lines.push('');
 
     if (result.issues.length === 0) {
@@ -724,7 +928,7 @@ export class DesignLinter {
   }
 
   private buildResult(): LintResult {
-    const score = this.calculateScore();
+    const { score, dimensions } = this.calculateScore();
     const errorCount = this.ctx.issues.filter((i) => i.severity === 'error').length;
     const warningCount = this.ctx.issues.filter((i) => i.severity === 'warning').length;
     const infoCount = this.ctx.issues.filter((i) => i.severity === 'info').length;
@@ -745,6 +949,7 @@ export class DesignLinter {
       warningCount,
       infoCount,
       categoryBreakdown,
+      dimensionScores: dimensions,
       summary,
     };
 

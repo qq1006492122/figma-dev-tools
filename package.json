@@ -1,7 +1,7 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.3.2",
-  "description": "Figma Dev Tools MCP Server - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, and one-click installation across 10+ editors. Features i18n, a11y (accessibility), responsive design inference, design system alignment, flex layout fixes, zero-config npx mode with --figma-api-key, secure token storage, interactive wizard CLI, Prettier auto-formatting, SVG sprite generation, Tailwind class merging with tailwind-merge",
+  "version": "1.4.0",
+  "description": "Figma Dev Tools MCP Server v1.4.0 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, and one-click installation across 10+ editors.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -86,10 +86,14 @@
     "clsx": "^2.1.1",
     "commander": "^12.1.0",
     "dotenv": "^16.4.7",
+    "fast-deep-equal": "^3.1.3",
     "fs-extra": "^11.2.0",
+    "https-proxy-agent": "^9.1.0",
+    "lru-cache": "^11.5.2",
     "open": "^11.0.0",
     "ora": "^9.4.1",
     "prettier": "^3.4.2",
+    "sanitize-html": "^2.17.5",
     "svgo": "^3.3.2",
     "tailwind-merge": "^3.6.0",
     "zod": "^3.23.8"
@@ -98,6 +102,7 @@
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^22.10.0",
     "@types/prettier": "^3.0.0",
+    "@types/sanitize-html": "^2.16.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

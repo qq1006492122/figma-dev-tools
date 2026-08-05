@@ -11,8 +11,8 @@
  * @module
  */
 
-import type { DesignContext, ProcessedNode } from '../types/nodes.js';
 import { getI18n } from '../i18n/index.js';
+import type { DesignContext, ProcessedNode } from '../types/nodes.js';
 
 // ============ 类型定义 ============
 
@@ -94,9 +94,23 @@ export interface VisibilitySuggestion {
  */
 export interface ResponsiveSuggestion {
   /** 建议类型 */
-  type: 'layout' | 'font-size' | 'visibility' | 'class';
+  type: 'layout' | 'font-size' | 'visibility' | 'class' | 'mobile-h5';
   /** 建议消息 */
   message: string;
+}
+
+/**
+ * 移动端H5适配建议（v1.4.0 新增）
+ */
+export interface MobileH5Suggestion {
+  /** 建议类型 */
+  type: 'safe-area' | 'hairline-border' | 'touch-optimization' | 'viewport' | 'tap-highlight';
+  /** 建议的 CSS/Tailwind 类 */
+  classes?: string;
+  /** CSS 代码片段 */
+  cssSnippet?: string;
+  /** 说明 */
+  description: string;
 }
 
 /**
@@ -119,6 +133,8 @@ export interface ResponsiveResult {
   fontSizeSuggestions: FontSizeSuggestion[];
   /** 可见性建议 */
   visibilitySuggestions: VisibilitySuggestion[];
+  /** 移动端H5适配建议（v1.4.0 新增） */
+  mobileH5Suggestions: MobileH5Suggestion[];
   /** 总体建议文本 */
   recommendations: string[];
   /** 响应式建议列表 */
@@ -190,13 +206,17 @@ export class ResponsiveInferrer {
     // ============ 6. 综合建议 ============
     const recommendations = this._generateRecommendations(device, width, root);
 
-    // ============ 7. 生成结构化建议 ============
+    // ============ 7. 移动端H5适配建议（v1.4.0新增） ============
+    const mobileH5Suggestions = this._generateMobileH5Suggestions(device);
+
+    // ============ 8. 生成结构化建议 ============
     const suggestions = this._generateStructuredSuggestions(
       device,
       layoutSuggestions,
       classSuggestions,
       fontSizeSuggestions,
       visibilitySuggestions,
+      mobileH5Suggestions,
     );
 
     return {
@@ -208,6 +228,7 @@ export class ResponsiveInferrer {
       classSuggestions,
       fontSizeSuggestions,
       visibilitySuggestions,
+      mobileH5Suggestions,
       recommendations,
       suggestions,
       suggestionsCount: suggestions.length,
@@ -224,12 +245,97 @@ export class ResponsiveInferrer {
   }
 
   /**
+   * 生成移动端H5适配建议（v1.4.0新增）
+   */
+  private _generateMobileH5Suggestions(device: DeviceType): MobileH5Suggestion[] {
+    const suggestions: MobileH5Suggestion[] = [];
+
+    // 仅对移动端设计稿生成详细的H5适配建议
+    if (device === 'mobile' || device === 'tablet') {
+      // 1. Viewport 设置建议
+      suggestions.push({
+        type: 'viewport',
+        description: '正确设置viewport元标签，支持响应式和安全区域',
+        cssSnippet:
+          '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">',
+      });
+
+      // 2. 安全区域适配建议
+      suggestions.push({
+        type: 'safe-area',
+        classes: 'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]',
+        description: '适配iPhone刘海屏和底部小黑条，使用env(safe-area-inset-*)设置安全区域padding',
+        cssSnippet: `/* 安全区域适配 */
+.safe-area-top { padding-top: env(safe-area-inset-top); }
+.safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }`,
+      });
+
+      // 3. 1px 边框（高清屏边框）
+      suggestions.push({
+        type: 'hairline-border',
+        classes: 'relative after:content-[""] after:absolute after:top-0 after:left-0 after:w-full after:h-full after:border after:border-current after:transform after:scale-50 after:origin-top-left',
+        description: '高清屏1px边框实现，使用transform: scale(0.5)避免边框变粗',
+        cssSnippet: `/* 1px 边框 */
+.hairline-border {
+  position: relative;
+}
+.hairline-border::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 200%;
+  height: 200%;
+  border: 1px solid currentColor;
+  transform: scale(0.5);
+  transform-origin: top left;
+  pointer-events: none;
+}`,
+      });
+
+      // 4. 触屏优化
+      suggestions.push({
+        type: 'touch-optimization',
+        classes: 'touch-manipulation select-none',
+        description: '消除点击300ms延迟，禁用文本选择，优化触屏交互',
+        cssSnippet: `/* 触屏优化 */
+.touch-optimized {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}`,
+      });
+
+      // 5. 点击高亮去除
+      suggestions.push({
+        type: 'tap-highlight',
+        classes: '[-webkit-tap-highlight-color:transparent]',
+        description: '去除移动端点击元素时的灰色高亮背景',
+        cssSnippet: 'a, button, [role="button"] { -webkit-tap-highlight-color: transparent; }',
+      });
+    } else {
+      // 桌面端设计稿也给出基础的移动端适配提示
+      suggestions.push({
+        type: 'viewport',
+        description: '移动端适配需设置正确的viewport元标签',
+        cssSnippet:
+          '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">',
+      });
+      suggestions.push({
+        type: 'safe-area',
+        description: '如适配移动端H5，建议添加安全区域padding',
+        classes: 'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]',
+      });
+    }
+
+    return suggestions;
+  }
+
+  /**
    * 分析布局方向
    */
-  private _analyzeLayoutDirections(
-    root: ProcessedNode,
-    device: DeviceType,
-  ): LayoutDirectionSuggestion[] {
+  private _analyzeLayoutDirections(root: ProcessedNode, device: DeviceType): LayoutDirectionSuggestion[] {
     const suggestions: LayoutDirectionSuggestion[] = [];
 
     const traverse = (node: ProcessedNode): void => {
@@ -284,10 +390,7 @@ export class ResponsiveInferrer {
   /**
    * 生成响应式类建议
    */
-  private _generateClassSuggestions(
-    root: ProcessedNode,
-    device: DeviceType,
-  ): ResponsiveClassSuggestion[] {
+  private _generateClassSuggestions(root: ProcessedNode, device: DeviceType): ResponsiveClassSuggestion[] {
     const suggestions: ResponsiveClassSuggestion[] = [];
 
     const traverse = (node: ProcessedNode): void => {
@@ -325,10 +428,7 @@ export class ResponsiveInferrer {
   /**
    * 生成字号响应式建议
    */
-  private _generateFontSizeSuggestions(
-    root: ProcessedNode,
-    device: DeviceType,
-  ): FontSizeSuggestion[] {
+  private _generateFontSizeSuggestions(root: ProcessedNode, device: DeviceType): FontSizeSuggestion[] {
     const sizeMap = new Map<number, number>();
 
     const traverse = (node: ProcessedNode): void => {
@@ -419,16 +519,14 @@ export class ResponsiveInferrer {
   /**
    * 生成综合建议
    */
-  private _generateRecommendations(
-    device: DeviceType,
-    width: number,
-    root: ProcessedNode,
-  ): string[] {
+  private _generateRecommendations(device: DeviceType, width: number, root: ProcessedNode): string[] {
     const recommendations: string[] = [];
     const msg = this._i18n.getMessages() as Record<string, Record<string, string>>;
     const responsiveMsg = msg.responsive || {};
 
-    recommendations.push(`📱 ${responsiveMsg.inferredDevice || '推断设备'}: ${this._getDeviceName(device)} (${width}px)`);
+    recommendations.push(
+      `📱 ${responsiveMsg.inferredDevice || '推断设备'}: ${this._getDeviceName(device)} (${width}px)`,
+    );
     recommendations.push('');
 
     if (device === 'desktop') {
@@ -439,9 +537,14 @@ export class ResponsiveInferrer {
       recommendations.push(`  - ${responsiveMsg.desktopFlexRow || '桌面端保持水平布局（flex-row）'}`);
       recommendations.push('  - 大标题字号建议响应式缩小');
       recommendations.push('  - 装饰性元素可考虑在移动端隐藏（hidden md:block）');
+      recommendations.push('  - 如适配H5，建议添加安全区域和1px边框处理');
     } else if (device === 'mobile') {
-      recommendations.push('💡 移动端设计稿响应式建议：');
+      recommendations.push('💡 移动端设计稿H5适配建议：');
       recommendations.push('  - 保持垂直布局（flex-col）');
+      recommendations.push('  - 设置 viewport-fit=cover 支持安全区域');
+      recommendations.push('  - 使用 env(safe-area-inset-*) 适配刘海屏');
+      recommendations.push('  - 1px 边框使用 transform: scale(0.5) 实现');
+      recommendations.push('  - 添加 touch-action: manipulation 消除点击延迟');
       recommendations.push('  - 在 md: 断点（768px+）适配平板和桌面');
       recommendations.push('  - 可考虑为大屏幕添加更宽松的间距');
     } else {
@@ -449,6 +552,7 @@ export class ResponsiveInferrer {
       recommendations.push('  - 基础样式适配平板');
       recommendations.push('  - sm: 调整为移动端样式');
       recommendations.push('  - lg: 调整为桌面端样式');
+      recommendations.push('  - 适配移动端H5时注意安全区域和触屏优化');
     }
 
     const columnCount = this._countTopLevelColumns(root);
@@ -469,6 +573,7 @@ export class ResponsiveInferrer {
     classSuggestions: ResponsiveClassSuggestion[],
     fontSizeSuggestions: FontSizeSuggestion[],
     visibilitySuggestions: VisibilitySuggestion[],
+    mobileH5Suggestions: MobileH5Suggestion[],
   ): ResponsiveSuggestion[] {
     const suggestions: ResponsiveSuggestion[] = [];
 
@@ -497,6 +602,14 @@ export class ResponsiveInferrer {
       suggestions.push({
         type: 'visibility',
         message: vs.reason + `: ${vs.visibilityClasses}`,
+      });
+    }
+
+    // 添加移动端H5适配建议（v1.4.0新增）
+    for (const h5 of mobileH5Suggestions) {
+      suggestions.push({
+        type: 'mobile-h5',
+        message: `[H5适配] ${h5.description}${h5.classes ? ` → ${h5.classes}` : ''}`,
       });
     }
 

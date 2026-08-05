@@ -12,3 +12,17 @@ fix-types.mjs
 commit-msg.txt
 publish-*.mjs
 *-temp.mjs
+
+# 临时测试/debug文件（本地测试产物，不提交）
+_*.mjs
+_*.json
+_*.txt
+_*.md
+_*.tsx
+_*.vue
+_*.ts
+_*.js
+
+# 用户本地配置
+figma-dev.config.json
+.figma-dev-cache/

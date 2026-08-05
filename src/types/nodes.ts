@@ -600,6 +600,8 @@ export interface ComponentUsage {
  * 此结构经过层级精简和语义标注，直接可用作 AI 代码生成的输入。
  */
 export interface DesignContext {
+  /** Figma 文件 Key（用于资源导出和 SVG 内联渲染） */
+  fileKey: string;
   /** 精简后的节点树 */
   node: ProcessedNode;
   /** 该节点下使用的颜色 Token 列表 */

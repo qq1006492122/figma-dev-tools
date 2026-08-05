@@ -3,13 +3,14 @@
  * Figma Dev Tools MCP Server
  * 提供 Figma 设计稿与代码的桥接能力，包括：
  * - 设计 Tokens 提取
- * - 组件代码生成（含 Flex 修复、a11y 增强、设计系统对齐、响应式推断）
+ * - 组件代码生成（含 Flex 修复、a11y 增强、设计系统对齐、响应式推断、移动端H5适配）
  * - 文件信息查询
  * - 截图获取
  * - 资源下载与 SVG Sprite 生成
- * - 设计规范检查
+ * - 设计规范检查（含维度评分）
+ * - 本地缓存加速
  *
- * @version 1.3.2
+ * @version 1.4.0
  */
 
 import * as fs from 'node:fs';
@@ -23,7 +24,9 @@ import { z } from 'zod';
 import { initI18nSync } from './i18n/index.js';
 import type { A11yReportEntry } from './services/a11y-enhancer.js';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
+import { createFigmaCache } from './services/cache.js';
 import { createCodeGenerator } from './services/code-generator.js';
+import { createComponentMapper } from './services/component-mapper.js';
 import { createDesignContextService } from './services/design-context.js';
 import { createDesignLinter } from './services/design-linter.js';
 import type { DesignSystemSuggestion } from './services/design-system.js';
@@ -33,6 +36,7 @@ import type { FlexFixEntry } from './services/flex-fixer.js';
 import type { ResponsiveSuggestion } from './services/responsive-inferrer.js';
 import { generateSvgSprite, generateSpriteTypes } from './services/svg-sprite-generator.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
+import { createVueGenerator } from './services/vue-generator.js';
 import type { DesignTokens } from './types.js';
 import type { ProcessedNode, StructuredNode } from './types/nodes.js';
 import { parseFigmaUrl, extractFileKey, extractNodeId } from './utils/figma-url.js';
@@ -43,6 +47,7 @@ dotenv.config();
 initI18nSync();
 
 let figmaClient: FigmaClient | null = null;
+let figmaCache: ReturnType<typeof createFigmaCache> | null = null;
 
 function getFigmaClient(token?: string): FigmaClient {
   const accessToken = token || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
@@ -55,7 +60,10 @@ function getFigmaClient(token?: string): FigmaClient {
   }
 
   if (!figmaClient || figmaClient.getAccessToken() !== accessToken) {
-    figmaClient = createFigmaClient({ accessToken });
+    if (!figmaCache) {
+      figmaCache = createFigmaCache();
+    }
+    figmaClient = createFigmaClient({ accessToken, cache: figmaCache });
   }
 
   return figmaClient;
@@ -63,7 +71,7 @@ function getFigmaClient(token?: string): FigmaClient {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.3.2',
+  version: '1.4.0',
 });
 
 server.registerTool(
@@ -1098,7 +1106,7 @@ server.registerTool(
       fileKey: z.string().describe('Figma 文件 Key'),
       nodeId: z.string().optional().describe('节点 ID（可选，默认检查整个文件或指定节点）'),
       figmaUrl: z.string().optional().describe('Figma URL（如果提供则自动解析 fileKey 和 nodeId）'),
-      maxDepth: z.number().min(1).max(10).default(8).describe('最大检查深度（默认8）'),
+      maxDepth: z.number().min(1).max(30).default(15).describe('最大检查深度（默认15）'),
       accessToken: z.string().optional().describe('Figma Access Token'),
     }),
     annotations: {
@@ -1165,20 +1173,22 @@ server.registerTool(
 server.registerTool(
   'figma_generate_jsx',
   {
-    title: '一键生成 React JSX 代码（增强版）',
-    description: `整合增强管线：自动精简层级 → 匹配 design token → 语义标签选择 → Flex 布局修复 → 无障碍增强 → 设计系统对齐 → 响应式推断 → 生成 React+Tailwind TSX 代码。
+    title: '一键生成 React/Vue 组件代码（增强版 v1.4.0）',
+    description: `整合增强管线：自动精简层级 → 匹配 design token → 语义标签选择 → Flex 布局修复 → 无障碍增强 → 设计系统对齐 → 响应式推断 → 生成组件代码。
+v1.4.0 新增支持 Vue 3 SFC (<script setup lang="ts">) 和 UnoCSS！
 v1.2.0 新增强化功能：
 - 🔧 Flex 布局问题自动修复（图标变形、文本截断、溢出滚动等）
 - ♿ 无障碍(a11y)自动增强（语义化标签、alt 文本、ARIA 属性）
 - 🎨 设计系统自动化（颜色变量、间距/字体/圆角/阴影映射）
 - 📱 响应式断点智能推断（设备类型、响应式前缀建议）
+- 🧩 shadcn/ui 等组件库自动检测与映射建议
 自动：消除 div soup（layout-only 节点扁平化）、颜色/间距/圆角/阴影命中 token、图片标记 publicCdnUrl 占位、复用组件提示 import。
-输出包含：TSX 代码、增强报告、需下载资源列表、需 @theme 扩展的 token、复用组件提示。
+输出包含：TSX/Vue 代码、增强报告、需下载资源列表、需 @theme 扩展的 token、复用组件提示。
 
 工作流建议：
 1. 先调用 figma_get_metadata 了解结构
 2. 可选：调用 figma_lint_design 检查设计规范并修复问题
-3. 对目标区块调用 figma_generate_jsx 生成代码
+3. 对目标区块调用 figma_generate_jsx 生成代码（指定 framework=vue 生成 Vue 3）
 4. 如有图片，调用 figma_download_assets 下载到 public/portal/<场景>/
 5. 将生成代码复制到项目，处理 TODO 注释（复用组件映射）`,
     inputSchema: z.object({
@@ -1187,7 +1197,9 @@ v1.2.0 新增强化功能：
       figmaUrl: z.string().optional().describe('Figma URL（可替代 fileKey+nodeId）'),
       componentName: z.string().optional().describe('生成的组件名（默认从节点名推断）'),
       sceneName: z.string().optional().describe('场景名（用于 public/portal/<场景>/ 资源路径）'),
-      maxDepth: z.number().default(8).describe('节点树最大遍历深度（默认 8）'),
+      maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）'),
+      framework: z.enum(['react', 'vue']).default('react').describe('目标框架：react (默认) | vue (v1.4.0新增)'),
+      styleFormat: z.enum(['tailwind', 'unocss']).default('tailwind').describe('样式方案：tailwind (默认) | unocss (v1.4.0新增)'),
       skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能'),
       skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示'),
       accessToken: z.string().optional().describe('Figma Access Token'),
@@ -1206,6 +1218,8 @@ v1.2.0 新增强化功能：
     componentName,
     sceneName,
     maxDepth,
+    framework,
+    styleFormat,
     skipEnhancements,
     skipLintCheck,
     accessToken,
@@ -1225,8 +1239,14 @@ v1.2.0 新增强化功能：
       const client = getFigmaClient(accessToken);
       const ctxService = createDesignContextService(client);
       const codeGen = createCodeGenerator(client);
+      const vueGen = createVueGenerator(client);
+      const componentMapper = createComponentMapper();
 
       const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
+
+      // v1.4.0 新增：组件库检测
+      const libDetection = componentMapper.detectLibrary();
+      const componentMatches = componentMapper.matchComponentsInTree(ctx.node, libDetection.library);
 
       let lintReport: Awaited<ReturnType<ReturnType<typeof createDesignLinter>['lint']>> | null = null;
       if (!skipLintCheck) {
@@ -1236,19 +1256,52 @@ v1.2.0 新增强化功能：
         } catch {}
       }
 
-      const result = await codeGen.generateJsxFromContext(ctx, {
-        componentName,
-        sceneName,
-        usePublicCdn: true,
-        skipEnhancements,
-      });
+      let result: {
+        code: string;
+        componentName: string;
+        pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
+        extensionsNeeded: Array<{ type: string; suggestedName: string; originalValue: string }>;
+        reports?: {
+          flexFixes?: { fixedCount?: number; totalFixedNodes?: number; fixes: FlexFixEntry[] };
+          a11y?: { enhancementsCount?: number; semanticTagsCount: number; buttonsIdentifiedCount: number; ariaAddedCount: number; report: A11yReportEntry[] };
+          designSystem?: { suggestionsCount?: number; suggestions: DesignSystemSuggestion[]; colorSuggestions: unknown[]; spacingTokens: unknown[]; radiusTokens: unknown[]; typographySuggestions: unknown[] };
+          responsive?: { suggestionsCount?: number; suggestions: ResponsiveSuggestion[]; recommendations: unknown[]; classSuggestions: unknown[]; layoutSuggestions: unknown[] };
+        };
+      };
+
+      if (framework === 'vue') {
+        const vueResult = await vueGen.generateFromContext(ctx, {
+          componentName,
+          sceneName,
+          usePublicCdn: true,
+          styleFormat: styleFormat === 'unocss' ? 'unocss' : 'tailwind',
+          skipEnhancements,
+        });
+        result = vueResult as any;
+      } else {
+        result = await codeGen.generateJsxFromContext(ctx, {
+          componentName,
+          sceneName,
+          usePublicCdn: true,
+          skipEnhancements,
+        });
+      }
 
       const lines: string[] = [];
-      lines.push(`# ${result.componentName} - React TSX 代码\n`);
+      lines.push(`# ${result.componentName} - ${framework === 'vue' ? 'Vue 3 SFC' : 'React TSX'} 代码 (${styleFormat})\n`);
+
+      if (libDetection.library !== 'none' && componentMatches.length > 0) {
+        lines.push(`## 🧩 检测到组件库: ${libDetection.library}\n`);
+        lines.push(`匹配到 ${componentMatches.length} 个可复用组件：\n`);
+        componentMatches.slice(0, 5).forEach((m) => {
+          lines.push(`- **${m.componentName}** (置信度 ${Math.round(m.confidence * 100)}%) → import from \`${m.importPath}\``);
+        });
+        lines.push('');
+      }
 
       if (lintReport && (lintReport.errorCount > 0 || lintReport.warningCount > 3)) {
         lines.push(`## ⚠️ 设计规范提示\n`);
-        const scoreEmoji = lintReport.score >= 75 ? '✅' : lintReport.score >= 60 ? '⚠️' : '❌';
+        const scoreEmoji = lintReport.score >= 90 ? '🎉' : lintReport.score >= 80 ? '✅' : lintReport.score >= 60 ? '🔶' : '❌';
         lines.push(
           `${scoreEmoji} 当前设计规范评分: **${lintReport.score}/100**，发现 ${lintReport.errorCount} 个错误、${lintReport.warningCount} 个警告`,
         );
@@ -1262,12 +1315,12 @@ v1.2.0 新增强化功能：
 
       // v1.2.0 新增：显示增强报告
       if (result.reports && !skipEnhancements) {
-        const reports = result.reports;
+        const reports: any = result.reports;
         const flexFixes = reports.flexFixes;
-        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes) > 0) {
-          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes;
+        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
+          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
           lines.push(`## 🔧 Flex 布局修复 (${flexCount} 处)\n`);
-          flexFixes.fixes.slice(0, 10).forEach((fix: FlexFixEntry) => {
+          (flexFixes.fixes || []).slice(0, 10).forEach((fix: FlexFixEntry) => {
             lines.push(`- 节点 \`${fix.nodeName}\`: 添加了 ${fix.addedClasses.join(', ')}`);
           });
           lines.push('');
@@ -1276,7 +1329,7 @@ v1.2.0 新增强化功能：
         if (a11yReport) {
           const a11yCount =
             a11yReport.enhancementsCount ??
-            a11yReport.semanticTagsCount + a11yReport.buttonsIdentifiedCount + a11yReport.ariaAddedCount;
+            (a11yReport.semanticTagsCount || 0) + (a11yReport.buttonsIdentifiedCount || 0) + (a11yReport.ariaAddedCount || 0);
           if (a11yCount > 0) {
             lines.push(`## ♿ 无障碍增强 (${a11yCount} 处)\n`);
             a11yReport.report.slice(0, 10).forEach((enh: A11yReportEntry) => {
@@ -1285,32 +1338,32 @@ v1.2.0 新增强化功能：
             lines.push('');
           }
         }
-        const dsReport = reports.designSystem;
+        const dsReport: any = reports.designSystem;
         if (dsReport) {
           const dsCount =
             dsReport.suggestionsCount ??
-            dsReport.colorSuggestions.length +
-              dsReport.spacingTokens.length +
-              dsReport.radiusTokens.length +
-              dsReport.typographySuggestions.length;
+            (dsReport.colorSuggestions?.length || 0) +
+              (dsReport.spacingTokens?.length || 0) +
+              (dsReport.radiusTokens?.length || 0) +
+              (dsReport.typographySuggestions?.length || 0);
           if (dsCount > 0) {
             lines.push(`## 🎨 设计系统建议 (${dsCount} 条)\n`);
-            dsReport.suggestions.slice(0, 10).forEach((sug: DesignSystemSuggestion) => {
+            (dsReport.suggestions || []).slice(0, 10).forEach((sug: DesignSystemSuggestion) => {
               lines.push(`- ${sug.message}`);
             });
             lines.push('');
           }
         }
-        const respReport = reports.responsive;
+        const respReport: any = reports.responsive;
         if (respReport) {
           const respCount =
             respReport.suggestionsCount ??
-            respReport.recommendations.length +
-              respReport.classSuggestions.length +
-              respReport.layoutSuggestions.length;
+            (respReport.recommendations?.length || 0) +
+              (respReport.classSuggestions?.length || 0) +
+              (respReport.layoutSuggestions?.length || 0);
           if (respCount > 0) {
             lines.push(`## 📱 响应式建议 (${respCount} 条)\n`);
-            respReport.suggestions.slice(0, 10).forEach((sug: ResponsiveSuggestion) => {
+            (respReport.suggestions || []).slice(0, 10).forEach((sug: ResponsiveSuggestion) => {
               lines.push(`- ${sug.message}`);
             });
             lines.push('');
@@ -1318,14 +1371,14 @@ v1.2.0 新增强化功能：
         }
       }
 
-      lines.push('```tsx');
+      lines.push(framework === 'vue' ? '```vue' : '```tsx');
       lines.push(result.code);
       lines.push('```\n');
 
-      if (result.extensionsNeeded.length > 0) {
+      if ((result.extensionsNeeded || []).length > 0) {
         lines.push('## ⚠️ 需要 @theme 扩展的 token\n');
         const grouped = new Map<string, Array<{ name: string; value: string }>>();
-        for (const ext of result.extensionsNeeded) {
+        for (const ext of result.extensionsNeeded as Array<any>) {
           if (!grouped.has(ext.type)) grouped.set(ext.type, []);
           grouped.get(ext.type)!.push({ name: ext.suggestedName, value: ext.originalValue });
         }
@@ -1339,7 +1392,7 @@ v1.2.0 新增强化功能：
         }
       }
 
-      if (result.pendingAssets.length > 0) {
+      if ((result.pendingAssets || []).length > 0) {
         lines.push('## 🖼️ 需要下载的资源\n');
         lines.push('调用 `figma_download_assets` 下载以下资源：\n');
         const uniqueAssets = result.pendingAssets.filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
@@ -1404,7 +1457,7 @@ v1.2.0 增强：输出包含语义标签建议、a11y 属性建议、设计系�
       fileKey: z.string().describe('Figma 文件 Key'),
       nodeId: z.string().describe('节点 ID（必需）'),
       figmaUrl: z.string().optional().describe('Figma URL（自动解析 fileKey/nodeId）'),
-      maxDepth: z.number().min(1).max(10).default(8).describe('最大节点树深度（默认8）'),
+      maxDepth: z.number().min(1).max(30).default(15).describe('最大节点树深度（默认15）'),
       accessToken: z.string().optional().describe('Figma Access Token'),
     }),
     annotations: {

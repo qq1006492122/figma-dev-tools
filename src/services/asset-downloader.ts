@@ -41,6 +41,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
 import { optimize as svgoOptimize } from 'svgo';
 
 import type { FigmaExportFormat } from '../types.js';
@@ -70,12 +71,13 @@ export interface AssetDownloaderOptions {
 /**
  * 默认下载配置
  */
-const DEFAULT_OPTIONS: Required<Pick<AssetDownloaderOptions, 'scale' | 'svgFormat' | 'skipExisting' | 'optimizeSvg'>> = {
-  scale: 2,
-  svgFormat: 'svg',
-  skipExisting: true,
-  optimizeSvg: true,
-};
+const DEFAULT_OPTIONS: Required<Pick<AssetDownloaderOptions, 'scale' | 'svgFormat' | 'skipExisting' | 'optimizeSvg'>> =
+  {
+    scale: 2,
+    svgFormat: 'svg',
+    skipExisting: true,
+    optimizeSvg: true,
+  };
 
 /**
  * Figma Images API 支持的导出格式参数（小写）

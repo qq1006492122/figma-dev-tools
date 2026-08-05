@@ -1,9 +1,9 @@
 ---
 name: "figma-dev-tools"
-description: "Figma 设计到代码增强工具集 v1.3.2 - 14个MCP工具，智能层级解析、多级Token映射、资源自动下载、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div soup、上下文爆炸、hex写死、资源路径处理等问题。支持Trae/VS Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。"
+description: "Figma 设计到代码增强工具集 v1.4.0 - 14个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测、多级Token映射、资源自动下载、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div soup、上下文爆炸、hex写死、资源路径处理、深层嵌套截断、层级混乱等问题。支持Trae/VS Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。"
 ---
 
-# Figma Dev Tools v1.3.2 - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.4.0 - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 
@@ -582,4 +582,60 @@ import { publicCdnUrl } from '@/lib/utils';
 4. **响应式缺失**：生成代码基于 Figma 固定尺寸，响应式样式必须手动添加
 5. **临时文件清理**：node-*.png/json、scripts/figma/node-*/ 等临时导出文件不提交 Git
 6. **网络要求**：Figma API 和图片 CDN 需要能访问 figma.com（国内可能需要代理）
-7. **框架选择正确**：React 项目用 generate_jsx，其他框架务必用 get_structured_data
+
+---
+
+## 📋 更新日志
+
+### v1.4.0（安全与层级增强）
+
+**🔒 安全防护**
+- 新增 XSS 攻击多层防护：引入 `sanitize-html`（4.5k+ stars），实现文本/属性/标识符/SVG 全方位清理
+- 新增 `sanitizeText`/`sanitizeSvg`/`escapeAttribute`/`escapeJsString`/`sanitizeIdentifier`/`sanitizeClassName` 6 个安全工具函数
+- React/Vue 代码生成器全面应用：组件名、文本内容、alt、aria-label、data 属性、role 属性均经过安全处理
+
+**🗂️ 层级结构修复（解决父子层级混乱问题）**
+- 新增 `hierarchy-fixer.ts` 智能层级修复服务：
+  - 坐标包含检测：根据 absoluteBoundingBox 判断应该是子节点却平级的元素（高置信度自动修复）
+  - 命名语义辅助：icon/label/text/按钮/图标 等子元素关键词优先嵌套
+  - 冗余包裹链检测：连续 ≥5 层无意义包裹自动警告
+  - 空容器检测：没有子节点也没有视觉样式的空容器
+  - 循环引用检测：防止组件实例循环嵌套导致的无限递归
+- `node-processor` 新增三重边界保护：
+  - 硬深度限制 `SAFE_MAX_DEPTH=50`：即使配置 maxDepth=-1 也不超过 50 层（防止栈溢出）
+  - 节点数硬限制 `SAFE_MAX_NODES=20000`：防止异常文件内存耗尽
+  - visited Set 循环引用检测：每条递归路径独立追踪，打破回边
+- 默认递归深度从 8/6 统一提高到 15，支持复杂设计稿
+- 节点数超限降级处理：只返回根节点而非崩溃
+
+**🎨 SVG 高保真还原**
+- 新增 `svg-inline-renderer.ts` 内联渲染服务：
+  - VECTOR/BOOLEAN_OPERATION/STAR/LINE/ELLIPSE/REGULAR_POLYGON 矢量节点直接导出为 SVG
+  - svgo multipass 优化，removeViewBox=false 保留缩放能力
+  - 自动转换为 React JSX（驼峰属性、className、aria-hidden）或 Vue Template（kebab-case）
+  - currentColor 支持：图标可通过 CSS color 控制颜色
+  - sanitizeSvg 白名单过滤，防止 SVG 注入
+- CLI 新增 `--inline-svg` 选项（默认开启）
+
+**✨ 动画/动效检测基础框架**
+- 新增 `animation-detector.ts`：检测 Figma Prototype 交互
+  - 支持触发器：ON_CLICK/ON_HOVER/ON_PRESS/MOUSE_ENTER/AFTER_TIMEOUT
+  - 支持过渡类型：DISSOLVE/SMART_ANIMATE/MOVE_IN/MOVE_OUT/PUSH/SLIDE/SCROLL_ANIMATE
+  - 支持缓动函数：EASE_IN/EASE_OUT/EASE_IN_OUT/LINEAR/SPRING/CUSTOM_CUBIC_BEZIER
+  - 自动生成 CSS transition 和 Framer Motion 代码建议
+  - 为 v1.5+ Smart Animate 完整对比还原预留扩展点
+
+**🔍 lint 命令增强**
+- `figma_lint_design` / `npx figma-dev lint` 新增层级结构问题检测
+- 默认检查深度从 8 提高到 15
+- 检测项新增：嵌套过深、冗余包裹链、空容器、循环引用
+
+**📦 依赖更新**
+- 新增：`sanitize-html`（XSS 防护，4.5k+ stars）
+- 新增：`fast-deep-equal`（深度比较，高性能对象对比）
+- 已有：`svgo`（SVG 优化，已内置）
+
+**⚡ 性能优化**
+- 节点统计和递归处理均增加 visited Set 防循环
+- 层级修复在 node-processor 入口自动执行，高置信度问题自动修复
+- CLI 和 MCP 工具默认深度统一为 15，max 上限提高到 30

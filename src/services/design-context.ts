@@ -513,6 +513,7 @@ export class DesignContextService {
 
     // ============ 组装并返回设计上下文 ============
     return {
+      fileKey,
       node: processedNode,
       colors: colorTokens,
       // 间距和圆角按数值升序排列，便于阅读和 token 匹配

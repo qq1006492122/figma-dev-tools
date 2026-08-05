@@ -33,6 +33,7 @@ import type {
   ProcessingStats,
   ProcessingResult,
 } from '../types/nodes.js';
+import { createHierarchyFixer } from './hierarchy-fixer.js';
 
 // ============ 配置类型 ============
 
@@ -57,6 +58,14 @@ const DEFAULT_OPTIONS: Required<NodeProcessorOptions> = {
   flattenGroups: true,
   detectAssets: true,
 };
+
+/**
+ * 安全硬限制（防止极端场景导致栈溢出或内存耗尽）
+ * 这些是紧急刹车机制，正常设计稿不会触及
+ */
+const SAFE_MAX_DEPTH = 50; // 绝对最大递归深度（即使配置 -1 也不超过此值）
+const SAFE_MAX_NODES = 20000; // 绝对最大节点数（防止恶意/异常文件）
+const SAFE_MAX_VISITED_PATH = 200; // visited 路径最大长度（循环引用检测窗口）
 
 // ============ 视觉属性判断工具 ============
 
@@ -637,6 +646,12 @@ export class NodeProcessor {
   private options: Required<NodeProcessorOptions>;
   /** 处理统计信息 */
   private stats: ProcessingStats;
+  /** 层级修复器 */
+  private _hierarchyFixer = createHierarchyFixer({ autoFix: true });
+  /** 当前访问路径（用于循环引用检测） */
+  private _visitedPath: string[] = [];
+  /** 是否已超过节点数限制 */
+  private _nodeLimitExceeded = false;
 
   /**
    * 构造函数 - 初始化节点处理器
@@ -670,65 +685,141 @@ export class NodeProcessor {
    * 处理节点树（入口方法）
    *
    * 处理流程：
-   * 1. 重置统计信息
-   * 2. 统计原始节点数
-   * 3. 递归处理节点（应用扁平化规则）
-   * 4. 记录处理耗时
+   * 1. 重置统计信息和状态
+   * 2. 运行层级修复器（自动修复高置信度层级问题）
+   * 3. 统计原始节点数（含硬限制检查）
+   * 4. 递归处理节点（应用扁平化规则 + 循环引用检测）
+   * 5. 记录处理耗时
    *
    * @param rootNode - Figma 根节点（DOCUMENT/CANVAS/FRAME 等）
    * @returns 处理结果，包含精简后的节点树和统计信息
    */
   process(rootNode: FigmaNode): ProcessingResult {
     this.stats = this._createEmptyStats();
+    this._visitedPath = [];
+    this._nodeLimitExceeded = false;
     const startTime = Date.now();
 
-    this._countNodes(rootNode);
+    // v1.4.0 新增：先运行层级修复器（自动修复高置信度层级问题）
+    const fixResult = this._hierarchyFixer.fix(rootNode);
+    if (fixResult.autoFixedCount > 0) {
+      this.stats.flattenedGroupCount += fixResult.autoFixedCount;
+    }
 
-    const processed = this._processNode(rootNode, 0, null);
+    // 统计节点数（带硬限制）
+    this._countNodes(rootNode, new Set<string>());
+
+    if (this._nodeLimitExceeded) {
+      // 节点数超限，只处理根节点
+      this.stats.processedNodeCount = 1;
+    } else {
+      const processed = this._processNode(rootNode, 0, null, new Set<string>());
+      this.stats.durationMs = Date.now() - startTime;
+
+      return {
+        node: processed!,
+        stats: this.stats,
+      };
+    }
 
     this.stats.durationMs = Date.now() - startTime;
 
+    // 节点超限降级处理：只返回根节点
     return {
-      node: processed!,
+      node: {
+        id: `${rootNode.id}-0`,
+        name: rootNode.name,
+        originalType: rootNode.type,
+        role: 'container',
+        visible: true,
+        clipsContent: false,
+        size: { width: rootNode.absoluteBoundingBox?.width || 0, height: rootNode.absoluteBoundingBox?.height || 0 },
+        position: { x: 0, y: 0 },
+        figmaId: rootNode.id,
+        flattenReason: `node_limit_exceeded:${this.stats.originalNodeCount}`,
+      } as ProcessedNode,
       stats: this.stats,
     };
   }
 
   /**
-   * 递归统计原始节点总数
-   *
-   * @param node - 当前节点
+   * 递归统计原始节点总数（带节点数硬限制）
    */
-  private _countNodes(node: FigmaNode): void {
+  private _countNodes(node: FigmaNode, visited: Set<string>): void {
+    if (this._nodeLimitExceeded) return;
+
+    const nodeId = node.id;
+    if (nodeId) {
+      if (visited.has(nodeId)) return; // 循环引用
+      visited.add(nodeId);
+    }
+
     this.stats.originalNodeCount++;
+
+    // 节点数硬限制检查
+    if (this.stats.originalNodeCount > SAFE_MAX_NODES) {
+      this._nodeLimitExceeded = true;
+      return;
+    }
+
     if (node.children) {
       for (const child of node.children) {
-        this._countNodes(child);
+        this._countNodes(child, new Set(visited));
+        if (this._nodeLimitExceeded) return;
       }
     }
   }
 
   /**
-   * 递归处理单个节点（核心方法）
+   * 递归处理单个节点（核心方法，v1.4.0 增强边界保护）
+   *
+   * **安全机制**：
+   * - 硬深度限制 SAFE_MAX_DEPTH=50：防止栈溢出
+   * - 循环引用检测：通过 visited path 检测回边
+   * - 节点数限制已在 count 阶段检查
    *
    * **扁平化规则执行顺序**：
-   * 1. 深度检查 → 超过 maxDepth 返回 null
-   * 2. 跳过检查 → 不可见/零尺寸节点返回 null
-   * 3. 单包 GROUP 提升（规则2）→ 直接返回子节点处理结果
-   * 4. 处理子节点 → 多子无视觉 GROUP 子节点提升（规则3）
-   * 5. Wrapper FRAME 标记（规则4）→ 保留但标记已扁平化
-   * 6. 提取样式属性 → 构建 ProcessedNode
-   * 7. 语义角色检测
-   * 8. 资源检测
+   * 1. 深度检查（配置 maxDepth + 硬限制 SAFE_MAX_DEPTH）
+   * 2. 循环引用检测
+   * 3. 跳过检查 → 不可见/零尺寸节点返回 null
+   * 4. 单包 GROUP 提升（规则2）→ 直接返回子节点处理结果
+   * 5. 处理子节点 → 多子无视觉 GROUP 子节点提升（规则3）
+   * 6. Wrapper FRAME 标记（规则4）→ 保留但标记已扁平化
+   * 7. 提取样式属性 → 构建 ProcessedNode
+   * 8. 语义角色检测
+   * 9. 资源检测
    *
    * @param node - 当前 Figma 节点
    * @param depth - 当前递归深度
    * @param parent - 父 ProcessedNode（用于绝对定位计算）
+   * @param visited - 当前路径已访问节点 ID（循环引用检测）
    * @returns 处理后的节点，被跳过返回 null
    */
-  private _processNode(node: FigmaNode, depth: number, parent: ProcessedNode | null): ProcessedNode | null {
+  private _processNode(
+    node: FigmaNode,
+    depth: number,
+    parent: ProcessedNode | null,
+    visited: Set<string>,
+  ): ProcessedNode | null {
+    // ============ 边界保护 ============
+
+    // 配置的 maxDepth 检查
     if (this.options.maxDepth >= 0 && depth > this.options.maxDepth) {
       return null;
+    }
+
+    // 硬深度限制（紧急刹车，即使 maxDepth=-1 也生效）
+    if (depth > SAFE_MAX_DEPTH) {
+      return null;
+    }
+
+    // 循环引用检测
+    const nodeId = node.id;
+    if (nodeId) {
+      if (visited.has(nodeId)) {
+        return null; // 循环引用，跳过
+      }
+      visited.add(nodeId);
     }
 
     if (shouldSkipNode(node, this.options)) {
@@ -745,7 +836,7 @@ export class NodeProcessor {
     if (this.options.flattenGroups && isRedundantGroup(node) && node.children && node.children.length === 1) {
       this.stats.flattenedGroupCount++;
       const child = node.children[0]!;
-      return this._processNode(child, depth, parent);
+      return this._processNode(child, depth, parent, new Set(visited));
     }
 
     // ============ 处理子节点 ============
@@ -756,7 +847,7 @@ export class NodeProcessor {
       const shouldFlattenGroupChildren = node.type === 'GROUP' && !hasVisualProps(node) && node.children.length > 1;
 
       for (const child of node.children) {
-        const processedChild = this._processNode(child, depth + 1, null);
+        const processedChild = this._processNode(child, depth + 1, null, new Set(visited));
         if (processedChild) {
           if (shouldFlattenGroupChildren && this.options.flattenGroups) {
             this.stats.flattenedGroupCount++;
