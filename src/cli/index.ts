@@ -51,7 +51,7 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.4.1');
+  .version('1.4.2');
 
 // 全局选项
 program

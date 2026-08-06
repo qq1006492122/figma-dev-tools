@@ -10,7 +10,7 @@
  * - 设计规范检查（含维度评分）
  * - 本地缓存加速
  *
- * @version 1.4.1
+ * @version 1.4.2
  */
 
 import * as fs from 'node:fs';
@@ -71,7 +71,7 @@ function getFigmaClient(token?: string): FigmaClient {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.4.1',
+  version: '1.4.2',
 });
 
 server.registerTool(
@@ -1549,5 +1549,5 @@ function countNodes(node: { children?: unknown[] }): number {
 export async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Figma Dev Tools MCP Server v1.3.2 running via stdio');
+  console.error('Figma Dev Tools MCP Server v1.4.2 running via stdio');
 }

@@ -34,7 +34,7 @@ const GUI_DIR = path.resolve(__dirname, '../../gui');
 
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 
 interface EditorInfo {
   name: string;
