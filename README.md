@@ -1,10 +1,18 @@
-# 🎨 Figma Dev Tools v1.4.0
+# 🎨 Figma Dev Tools v1.4.1
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
 **打通 Figma 设计与前端研发的完整工具链**，支持 🖥️ GUI 可视化配置向导、设计 Tokens 智能提取、高保真组件生成（React/Vue/Svelte/HTML 等）、资源自动下载、跨编辑器 MCP 集成。专为 AI Agent 优化，解决 div soup、上下文爆炸、hex 写死、资源路径处理、Flex 布局变形、无障碍缺失、响应式适配等核心痛点。
 
 ---
+
+## ✨ v1.4.1 代码质量优化
+
+| 优化项 | 说明 | 版本 |
+|--------|------|------|
+| 🛡️ **零 any 类型** | 全面替换所有 `any` 类型为明确接口或 `unknown`，hierarchy-fixer 定义完整递归节点类型，确保类型安全 | **v1.4.1** |
+| 🧹 **oxlint 零警告** | 修复所有 oxlint 警告：移除未使用变量、应用 unicorn 规则（Set.has/Number.parseInt/node:协议），代码检查 0 error 0 warning | **v1.4.1** |
+| 📦 **代码规范增强** | install.mjs 等脚本应用 Set 优化，import 使用 node: 协议前缀，统一代码风格 | **v1.4.1** |
 
 ## ✨ v1.4.0 重磅更新
 
@@ -678,7 +686,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.0                            │
+│                      figma-dev-tools MCP Server v1.4.1                            │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │
