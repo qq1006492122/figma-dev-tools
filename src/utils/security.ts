@@ -286,9 +286,10 @@ export function maskSensitiveData(input: string): string {
  * 脱敏对象（递归处理所有字符串值）
  *
  * @param obj - 输入对象
+ * @param seen - 内部使用的循环引用检测集合
  * @returns 脱敏后的对象副本
  */
-export function maskSensitiveObject<T>(obj: T): T {
+export function maskSensitiveObject<T>(obj: T, seen: WeakSet<object> = new WeakSet()): T {
   if (obj === null || obj === undefined) return obj;
 
   if (typeof obj === 'string') {
@@ -296,8 +297,13 @@ export function maskSensitiveObject<T>(obj: T): T {
   }
 
   if (typeof obj === 'object') {
+    if (seen.has(obj as object)) {
+      return '[Circular]' as unknown as T;
+    }
+    seen.add(obj as object);
+
     if (Array.isArray(obj)) {
-      return obj.map((item) => maskSensitiveObject(item)) as unknown as T;
+      return obj.map((item) => maskSensitiveObject(item, seen)) as unknown as T;
     }
 
     const masked: Record<string, unknown> = {};
@@ -311,7 +317,7 @@ export function maskSensitiveObject<T>(obj: T): T {
           masked[key] = '***';
         }
       } else {
-        masked[key] = maskSensitiveObject(value);
+        masked[key] = maskSensitiveObject(value, seen);
       }
     }
     return masked as T;

@@ -32,6 +32,7 @@ import type {
   FigmaStyle,
   FigmaPaint,
 } from '../types.js';
+import { FigmaApiError, type ErrorCode } from '../utils/errors.js';
 import { FigmaCache } from './cache.js';
 
 // ============ 类型定义 ============
@@ -108,6 +109,14 @@ export interface FigmaClientConfig {
   cache?: FigmaCache;
   /** 缓存 TTL（毫秒），默认 10 分钟 */
   cacheTTL?: number;
+  /** 备用 Token 列表。当前 Token 遇到 401/Token 类 403 时会自动轮换。 */
+  tokens?: string[];
+  /** 是否启用多 Token 自动轮换，默认 true */
+  enableTokenRotation?: boolean;
+  /** 鉴权、权限、付费墙或网络异常时是否允许回退到陈旧缓存，默认 true */
+  staleCacheFallback?: boolean;
+  /** 陈旧缓存最大可接受年龄（毫秒），默认 7 天 */
+  staleCacheMaxAgeMs?: number;
 }
 
 /**
@@ -127,18 +136,41 @@ interface RateLimitState {
  */
 interface RequestMetadata {
   retryCount?: number;
+  authRetryCount?: number;
+}
+
+/**
+ * HTTP 失败分类结果
+ */
+interface HttpFailureClassification {
+  code: ErrorCode;
+  reason: string;
+  solution: string;
+  retriable: boolean;
+  tokenRecoverable: boolean;
+  staleCacheRecoverable: boolean;
 }
 
 /**
  * Figma API 错误响应结构
  */
-export interface FigmaApiError {
+export interface FigmaApiErrorResponse {
   /** HTTP 状态码 */
   status: number;
   /** 错误消息 */
   message: string;
   /** Figma 原始错误描述 */
   err?: string;
+}
+
+/**
+ * Figma `/v1/me` 响应结构
+ */
+export interface FigmaMeResponse {
+  id: string;
+  email: string;
+  handle: string;
+  img_url: string;
 }
 
 /**
@@ -189,6 +221,9 @@ const LOCALHOST_ADDRESSES = new Set(['localhost', '127.0.0.1', '::1']);
 /** getImages 单批最大节点数（防止 URL 过长导致 HTTP 414 错误） */
 const GET_IMAGES_BATCH_SIZE = 50;
 
+/** 陈旧缓存默认最大保留时间：7 天 */
+const DEFAULT_STALE_CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+
 // ============ FigmaClient 类 ============
 
 /**
@@ -225,7 +260,7 @@ export class FigmaClient {
   /** Axios HTTP 客户端实例（已配置认证头部和错误拦截器） */
   private readonly _client: AxiosInstance;
   /** Figma Personal Access Token */
-  private readonly _accessToken: string;
+  private _accessToken: string;
   /** 重试配置 */
   private readonly _retryConfig: Required<RetryConfig>;
   /** 速率限制配置 */
@@ -233,11 +268,23 @@ export class FigmaClient {
   /** 速率限制状态 */
   private _rateLimitState: RateLimitState;
   /** 缓存统计 */
-  private _requestStats: { total: number; retried: number; cached: number };
+  private _requestStats: { total: number; retried: number; cached: number; staleFallback: number };
   /** 缓存实例 */
   private readonly _cache: FigmaCache | null;
   /** 缓存 TTL */
   private readonly _cacheTTL: number;
+  /** 可用 Token 列表，首个为当前 Token */
+  private readonly _tokens: string[];
+  /** 当前 Token 在列表中的下标 */
+  private _tokenIndex: number;
+  /** 是否启用 Token 轮换 */
+  private readonly _enableTokenRotation: boolean;
+  /** 是否允许陈旧缓存兜底 */
+  private readonly _staleCacheFallback: boolean;
+  /** 陈旧缓存最大年龄 */
+  private readonly _staleCacheMaxAgeMs: number;
+  /** 上一次请求的降级警告 */
+  private _lastWarning?: string;
 
   /**
    * 从环境变量自动检测代理配置
@@ -355,10 +402,10 @@ export class FigmaClient {
   /**
    * 判断是否应该重试
    */
-  private _isRetryable(error: AxiosError<FigmaApiError>): boolean {
+  private _isRetryable(error: AxiosError<FigmaApiErrorResponse>): boolean {
     if (!error.response) {
-      // 网络错误（没有响应）可以重试
-      return error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' || !error.response;
+      // 网络错误（没有响应）：仅超时/中止类错误可重试，DNS 失败/连接拒绝等不应重试
+      return error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
     }
     return this._retryConfig.retryableStatusCodes.includes(error.response.status);
   }
@@ -366,7 +413,7 @@ export class FigmaClient {
   /**
    * 获取 Retry-After 头的值（秒）
    */
-  private _getRetryAfter(error: AxiosError<FigmaApiError>): number | undefined {
+  private _getRetryAfter(error: AxiosError<FigmaApiErrorResponse>): number | undefined {
     if (!error.response?.headers) return undefined;
     const retryAfter = error.response.headers['retry-after'];
     if (retryAfter) {
@@ -374,6 +421,202 @@ export class FigmaClient {
       return Number.isNaN(parsed) ? undefined : parsed;
     }
     return undefined;
+  }
+
+  /**
+   * 规范化 Token 列表，去重并过滤空值。
+   */
+  private _normalizeTokens(config: FigmaClientConfig): string[] {
+    const tokens = [config.accessToken, ...(config.tokens ?? [])]
+      .map((token) => token?.trim())
+      .filter((token): token is string => Boolean(token));
+    return Array.from(new Set(tokens));
+  }
+
+  /**
+   * 切换到下一个可用 Token。
+   */
+  private _rotateToken(requestConfig?: InternalAxiosRequestConfig): boolean {
+    if (!this._enableTokenRotation || this._tokens.length <= 1) return false;
+
+    const nextIndex = (this._tokenIndex + 1) % this._tokens.length;
+    if (nextIndex === this._tokenIndex) return false;
+
+    this._tokenIndex = nextIndex;
+    const nextToken = this._tokens[nextIndex]!;
+    this._accessToken = nextToken;
+    this._client.defaults.headers.common['X-Figma-Token'] = nextToken;
+    if (requestConfig) {
+      requestConfig.headers.set('X-Figma-Token', nextToken);
+    }
+    return true;
+  }
+
+  /**
+   * 从 Figma 错误响应中提取可搜索的小写错误文本。
+   */
+  private _getResponseText(data?: FigmaApiErrorResponse): string {
+    return [data?.err, data?.message].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  /**
+   * 根据 HTTP 状态码和响应文本细分失败原因。
+   */
+  private _classifyHttpFailure(status: number, data?: FigmaApiErrorResponse): HttpFailureClassification {
+    const text = this._getResponseText(data);
+    const has = (...keywords: string[]): boolean => keywords.some((keyword) => text.includes(keyword));
+
+    if (status === 401) {
+      const expired = has('expired', 'expire', 'invalid token', 'unauthorized');
+      return {
+        code: expired ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+        reason: expired ? 'Figma Access Token 已过期或被撤销。' : 'Figma Access Token 无效。',
+        solution: '请重新生成 Token；如配置了多个 Token，工具会自动尝试下一个。',
+        retriable: false,
+        tokenRecoverable: true,
+        staleCacheRecoverable: true,
+      };
+    }
+
+    if (status === 403) {
+      if (has('payment', 'paid', 'seat', 'billing', 'upgrade', 'subscription', 'dev mode', 'developer mode')) {
+        return {
+          code: 'PAYMENT_REQUIRED',
+          reason: 'Figma 返回付费、席位或 Dev Mode 权限限制。',
+          solution: '请确认 Figma 组织席位或对应权限；本地若有历史缓存，将自动返回陈旧缓存并提示。',
+          retriable: false,
+          tokenRecoverable: false,
+          staleCacheRecoverable: true,
+        };
+      }
+
+      if (has('token', 'auth', 'credential', 'forbidden token')) {
+        return {
+          code: 'TOKEN_INVALID',
+          reason: 'Token 认证失败或权限不足。',
+          solution: '请重新生成 Token，或确认该 Token 拥有 File content (Read only) 权限。',
+          retriable: false,
+          tokenRecoverable: true,
+          staleCacheRecoverable: true,
+        };
+      }
+
+      if (has('permission', 'access', 'not allowed', 'not found', 'file')) {
+        return {
+          code: 'FILE_PERMISSION_DENIED',
+          reason: '当前账号没有该文件或节点的访问权限。',
+          solution: '请确认文件链接正确，并让文件所有者把当前 Figma 账号加入协作。',
+          retriable: false,
+          tokenRecoverable: false,
+          staleCacheRecoverable: true,
+        };
+      }
+
+      return {
+        code: 'FORBIDDEN',
+        reason: 'Figma 拒绝了本次请求，但响应中没有给出更明确的原因。',
+        solution: '请检查 Token 权限、文件权限或 Figma 付费/席位状态；本地若有缓存可降级读取。',
+        retriable: false,
+        tokenRecoverable: false,
+        staleCacheRecoverable: true,
+      };
+    }
+
+    if (status === 404) {
+      return {
+        code: 'FILE_NOT_FOUND',
+        reason: '文件或节点不存在，也可能是当前账号无权限导致 Figma 返回 404。',
+        solution: '请检查 fileKey/nodeId 是否正确，并确认当前账号是否有该文件访问权限。',
+        retriable: false,
+        tokenRecoverable: false,
+        staleCacheRecoverable: true,
+      };
+    }
+
+    if (status === 429) {
+      return {
+        code: 'RATE_LIMITED',
+        reason: 'Figma API 请求频率超限。',
+        solution: '工具会根据 Retry-After 自动退避重试；仍失败时请稍后再试。',
+        retriable: true,
+        tokenRecoverable: false,
+        staleCacheRecoverable: true,
+      };
+    }
+
+    if (status >= 500) {
+      return {
+        code: 'SERVER_ERROR',
+        reason: `Figma 服务端异常 (HTTP ${status})。`,
+        solution: '工具已自动重试；若持续失败，请查看 https://status.figma.com。',
+        retriable: true,
+        tokenRecoverable: false,
+        staleCacheRecoverable: true,
+      };
+    }
+
+    return {
+      code: 'NETWORK_ERROR',
+      reason: data?.err || data?.message || `Figma API 请求失败 (HTTP ${status})。`,
+      solution: '请检查参数、网络或代理配置后重试。',
+      retriable: status === 408,
+      tokenRecoverable: false,
+      staleCacheRecoverable: status >= 500 || status === 408,
+    };
+  }
+
+  /**
+   * 构造结构化 FigmaApiError。
+   */
+  private _createApiError(
+    status: number,
+    data: FigmaApiErrorResponse | undefined,
+    classification: HttpFailureClassification,
+  ): FigmaApiError {
+    const originalMessage = [data?.err, data?.message].filter(Boolean).join(' ');
+    return new FigmaApiError(classification.code, status, {
+      reason: classification.reason,
+      solution: classification.solution,
+      retriable: classification.retriable,
+      staleCacheRecoverable: classification.staleCacheRecoverable,
+      originalMessage: originalMessage || undefined,
+    });
+  }
+
+  /**
+   * 判断错误是否允许读取陈旧缓存。
+   */
+  private _canUseStaleCache(error: unknown): boolean {
+    if (!this._staleCacheFallback || !this._cache) return false;
+    if (error instanceof FigmaApiError) return error.staleCacheRecoverable;
+    if (error instanceof Error) {
+      return ['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNRESET'].some((code) => error.message.includes(code));
+    }
+    return false;
+  }
+
+  /**
+   * 实时请求失败时，尝试读取 7 天内的陈旧缓存作为兜底。
+   */
+  private async _withStaleCache<T>(cacheKey: string | null, request: () => Promise<T>): Promise<T> {
+    this._lastWarning = undefined;
+    try {
+      return await request();
+    } catch (error) {
+      if (!cacheKey || !this._canUseStaleCache(error)) {
+        throw error;
+      }
+
+      const stale = await this._cache?.getStale<T>(cacheKey, this._staleCacheMaxAgeMs);
+      if (!stale) {
+        throw error;
+      }
+
+      const ageHours = Math.round(stale.ageMs / (60 * 60 * 1000));
+      this._lastWarning = `实时请求失败，已回退到本地陈旧缓存（约 ${ageHours} 小时前），生成结果可能不是最新设计稿。`;
+      this._requestStats.staleFallback++;
+      return stale.data;
+    }
   }
 
   /**
@@ -391,10 +634,15 @@ export class FigmaClient {
    * @throws {Error} 当 accessToken 为空时构造函数不会直接抛出，但后续 API 调用会返回 401
    */
   constructor(config: FigmaClientConfig) {
-    this._accessToken = config.accessToken;
+    this._tokens = this._normalizeTokens(config);
+    this._tokenIndex = 0;
+    this._accessToken = this._tokens[0] ?? config.accessToken;
+    this._enableTokenRotation = config.enableTokenRotation ?? true;
+    this._staleCacheFallback = config.staleCacheFallback ?? true;
+    this._staleCacheMaxAgeMs = config.staleCacheMaxAgeMs ?? DEFAULT_STALE_CACHE_MAX_AGE;
     this._cache = config.cache || null;
     this._cacheTTL = config.cacheTTL ?? 10 * 60 * 1000; // 默认 10 分钟
-    this._requestStats = { total: 0, retried: 0, cached: 0 };
+    this._requestStats = { total: 0, retried: 0, cached: 0, staleFallback: 0 };
 
     // 初始化重试配置
     this._retryConfig = {
@@ -430,7 +678,7 @@ export class FigmaClient {
       baseURL,
       timeout: config.timeout || DEFAULT_TIMEOUT,
       headers: {
-        'X-Figma-Token': config.accessToken,
+        'X-Figma-Token': this._accessToken,
         'Content-Type': 'application/json',
       },
       httpsAgent,
@@ -455,89 +703,55 @@ export class FigmaClient {
         }
         return response;
       },
-      async (error: AxiosError<FigmaApiError>) => {
-        const config = error.config as (InternalAxiosRequestConfig & RequestMetadata) | undefined;
+      async (error: AxiosError<FigmaApiErrorResponse>) => {
+        const requestConfig = error.config as (InternalAxiosRequestConfig & RequestMetadata) | undefined;
 
         // 更新速率限制状态（即使是错误响应）
         if (error.response?.headers) {
           this._updateRateLimitFromHeaders(error.response.headers as Record<string, string>);
         }
 
-        // 重试逻辑
-        if (config && this._isRetryable(error)) {
-          const retryCount = config.retryCount ?? 0;
-          if (retryCount < this._retryConfig.maxRetries) {
-            this._requestStats.retried++;
-            const retryAfter = this._getRetryAfter(error);
-            const delay = this._calculateRetryDelay(retryCount, retryAfter);
-            await this._delay(delay);
-
-            // 重试请求
-            const newConfig = { ...config, retryCount: retryCount + 1 };
-            return this._client.request(newConfig);
-          }
-        }
-
-        // 错误消息格式化
         if (error.response) {
           const { status, data } = error.response;
-          let message = 'Figma API 请求失败';
-          let suggestion = '';
+          const classification = this._classifyHttpFailure(status, data);
 
-          switch (status) {
-            case 400:
-              message = '请求参数错误';
-              suggestion = '请检查 nodeId、fileKey 等参数格式是否正确';
-              break;
-            case 401:
-              message = '认证失败';
-              suggestion = '请检查 Figma Access Token 是否有效或已过期，可使用 figma-dev token set 更新';
-              break;
-            case 403:
-              message = '权限不足';
-              suggestion =
-                '该 Token 无法访问此文件，请确认 Token 权限包含 File content (Read only)，且你有该文件的访问权限';
-              break;
-            case 404:
-              message = '文件或节点不存在';
-              suggestion = '请检查 fileKey/nodeId 是否正确，文件是否已被删除或移动';
-              break;
-            case 429:
-              message = '请求频率超限（Rate Limit）';
-              suggestion = '已自动重试多次仍失败，请稍后再试，或降低并发请求数';
-              break;
-            case 408:
-              message = '请求超时';
-              suggestion = '网络不稳定，已自动重试，请检查网络连接';
-              break;
-            case 500:
-            case 502:
-            case 503:
-            case 504:
-              message = 'Figma 服务器错误';
-              suggestion = '已自动重试多次，请稍后再试，或查看 https://status.figma.com 了解服务状态';
-              break;
-            default:
-              message = data?.err || data?.message || `HTTP ${status} 错误`;
-              suggestion = '如果问题持续，请检查网络连接或稍后重试';
+          // 401/Token 类 403：优先尝试下一个 Token，避免单个 Token 过期导致整次生成失败。
+          if (
+            requestConfig &&
+            classification.tokenRecoverable &&
+            (requestConfig.authRetryCount ?? 0) < Math.max(this._tokens.length - 1, 0) &&
+            this._rotateToken(requestConfig)
+          ) {
+            requestConfig.authRetryCount = (requestConfig.authRetryCount ?? 0) + 1;
+            requestConfig.retryCount = requestConfig.retryCount ?? 0;
+            return this._client.request(requestConfig);
           }
 
-          const errorMsg = `Figma API Error (${status}): ${message}。${suggestion}`;
-          const enhancedError = new Error(errorMsg);
-          (enhancedError as Error & { status?: number }).status = status;
-          throw enhancedError;
-        } else if (error.request) {
-          // 请求已发出但未收到响应（网络问题、DNS 失败、超时等）
-          const networkError = new Error(
-            'Figma API 请求失败：网络连接错误或请求超时。' +
-              '请检查网络设置，如有代理可配置 HTTP_PROXY/HTTPS_PROXY 环境变量，' +
-              '或使用 figma-dev config set proxy 配置代理。',
-          );
-          throw networkError;
-        } else {
-          // 请求配置阶段出错
-          throw new Error(`Figma API 请求失败：${error.message}`);
+          // 429/5xx/超时：按照指数退避与 Retry-After 自动重试。
+          if (requestConfig && classification.retriable && this._isRetryable(error)) {
+            const retryCount = requestConfig.retryCount ?? 0;
+            if (retryCount < this._retryConfig.maxRetries) {
+              this._requestStats.retried++;
+              const retryAfter = this._getRetryAfter(error);
+              const delay = this._calculateRetryDelay(retryCount, retryAfter);
+              await this._delay(delay);
+              requestConfig.retryCount = retryCount + 1;
+              return this._client.request(requestConfig);
+            }
+          }
+
+          throw this._createApiError(status, data, classification);
         }
+
+        if (error.request) {
+          // 请求已发出但未收到响应（网络问题、DNS 失败、超时等）。交给陈旧缓存降级逻辑处理。
+          throw new Error(
+            'Figma API 请求失败：网络连接错误或请求超时。' +
+              '请检查网络设置、HTTP_PROXY/HTTPS_PROXY 环境变量或代理配置。',
+          );
+        }
+
+        throw new Error(`Figma API 请求失败：${error.message}`);
       },
     );
   }
@@ -558,7 +772,14 @@ export class FigmaClient {
    *
    * @returns 包含总请求数、重试次数、缓存命中数的统计对象
    */
-  getRequestStats(): { total: number; retried: number; cached: number; retryRate: number; cacheHitRate: number } {
+  getRequestStats(): {
+    total: number;
+    retried: number;
+    cached: number;
+    staleFallback: number;
+    retryRate: number;
+    cacheHitRate: number;
+  } {
     const retryRate = this._requestStats.total > 0 ? this._requestStats.retried / this._requestStats.total : 0;
     const cacheHitRate = this._requestStats.total > 0 ? this._requestStats.cached / this._requestStats.total : 0;
     return {
@@ -566,6 +787,20 @@ export class FigmaClient {
       retryRate,
       cacheHitRate,
     };
+  }
+
+  /**
+   * 获取上一次请求的降级警告。
+   */
+  getLastWarning(): string | undefined {
+    return this._lastWarning;
+  }
+
+  /**
+   * 清除降级警告，避免跨工具调用误报。
+   */
+  clearLastWarning(): void {
+    this._lastWarning = undefined;
   }
 
   /**
@@ -589,12 +824,12 @@ export class FigmaClient {
    *
    * @returns Token 有效返回用户信息，无效返回 null
    */
-  async validateToken(): Promise<{ id: string; email: string; handle: string; img_url: string } | null> {
+  async validateToken(): Promise<FigmaMeResponse | null> {
     try {
-      const response = await this._client.get('/v1/me');
+      const response = await this._client.get<FigmaMeResponse>('/v1/me');
       return response.data;
     } catch {
-      // 任何错误（401、网络错误等）都视为 Token 无效
+      // 任何错误（401、网络错误等）都视为 Token 无效；具体错误会在业务请求中展示。
       return null;
     }
   }
@@ -614,10 +849,11 @@ export class FigmaClient {
    * @throws {Error} 当 fileKey 无效或无权限时抛出 Figma API 错误
    */
   async getFile(fileKey: string, version?: string, depth?: number): Promise<FigmaFileResponse> {
-    // 尝试从缓存获取
-    if (this._cache) {
-      const cacheKey = FigmaCache.generateFileCacheKey(fileKey, version, depth);
-      const cached = await this._cache.get<FigmaFileResponse>(cacheKey);
+    const cache = this._cache;
+    const cacheKey = cache ? FigmaCache.generateFileCacheKey(fileKey, version, depth) : null;
+
+    if (cache && cacheKey) {
+      const cached = await cache.get<FigmaFileResponse>(cacheKey);
       if (cached) {
         this._requestStats.cached++;
         return cached;
@@ -628,14 +864,12 @@ export class FigmaClient {
     if (version) params.version = version;
     if (depth !== undefined) params.depth = depth;
 
-    const response = await this._client.get<FigmaFileResponse>(`/v1/files/${fileKey}`, {
-      params,
-    });
+    const response = await this._withStaleCache(cacheKey, () =>
+      this._client.get<FigmaFileResponse>(`/v1/files/${fileKey}`, { params }),
+    );
 
-    // 写入缓存
-    if (this._cache) {
-      const cacheKey = FigmaCache.generateFileCacheKey(fileKey, version, depth);
-      await this._cache.set(cacheKey, response.data, this._cacheTTL);
+    if (cache && cacheKey) {
+      await cache.set(cacheKey, response.data, this._cacheTTL);
     }
 
     return response.data;
@@ -655,7 +889,6 @@ export class FigmaClient {
     fileKey: string,
     options: GetFileNodesOptions = {},
   ): Promise<{ nodes: Record<string, { document: FigmaNode }> }> {
-    // 生成缓存键（包含所有选项）
     const cacheKeyParts = [
       fileKey,
       (options.ids || []).sort().join(','),
@@ -663,11 +896,11 @@ export class FigmaClient {
       options.geometry || '',
       options.plugin_data || '',
     ];
-    const cacheKey = FigmaCache.generateApiCacheKey('nodes', ...cacheKeyParts);
+    const cache = this._cache;
+    const cacheKey = cache ? FigmaCache.generateApiCacheKey('nodes', ...cacheKeyParts) : null;
 
-    // 尝试从缓存获取
-    if (this._cache) {
-      const cached = await this._cache.get<{ nodes: Record<string, { document: FigmaNode }> }>(cacheKey);
+    if (cache && cacheKey) {
+      const cached = await cache.get<{ nodes: Record<string, { document: FigmaNode }> }>(cacheKey);
       if (cached) {
         this._requestStats.cached++;
         return cached;
@@ -682,13 +915,14 @@ export class FigmaClient {
     if (options.geometry) params.geometry = options.geometry;
     if (options.plugin_data) params.plugin_data = options.plugin_data;
 
-    const response = await this._client.get(`/v1/files/${fileKey}/nodes`, {
-      params,
-    });
+    const response = await this._withStaleCache(cacheKey, () =>
+      this._client.get<{ nodes: Record<string, { document: FigmaNode }> }>(`/v1/files/${fileKey}/nodes`, {
+        params,
+      }),
+    );
 
-    // 写入缓存
-    if (this._cache) {
-      await this._cache.set(cacheKey, response.data, this._cacheTTL);
+    if (cache && cacheKey) {
+      await cache.set(cacheKey, response.data, this._cacheTTL);
     }
 
     return response.data;
@@ -754,7 +988,25 @@ export class FigmaClient {
    * @throws {Error} Variables API 不可用或无权限时抛出
    */
   async getVariables(fileKey: string): Promise<FigmaVariablesResponse> {
-    const response = await this._client.get<FigmaVariablesResponse>(`/v1/files/${fileKey}/variables/local`);
+    const cache = this._cache;
+    const cacheKey = cache ? FigmaCache.generateApiCacheKey('variables', fileKey) : null;
+
+    if (cache && cacheKey) {
+      const cached = await cache.get<FigmaVariablesResponse>(cacheKey);
+      if (cached) {
+        this._requestStats.cached++;
+        return cached;
+      }
+    }
+
+    const response = await this._withStaleCache(cacheKey, () =>
+      this._client.get<FigmaVariablesResponse>(`/v1/files/${fileKey}/variables/local`),
+    );
+
+    if (cache && cacheKey) {
+      await cache.set(cacheKey, response.data, this._cacheTTL);
+    }
+
     return response.data;
   }
 
@@ -774,7 +1026,33 @@ export class FigmaClient {
       componentIds: string[];
     }>;
   }> {
-    const response = await this._client.get(`/v1/files/${fileKey}/component_sets`);
+    type ComponentSetsResponse = {
+      componentSets: Array<{
+        key: string;
+        name: string;
+        description: string;
+        componentIds: string[];
+      }>;
+    };
+
+    const cache = this._cache;
+    const cacheKey = cache ? FigmaCache.generateApiCacheKey('component-sets', fileKey) : null;
+    if (cache && cacheKey) {
+      const cached = await cache.get<ComponentSetsResponse>(cacheKey);
+      if (cached) {
+        this._requestStats.cached++;
+        return cached;
+      }
+    }
+
+    const response = await this._withStaleCache(cacheKey, () =>
+      this._client.get<ComponentSetsResponse>(`/v1/files/${fileKey}/component_sets`),
+    );
+
+    if (cache && cacheKey) {
+      await cache.set(cacheKey, response.data, this._cacheTTL);
+    }
+
     return response.data;
   }
 

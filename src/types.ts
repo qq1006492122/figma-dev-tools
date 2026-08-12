@@ -1058,6 +1058,8 @@ export interface CodeGenResult {
   readonly extensionsNeeded: readonly TailwindExtension[];
   /** 需要下载的资源列表 */
   readonly pendingAssets: readonly PendingAsset[];
+  /** 代码生成过程中的警告信息（样式未匹配 token、多层描边等，v1.4.2 新增） */
+  readonly warnings: readonly string[];
   /** 增强报告 */
   readonly reports: EnhancementReports;
 }

@@ -170,13 +170,14 @@ export class WatchMode {
     this._isGenerating = true;
 
     try {
+      // 获取文件元信息（depth=1 最小化数据传输，仍包含 lastModified）
+      // 注意：必须在循环外获取，同一文件的 lastModified 对所有节点相同
+      const fileMeta = await this._client.getFile(this._options.fileKey, undefined, 1);
+      const newModifiedAt = fileMeta.lastModified;
+
       for (const nodeId of this._options.nodeIds) {
         const startTime = Date.now();
 
-        // 获取文件元信息（depth=1 最小化数据传输，仍包含 lastModified）
-        const fileMeta = await this._client.getFile(this._options.fileKey, undefined, 1);
-
-        const newModifiedAt = fileMeta.lastModified;
         const oldModifiedAt = this._lastModifiedCache.get(nodeId) ?? null;
 
         const hasChanged = isFirstRun || oldModifiedAt !== newModifiedAt;

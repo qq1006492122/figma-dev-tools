@@ -31,6 +31,7 @@ import type {
   ProcessedAsset,
   ProcessedShadow,
   ProcessedFill,
+  ProcessedGradientFill,
   NodeSemanticRole,
 } from '../types/nodes.js';
 import type { FigmaClient } from './figma-client.js';
@@ -81,15 +82,32 @@ function colorToHex(color: FigmaColor): string {
  * @param fills - 处理后的填充数组
  * @param result - 用于收集 hex 的 Set（输出参数）
  */
-function collectColorsFromFills(fills: ProcessedFill[] | undefined, result: Set<string>): void {
+function collectColorsFromFills(
+  fills: ProcessedFill[] | undefined,
+  result: Set<string>,
+  gradients?: Map<string, ProcessedGradientFill>,
+): void {
   if (!fills) return;
   for (const fill of fills) {
+    if (fill.opacity !== undefined && fill.opacity <= 0.01) continue;
+
     if (fill.type === 'solid' && fill.color) {
-      const hex = colorToHex(fill.color);
-      // 忽略接近透明的颜色，避免收集到无用的透明色 token
-      if (fill.opacity === undefined || fill.opacity > 0.01) {
-        result.add(hex);
+      result.add(colorToHex(fill.color));
+    }
+
+    if (fill.type === 'gradient-linear') {
+      for (const stop of fill.gradientStops) {
+        result.add(colorToHex(stop.color));
       }
+      const key = JSON.stringify({
+        handles: fill.gradientHandlePositions,
+        stops: fill.gradientStops.map((stop) => ({
+          position: Number(stop.position.toFixed(3)),
+          color: colorToHex(stop.color),
+          alpha: Number(stop.color.a.toFixed(3)),
+        })),
+      });
+      gradients?.set(key, fill);
     }
   }
 }
@@ -114,7 +132,11 @@ function collectColorsFromFills(fills: ProcessedFill[] | undefined, result: Set<
  * @param spacingValues - 间距值集合（输出）
  * @param radiusValues - 圆角值集合（输出）
  * @param shadows - 阴影数组（输出）
+ * @param gradients - 渐变填充集合（输出）
  */
+/** collectNodeInfo 递归深度硬限制，防止异常数据导致栈溢出 */
+const COLLECT_MAX_DEPTH = 60;
+
 function collectNodeInfo(
   node: ProcessedNode,
   colors: Set<string>,
@@ -124,9 +146,14 @@ function collectNodeInfo(
   spacingValues: Set<number>,
   radiusValues: Set<number>,
   shadows: ProcessedShadow[],
+  gradients: Map<string, ProcessedGradientFill>,
+  depth: number = 0,
 ): void {
-  // ============ 收集颜色 ============
-  collectColorsFromFills(node.fills, colors);
+  // 深度保护：超过硬限制时停止递归
+  if (depth > COLLECT_MAX_DEPTH) return;
+
+  // ============ 收集颜色与渐变 ============
+  collectColorsFromFills(node.fills, colors, gradients);
   // 描边颜色
   if (node.strokes) {
     for (const stroke of node.strokes) {
@@ -213,7 +240,18 @@ function collectNodeInfo(
   // ============ 递归处理子节点 ============
   if (node.children) {
     for (const child of node.children) {
-      collectNodeInfo(child, colors, assets, textNodes, componentsUsed, spacingValues, radiusValues, shadows);
+      collectNodeInfo(
+        child,
+        colors,
+        assets,
+        textNodes,
+        componentsUsed,
+        spacingValues,
+        radiusValues,
+        shadows,
+        gradients,
+        depth + 1,
+      );
     }
   }
 }
@@ -365,6 +403,11 @@ export class DesignContextService {
     }
 
     const size = node.absoluteBoundingBox || node.absoluteRenderBounds;
+    const warnings: string[] = [];
+
+    if (!size || size.width <= 0 || size.height <= 0) {
+      warnings.push('目标节点缺少有效尺寸，概览布局可能不完整。');
+    }
 
     // ============ 构建直接子节点概览 ============
     const children: NodeOverview[] = [];
@@ -423,9 +466,16 @@ export class DesignContextService {
       }
     }
 
+    const clientWarning = this._client.getLastWarning();
+    if (clientWarning) {
+      warnings.unshift(clientWarning);
+    }
+
     // ============ 构建并返回元数据 ============
     // 最多返回 30 个颜色，避免上下文过长
     return {
+      warnings,
+      dataSource: clientWarning ? 'stale-cache' : 'live',
       name: node.name,
       type:
         node.type === 'CANVAS' ||
@@ -466,19 +516,28 @@ export class DesignContextService {
     maxDepth: number = this._options.defaultMaxDepth,
     _includeChildren: boolean = true,
   ): Promise<DesignContext> {
+    const effectiveMaxDepth = maxDepth > 0 ? Math.min(Math.max(maxDepth, 1), 10) : -1;
+    const requestDepth = effectiveMaxDepth > 0 ? effectiveMaxDepth + 2 : -1;
+    const warnings: string[] = [];
+
     // ============ 获取原始节点 ============
     // 获取足够深度的原始节点（node-processor 内部会控制输出深度）
     // maxDepth+2 是为了给扁平化操作预留缓冲
-    const rawNode = await this._client.getNode(fileKey, nodeId, maxDepth > 0 ? maxDepth + 2 : -1);
+    const rawNode = await this._client.getNode(fileKey, nodeId, requestDepth);
 
     if (!rawNode) {
       throw new Error(`Node not found: ${nodeId} in file ${fileKey}`);
     }
 
+    const rawBounds = rawNode.absoluteBoundingBox || rawNode.absoluteRenderBounds;
+    if (!rawBounds || rawBounds.width <= 0 || rawBounds.height <= 0) {
+      warnings.push('目标节点缺少有效尺寸（absoluteBoundingBox/absoluteRenderBounds），布局还原需结合截图复核。');
+    }
+
     // ============ 使用 node-processor 精简处理 ============
     // 配置：跳过不可见、扁平化 GROUP、自动检测资源
     const processor = createNodeProcessor({
-      maxDepth,
+      maxDepth: effectiveMaxDepth,
       skipInvisible: true,
       flattenGroups: true,
       detectAssets: true,
@@ -486,6 +545,12 @@ export class DesignContextService {
 
     const result = processor.process(rawNode);
     const processedNode = result.node;
+
+    if (result.stats.originalNodeCount > result.stats.processedNodeCount) {
+      warnings.push(
+        `节点树过大，已降级处理：原始 ${result.stats.originalNodeCount} 个节点，输出 ${result.stats.processedNodeCount} 个节点。`,
+      );
+    }
 
     // ============ 收集节点树中的所有信息 ============
     const colors = new Set<string>();
@@ -495,9 +560,25 @@ export class DesignContextService {
     const spacingValues = new Set<number>();
     const radiusValues = new Set<number>();
     const shadows: ProcessedShadow[] = [];
+    const gradients = new Map<string, ProcessedGradientFill>();
 
     // 递归遍历精简后的节点树，收集所有设计信息
-    collectNodeInfo(processedNode, colors, assets, textNodes, componentsUsed, spacingValues, radiusValues, shadows);
+    collectNodeInfo(
+      processedNode,
+      colors,
+      assets,
+      textNodes,
+      componentsUsed,
+      spacingValues,
+      radiusValues,
+      shadows,
+      gradients,
+    );
+
+    const clientWarning = this._client.getLastWarning();
+    if (clientWarning) {
+      warnings.unshift(clientWarning);
+    }
 
     // ============ 将颜色 hex 转为 ColorToken 数组 ============
     // 为每个颜色生成临时名称（color-1, color-2, ...），后续可通过 token-matcher 匹配到系统色板
@@ -520,9 +601,13 @@ export class DesignContextService {
       spacing: Array.from(spacingValues).sort((a, b) => a - b),
       radii: Array.from(radiusValues).sort((a, b) => a - b),
       shadows,
+      gradients: Array.from(gradients.values()),
       assets,
       textNodes,
       componentsUsed: Array.from(componentsUsed.values()),
+      warnings,
+      dataSource: clientWarning ? 'stale-cache' : 'live',
+      processingStats: result.stats,
     };
   }
 

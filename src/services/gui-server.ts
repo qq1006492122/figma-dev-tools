@@ -34,7 +34,7 @@ const GUI_DIR = path.resolve(__dirname, '../../gui');
 
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
-const VERSION = '1.4.2';
+const VERSION = '1.4.3';
 
 interface EditorInfo {
   name: string;
@@ -409,13 +409,31 @@ function sendJson(res: http.ServerResponse, statusCode: number, data: unknown): 
   res.end(JSON.stringify(data));
 }
 
+/** 请求体大小上限（1MB），防止恶意超大 body 导致内存耗尽 */
+const MAX_BODY_BYTES = 1 * 1024 * 1024;
+
 function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (chunk) => {
+    let size = 0;
+    let aborted = false;
+    req.on('data', (chunk: Buffer) => {
+      if (aborted) return;
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        aborted = true;
+        req.destroy();
+        reject(new Error('Request body too large (max 1MB)'));
+        return;
+      }
       body += chunk.toString();
     });
-    req.on('end', () => resolve(body));
+    req.on('end', () => {
+      if (!aborted) resolve(body);
+    });
+    req.on('error', (err) => {
+      if (!aborted) reject(err);
+    });
   });
 }
 

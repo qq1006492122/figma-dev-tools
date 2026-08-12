@@ -1,7 +1,7 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.4.2",
-  "description": "Figma Dev Tools MCP Server v1.4.2 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, zero `any` types for type safety, and one-click installation across 10+ editors.",
+  "version": "1.4.3",
+  "description": "Figma Dev Tools MCP Server v1.4.3 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, zero `any` types for type safety, and one-click installation across 10+ editors.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

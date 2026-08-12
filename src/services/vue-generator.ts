@@ -35,6 +35,7 @@ export interface GeneratedVueComponent {
   componentName: string;
   pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
   extensionsNeeded: TailwindMapping['extensionsNeeded'];
+  warnings: string[];
   reports: EnhancementReports;
   imports: string[];
 }
@@ -46,6 +47,7 @@ interface VueRenderContext {
   depth: number;
   extensions: TailwindMapping['extensionsNeeded'];
   pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
+  warnings: string[];
   usePublicCdn: boolean;
   sceneName: string;
   fileKey: string;
@@ -96,7 +98,13 @@ export class VueGenerator {
     const reports: EnhancementReports = {};
     const extensionsNeeded: TailwindMapping['extensionsNeeded'] = [];
     const pendingAssets: Array<{ nodeId: string; name: string; type: string }> = [];
+    const warnings: string[] = [];
     const imports = new Set<string>();
+
+    // 透传 design-context 层的警告（如陈旧缓存降级）
+    if (context.warnings && context.warnings.length > 0) {
+      warnings.push(...context.warnings);
+    }
 
     if (!opts.skipEnhancements) {
       reports.flexFixes = flexFixer.applyFixes(context.node);
@@ -116,6 +124,7 @@ export class VueGenerator {
         depth: 1,
         extensions: extensionsNeeded,
         pendingAssets,
+        warnings,
         usePublicCdn: opts.usePublicCdn !== false,
         sceneName: opts.sceneName || '',
         fileKey: context.fileKey,
@@ -168,6 +177,7 @@ export class VueGenerator {
       componentName,
       pendingAssets: dedupedAssets,
       extensionsNeeded: dedupedExtensions,
+      warnings: Array.from(new Set(warnings)),
       reports,
       imports: Array.from(imports),
     };
@@ -228,6 +238,16 @@ export class VueGenerator {
 
     const mapping: TailwindMapping = twMapper.mapNode(node);
     ctx.extensions.push(...(mapping.extensionsNeeded || []));
+
+    // 收集 Tailwind 映射警告（去重后添加到上下文）
+    if (mapping.warnings && mapping.warnings.length > 0) {
+      for (const w of mapping.warnings) {
+        const warningWithNode = `[${node.name || node.figmaId}] ${w}`;
+        if (!ctx.warnings.includes(warningWithNode)) {
+          ctx.warnings.push(warningWithNode);
+        }
+      }
+    }
 
     const classNames: string[] = [];
     if (mapping.className) classNames.push(mapping.className);

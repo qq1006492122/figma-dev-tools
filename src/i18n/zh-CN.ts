@@ -383,6 +383,52 @@ export const zhCN = {
         getToken: '🔑 获取 Token: https://www.figma.com/developers/api#access-tokens',
       },
       invalidUrl: '错误: 无法解析 Figma URL',
+      codes: {
+        TOKEN_INVALID: {
+          code: 'TOKEN_INVALID',
+          title: 'Figma Token 无效',
+          reason: '当前 Access Token 无法通过 Figma 认证。',
+          solutions: ['重新生成 Figma Personal Access Token', '确认勾选 File content (Read only) 权限', '更新环境变量 FIGMA_ACCESS_TOKEN 或调用参数 accessToken'],
+          docs: 'https://www.figma.com/developers/api#access-tokens',
+        },
+        TOKEN_EXPIRED: {
+          code: 'TOKEN_EXPIRED',
+          title: 'Figma Token 已过期',
+          reason: '当前 Token 已过期或被撤销，无法读取设计稿结构。',
+          solutions: ['在 Figma Settings 中重新生成 Token', '如果配置了多个 Token，工具会自动尝试切换到下一个', '更新 Token 后重新拉取设计数据'],
+          docs: 'https://www.figma.com/developers/api#access-tokens',
+        },
+        FILE_PERMISSION_DENIED: {
+          code: 'FILE_PERMISSION_DENIED',
+          title: '没有文件访问权限',
+          reason: 'Token 本身有效，但当前账号没有该 Figma 文件的访问权限。',
+          solutions: ['确认文件链接正确', '让文件所有者把当前 Figma 账号加入文件协作', '确认该文件不是团队内受限文件'],
+        },
+        PAYMENT_REQUIRED: {
+          code: 'PAYMENT_REQUIRED',
+          title: 'Figma 付费或席位权限受限',
+          reason: 'Figma 返回付费、席位或 Dev Mode 相关限制，当前 Token 无法读取完整设计数据。',
+          solutions: ['确认 Figma 组织/团队席位是否有效', '确认应用或 Token 对应账号是否具备所需访问权限', '如果本机已有缓存，工具会尝试返回最近一次缓存并标记为陈旧数据'],
+        },
+        FORBIDDEN: {
+          code: 'FORBIDDEN',
+          title: 'Figma 请求被拒绝',
+          reason: 'Figma 返回 403，但未能从响应中判断具体原因。',
+          solutions: ['检查 Token 权限和文件协作权限', '稍后重试，或使用截图/导出资源补充输入', '若本地有旧缓存，可选择基于陈旧缓存继续分析'],
+        },
+        SERVER_ERROR: {
+          code: 'SERVER_ERROR',
+          title: 'Figma 服务异常',
+          reason: 'Figma API 返回 5xx 服务端错误。',
+          solutions: ['工具已自动重试', '查看 https://status.figma.com', '稍后重新生成代码'],
+        },
+        STALE_CACHE_USED: {
+          code: 'STALE_CACHE_USED',
+          title: '正在使用陈旧缓存',
+          reason: '实时请求失败，当前结果来自本地历史缓存，可能不是最新设计稿。',
+          solutions: ['恢复 Token 或文件权限后重新拉取', '将生成结果与 Figma 最新截图比对', '不要把陈旧缓存结果视为最终还原结果'],
+        },
+      },
     },
   },
 

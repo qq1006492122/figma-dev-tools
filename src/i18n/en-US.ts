@@ -383,6 +383,52 @@ export const enUS = {
         getToken: '🔑 Get Token: https://www.figma.com/developers/api#access-tokens',
       },
       invalidUrl: 'Error: Unable to parse Figma URL',
+      codes: {
+        TOKEN_INVALID: {
+          code: 'TOKEN_INVALID',
+          title: 'Invalid Figma token',
+          reason: 'The current access token did not pass Figma authentication.',
+          solutions: ['Regenerate a Figma Personal Access Token', 'Confirm File content (Read only) scope is selected', 'Update FIGMA_ACCESS_TOKEN or the accessToken argument'],
+          docs: 'https://www.figma.com/developers/api#access-tokens',
+        },
+        TOKEN_EXPIRED: {
+          code: 'TOKEN_EXPIRED',
+          title: 'Figma token expired',
+          reason: 'The current token has expired or been revoked.',
+          solutions: ['Regenerate the token in Figma Settings', 'If multiple tokens are configured, the tool will try the next one', 'Pull design data again after updating the token'],
+          docs: 'https://www.figma.com/developers/api#access-tokens',
+        },
+        FILE_PERMISSION_DENIED: {
+          code: 'FILE_PERMISSION_DENIED',
+          title: 'File access denied',
+          reason: 'The token is valid, but the current account cannot access this Figma file.',
+          solutions: ['Verify the file URL', 'Ask the file owner to invite the current Figma account', 'Check team-level access restrictions'],
+        },
+        PAYMENT_REQUIRED: {
+          code: 'PAYMENT_REQUIRED',
+          title: 'Payment or seat restriction',
+          reason: 'Figma returned a payment, seat, or Dev Mode access restriction.',
+          solutions: ['Verify the organization or team seat is active', 'Confirm the token account has the required access level', 'If local cache exists, the tool can return stale data with a warning'],
+        },
+        FORBIDDEN: {
+          code: 'FORBIDDEN',
+          title: 'Figma request forbidden',
+          reason: 'Figma returned 403, but the exact cause could not be determined from the response.',
+          solutions: ['Check token scopes and file permissions', 'Retry later or provide screenshots/exported assets as fallback', 'Use stale local cache when available'],
+        },
+        SERVER_ERROR: {
+          code: 'SERVER_ERROR',
+          title: 'Figma server error',
+          reason: 'Figma API returned a 5xx server error.',
+          solutions: ['The tool has retried automatically', 'Check https://status.figma.com', 'Retry code generation later'],
+        },
+        STALE_CACHE_USED: {
+          code: 'STALE_CACHE_USED',
+          title: 'Stale cache is being used',
+          reason: 'The live request failed and the result came from local historical cache. It may be outdated.',
+          solutions: ['Refresh token or file permission, then pull again', 'Compare generated output with the latest Figma screenshot', 'Do not treat stale cache output as final'],
+        },
+      },
     },
   },
 

@@ -506,7 +506,10 @@ class TokenStoreImpl implements TokenStore {
       if (stored) {
         return stored;
       }
-    } catch {}
+    } catch (err) {
+      // 从系统密钥链读取失败时回退到默认 token 名称
+      console.warn('[figma-dev] Keytar read failed, falling back to default:', err instanceof Error ? err.message : err);
+    }
     return DEFAULT_TOKEN_NAME;
   }
 

@@ -110,6 +110,8 @@ interface ProcessedNodeContext {
   imports: Set<string>;
   /** 需要 @theme 扩展的值列表 */
   extensions: TailwindMapping['extensionsNeeded'];
+  /** Tailwind 映射过程中产生的警告（用于人工复核） */
+  warnings: string[];
   /** 需要下载的资源列表（nodeId → 建议文件名） */
   pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
   /** 是否使用 publicCdnUrl 引用资源 */
@@ -188,8 +190,8 @@ const DEFAULT_CODE_GEN_OPTIONS: Required<CodeGenOptions> = {
  * ```
  */
 export class CodeGenerator {
-  /** Figma API 客户端实例 */
-  private readonly _client: FigmaClient;
+  /** Figma API 客户端实例（纯 CSS 生成等场景可为 null） */
+  private readonly _client: FigmaClient | null;
   /** 代码生成选项（已合并默认值） */
   private _options: Required<CodeGenOptions>;
   /** SVG 内联渲染器实例 */
@@ -198,10 +200,10 @@ export class CodeGenerator {
   /**
    * 构造函数 - 初始化代码生成器
    *
-   * @param client - Figma API 客户端实例
+   * @param client - Figma API 客户端实例（纯本地转换时可传 null）
    * @param options - 代码生成选项
    */
-  constructor(client: FigmaClient, options: Partial<CodeGenOptions> = {}) {
+  constructor(client: FigmaClient | null, options: Partial<CodeGenOptions> = {}) {
     this._client = client;
     this._options = { ...DEFAULT_CODE_GEN_OPTIONS, ...options };
     this._svgRenderer = new SvgInlineRenderer(client, {
@@ -231,6 +233,7 @@ export class CodeGenerator {
     nodeId: string,
     options?: Partial<CodeGenOptions>,
   ): Promise<GeneratedComponent> {
+    if (!this._client) throw new Error('generateComponent 需要 FigmaClient 实例');
     const opts = { ...this._options, ...options };
     const node = await this._client.getNode(fileKey, nodeId);
 
@@ -423,6 +426,8 @@ export class CodeGenerator {
     extensionsNeeded: Array<{ type: string; suggestedName: string; originalValue: string }>;
     /** 需要下载的资源列表（nodeId → 建议文件名） */
     pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
+    /** Tailwind 映射和代码生成过程中产生的警告（需人工复核） */
+    warnings: string[];
     /** 增强报告（v1.2.0 新增） */
     reports: EnhancementReports;
   }> {
@@ -430,9 +435,15 @@ export class CodeGenerator {
     const twMapper = createTailwindMapper({ allowArbitrary: true });
     const imports = new Set<string>(['import React from "react";']);
     const extensionsNeeded: TailwindMapping['extensionsNeeded'] = [];
+    const warnings: string[] = [];
     const pendingAssets: Array<{ nodeId: string; name: string; type: string }> = [];
     const reports: EnhancementReports = {};
     let needsPublicCdnUrl = false;
+
+    // 透传 design-context 层的警告（如陈旧缓存降级）
+    if (context.warnings && context.warnings.length > 0) {
+      warnings.push(...context.warnings);
+    }
 
     // ============ 0. 应用增强器链（v1.2.0 新增） ============
     if (!options.skipEnhancements) {
@@ -474,6 +485,7 @@ export class CodeGenerator {
       isRoot: true,
       imports,
       extensions: extensionsNeeded,
+      warnings,
       pendingAssets,
       usePublicCdn: options.usePublicCdn !== false,
       sceneName: options.sceneName || '',
@@ -491,7 +503,11 @@ export class CodeGenerator {
     const propsName = `${componentName}Props`;
     const lines: string[] = [];
 
-    // imports 按规范排序分组：React (external) → 第三方 → @/ 内部路径 (internal)
+    // imports 按前端规范分组：
+    // 1. React 核心
+    // 2. 第三方依赖（external）
+    // 3. @/ 别名内部模块（internal）
+    // 注意：组内不按字母排序，保持逻辑引入顺序
     const allImports = new Set(imports);
     allImports.add('import { cn } from "@/lib/utils";');
     if (needsPublicCdnUrl) {
@@ -499,8 +515,8 @@ export class CodeGenerator {
     }
 
     const reactImports: string[] = [];
+    const externalImports: string[] = [];
     const internalImports: string[] = [];
-    const otherImports: string[] = [];
 
     for (const imp of allImports) {
       if (imp.includes('from "react"')) {
@@ -508,23 +524,22 @@ export class CodeGenerator {
       } else if (imp.includes('from "@/')) {
         internalImports.push(imp);
       } else {
-        otherImports.push(imp);
+        externalImports.push(imp);
       }
     }
 
-    // 各组内按字母排序
-    reactImports.sort();
-    otherImports.sort();
-    internalImports.sort();
-
     lines.push(...reactImports);
-    if (otherImports.length > 0) {
-      lines.push(...otherImports);
+    if (externalImports.length > 0) {
+      lines.push('');
+      lines.push(...externalImports);
     }
-    lines.push(...internalImports);
+    if (internalImports.length > 0) {
+      lines.push('');
+      lines.push(...internalImports);
+    }
 
-    // 添加报告注释
-    const reportComments = this._generateReportComments(reports);
+    // 添加报告注释（包含增强器统计和人工复核警告）
+    const reportComments = this._generateReportComments(reports, warnings);
     if (reportComments) {
       lines.push('');
       lines.push(...reportComments);
@@ -594,6 +609,7 @@ export class CodeGenerator {
       imports,
       extensionsNeeded: dedupedExtensions,
       pendingAssets: dedupedAssets,
+      warnings: Array.from(new Set(warnings)),
       reports,
     };
   }
@@ -604,17 +620,23 @@ export class CodeGenerator {
    * 生成增强报告的注释
    *
    * @param reports - 增强报告
+   * @param warnings - 代码生成过程中的警告列表
    * @returns 注释行数组
    */
-  private _generateReportComments(reports: EnhancementReports): string[] {
+  private _generateReportComments(reports: EnhancementReports, warnings: string[] = []): string[] {
     const comments: string[] = [];
     const hasContent =
-      reports.flexFixes || reports.a11y || reports.designSystem || reports.responsive || reports.interaction;
+      reports.flexFixes ||
+      reports.a11y ||
+      reports.designSystem ||
+      reports.responsive ||
+      reports.interaction ||
+      warnings.length > 0;
 
     if (!hasContent) return comments;
 
     comments.push('/**');
-    comments.push(' * 🤖 Generated by figma-dev-tools v1.4.0');
+    comments.push(' * 🤖 Generated by figma-dev-tools v1.4.3');
     comments.push(' *');
 
     if (reports.flexFixes && reports.flexFixes.totalFixedNodes > 0) {
@@ -660,6 +682,22 @@ export class CodeGenerator {
       comments.push(` * 🔄 Interactions inferred: ${reports.interaction.interactionsCount} (${typeSummary})`);
       if (reports.interaction.interactions.some((i) => i.codeHint)) {
         comments.push(' *    ⚠️  Check TODO comments for event handler wiring');
+      }
+    }
+
+    // 添加人工复核警告
+    if (warnings.length > 0) {
+      comments.push(' *');
+      comments.push(` * ⚠️  Manual review needed (${warnings.length} item${warnings.length > 1 ? 's' : ''}):`);
+      // 最多展示10条警告，避免注释过长
+      const displayWarnings = warnings.slice(0, 10);
+      for (const w of displayWarnings) {
+        // 限制单行长度
+        const line = w.length > 100 ? w.slice(0, 97) + '...' : w;
+        comments.push(` *    - ${line}`);
+      }
+      if (warnings.length > 10) {
+        comments.push(` *    ... and ${warnings.length - 10} more (see result.warnings for full list)`);
       }
     }
 
@@ -732,6 +770,16 @@ export class CodeGenerator {
     // ============ 5. Tailwind 样式映射 ============
     const tw = twMapper.mapNode(node);
     ctx.extensions.push(...tw.extensionsNeeded);
+
+    // 收集 Tailwind 映射警告（去重后添加到上下文）
+    if (tw.warnings && tw.warnings.length > 0) {
+      for (const w of tw.warnings) {
+        const warningWithNode = `[${node.name || node.figmaId}] ${w}`;
+        if (!ctx.warnings.includes(warningWithNode)) {
+          ctx.warnings.push(warningWithNode);
+        }
+      }
+    }
 
     // 合并 Flex 修复类名（由 flex-fixer 添加到 node._flexFixes）
     let finalClassName = tw.className;
@@ -1338,7 +1386,7 @@ export class CodeGenerator {
     }
 
     // ============ 背景色（简化版：仅黑白和任意值） ============
-    const fill = this._client.getSolidFill(node);
+    const fill = this._client?.getSolidFill(node) ?? null;
     if (fill && 'color' in fill && fill.color) {
       const colorHex = convertFigmaColor(fill.color, 'hex');
       if (colorHex === '#FFFFFFFF' || colorHex === '#FFFFFF') {
@@ -1422,7 +1470,7 @@ export class CodeGenerator {
   private _generateInlineStyleLegacy(node: FigmaNode): string | null {
     const styles: string[] = [];
 
-    const fill = this._client.getSolidFill(node);
+    const fill = this._client?.getSolidFill(node) ?? null;
     if (fill && 'color' in fill && fill.color) {
       const color = convertFigmaColor(fill.color, 'rgb');
       styles.push(`backgroundColor: '${color}'`);
@@ -1635,10 +1683,10 @@ export class CodeGenerator {
 /**
  * 创建代码生成器实例
  *
- * @param client - Figma API 客户端实例
+ * @param client - Figma API 客户端实例（纯本地 CSS 转换时可传 null）
  * @param options - 代码生成选项
  * @returns CodeGenerator 实例
  */
-export function createCodeGenerator(client: FigmaClient, options?: CodeGenOptions): CodeGenerator {
+export function createCodeGenerator(client: FigmaClient | null, options?: CodeGenOptions): CodeGenerator {
   return new CodeGenerator(client, options);
 }

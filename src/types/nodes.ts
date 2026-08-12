@@ -195,9 +195,14 @@ export interface ProcessedGradientFill {
  */
 export interface ProcessedImageFill {
   type: 'image';
+  /** Figma 图片引用 hash（用于调用 /v1/images 端点导出） */
   imageRef?: string;
+  /** 图片缩放模式 */
   scaleMode?: FigmaScaleMode;
+  /** 透明度 */
   opacity?: number;
+  /** 已解析的图片 URL（由 asset-downloader 或 figma-client 填充） */
+  imageUrl?: string;
 }
 
 /**
@@ -551,6 +556,10 @@ export interface DesignMetadata {
   imageCount: number;
   /** 文本节点数量 */
   textNodeCount: number;
+  /** 数据来源：live=实时请求，stale-cache=陈旧缓存降级 */
+  dataSource?: 'live' | 'stale-cache';
+  /** 警告信息（如陈旧缓存降级、节点缺少尺寸等） */
+  warnings?: string[];
   /** 扩展字段（满足 MCP structuredContent 索引签名） */
   [key: string]: unknown;
 }
@@ -612,12 +621,20 @@ export interface DesignContext {
   radii: number[];
   /** 使用的阴影效果列表 */
   shadows: ProcessedShadow[];
+  /** 使用的渐变填充列表（含渐变类型、控制点、停点、透明度，v1.4.2 新增） */
+  gradients?: ProcessedGradientFill[];
   /** 资源列表 */
   assets: ProcessedAsset[];
   /** 文本节点摘要列表 */
   textNodes: TextNodeSummary[];
   /** 使用到的 Figma Component 统计 */
   componentsUsed: ComponentUsage[];
+  /** 数据来源：live=实时请求，stale-cache=陈旧缓存降级（v1.4.2 新增） */
+  dataSource?: 'live' | 'stale-cache';
+  /** 节点处理统计（v1.4.2 新增） */
+  processingStats?: ProcessingStats;
+  /** 警告信息（如陈旧缓存降级、部分样式无法提取等，v1.4.2 新增） */
+  warnings?: string[];
   /** 扩展字段（满足 MCP structuredContent 索引签名） */
   [key: string]: unknown;
 }

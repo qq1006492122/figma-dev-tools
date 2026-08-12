@@ -83,6 +83,8 @@ export interface TailwindMapping {
    * 调用方应将此对象展开到元素的 style 属性。
    */
   inlineStyle?: Record<string, string | number>;
+  /** 无法完整映射时的提示，用于让调用方明确哪些样式需要人工复核 */
+  warnings?: string[];
 }
 
 /**
@@ -167,6 +169,7 @@ export class TailwindMapper {
     const classes: string[] = [];
     const extensionsNeeded: TailwindMapping['extensionsNeeded'] = [];
     const inlineStyle: Record<string, string | number> = {};
+    const warnings: string[] = [];
 
     // ============ 1. 可见性与透明度 ============
     this._mapVisibility(node, classes);
@@ -195,17 +198,17 @@ export class TailwindMapper {
 
     // ============ 7. 描边 ============
     if (node.strokes && node.strokes.length > 0) {
-      this._mapStrokes(node.strokes, classes, extensionsNeeded);
+      this._mapStrokes(node.strokes, classes, extensionsNeeded, warnings);
     }
 
     // ============ 8. 填充（背景色/渐变/图片） ============
     if (node.fills && node.fills.length > 0) {
-      this._mapFills(node.fills, node.role, classes, extensionsNeeded, inlineStyle);
+      this._mapFills(node.fills, node.role, classes, extensionsNeeded, inlineStyle, warnings);
     }
 
     // ============ 9. 阴影/效果 ============
     if (node.effects && node.effects.length > 0) {
-      this._mapShadows(node.effects, classes, extensionsNeeded, inlineStyle);
+      this._mapShadows(node.effects, classes, extensionsNeeded, inlineStyle, warnings);
     }
 
     // ============ 10. 绝对定位 ============
@@ -222,6 +225,7 @@ export class TailwindMapper {
       className: cn(...classes),
       extensionsNeeded,
       inlineStyle: Object.keys(inlineStyle).length > 0 ? inlineStyle : undefined,
+      warnings: warnings.length > 0 ? warnings : undefined,
     };
   }
 
@@ -712,7 +716,7 @@ export class TailwindMapper {
       // 无匹配，使用任意值语法
       classes.push(`${prefix}-[${px}px]`);
       if (match.needsExtension) {
-        extensions.push({
+        this._addExtension(extensions, {
           type: 'radius',
           suggestedName: `${Math.round(px)}`,
           originalValue: `${px}px`,
@@ -731,11 +735,13 @@ export class TailwindMapper {
    * @param strokes - 描边数组
    * @param classes - 类名数组（输出参数）
    * @param extensions - 待扩展 token 列表（输出参数）
+   * @param warnings - 警告信息列表（输出参数）
    */
   private _mapStrokes(
     strokes: ProcessedStroke[],
     classes: string[],
     extensions: TailwindMapping['extensionsNeeded'],
+    warnings: string[],
   ): void {
     for (const stroke of strokes) {
       // ============ 描边宽度 ============
@@ -754,7 +760,17 @@ export class TailwindMapper {
         const hex = this._colorToHex(stroke.color);
         if (this._options.allowArbitrary) classes.push(`border-[${hex}]`);
         const colorSuffix = hex.replace(/[^a-f0-9]/gi, '').slice(0, 6);
-        extensions.push({ type: 'color', suggestedName: `border-${colorSuffix}`, originalValue: hex });
+        this._addExtension(extensions, {
+          type: 'color',
+          suggestedName: `border-${colorSuffix}`,
+          originalValue: hex,
+        });
+        warnings.push(`描边颜色 ${hex} 未匹配到设计系统 Token，已使用任意值语法`);
+      }
+
+      // 多层描边警告
+      if (strokes.length > 1) {
+        warnings.push(`检测到 ${strokes.length} 层描边，当前仅渲染第一层`);
       }
 
       // 仅处理第一个描边（多层描边罕见，暂不支持）
@@ -775,6 +791,7 @@ export class TailwindMapper {
    * @param classes - 类名数组（输出参数）
    * @param extensions - 待扩展 token 列表（输出参数）
    * @param inlineStyle - 内联样式对象（输出参数，用于复杂渐变）
+   * @param warnings - 警告信息列表（输出参数）
    */
   private _mapFills(
     fills: ProcessedFill[],
@@ -782,6 +799,7 @@ export class TailwindMapper {
     classes: string[],
     extensions: TailwindMapping['extensionsNeeded'],
     inlineStyle: Record<string, string | number>,
+    warnings: string[],
   ): void {
     // Figma fills 数组：索引 0 是最底层，最后一个是最顶层
     // 倒序遍历确保先处理背景色（底层）
@@ -806,14 +824,19 @@ export class TailwindMapper {
             if (this._options.allowArbitrary) classes.push(`${purpose}-[${hex}]`);
             // 使用颜色hex值生成唯一名称，避免重复
             const colorSuffix = hex.replace(/[^a-f0-9]/gi, '').slice(0, 6);
-            extensions.push({ type: 'color', suggestedName: `${purpose}-${colorSuffix}`, originalValue: hex });
+            this._addExtension(extensions, {
+              type: 'color',
+              suggestedName: `${purpose}-${colorSuffix}`,
+              originalValue: hex,
+            });
+            warnings.push(`填充颜色 ${hex} 未匹配到设计系统 Token，已使用任意值语法`);
           }
           break;
         }
 
         case 'gradient-linear': {
           // 线性渐变
-          this._mapLinearGradient(fill.gradientHandlePositions, fill.gradientStops, classes, inlineStyle);
+          this._mapLinearGradient(fill.gradientHandlePositions, fill.gradientStops, classes, inlineStyle, warnings);
           break;
         }
 
@@ -821,6 +844,11 @@ export class TailwindMapper {
           // 图片填充（背景图片）
           classes.push('bg-cover', 'bg-center', 'bg-no-repeat');
           if (fill.scaleMode === 'FIT') classes.push('bg-contain');
+          if (fill.imageUrl) {
+            inlineStyle.backgroundImage = `url("${fill.imageUrl}")`;
+          } else {
+            warnings.push('图片填充缺少 imageUrl，背景图未设置，请通过 download_assets 下载资源后手动补充');
+          }
           break;
         }
       }
@@ -837,12 +865,14 @@ export class TailwindMapper {
    * @param stops - 渐变色标
    * @param classes - 类名数组（输出参数）
    * @param inlineStyle - 内联样式对象（输出参数）
+   * @param warnings - 警告信息列表（输出参数）
    */
   private _mapLinearGradient(
     handles: Array<{ x: number; y: number }>,
     stops: GradientStop[],
     classes: string[],
     inlineStyle: Record<string, string | number>,
+    warnings: string[],
   ): void {
     if (!handles || handles.length < 2 || !stops || stops.length < 2) return;
 
@@ -872,6 +902,9 @@ export class TailwindMapper {
       const angle = this._gradientAngle(handles);
       const cssStops = stops.map((s) => `${this._colorToRgba(s.color)} ${(s.position * 100).toFixed(0)}%`).join(', ');
       inlineStyle.background = `linear-gradient(${angle}deg, ${cssStops})`;
+      if (stops.length > 3) {
+        warnings.push(`渐变色标数量为 ${stops.length}（超过3个），已使用内联样式兜底`);
+      }
     }
   }
 
@@ -888,34 +921,55 @@ export class TailwindMapper {
    * @param classes - 类名数组（输出参数）
    * @param extensions - 待扩展 token 列表（输出参数）
    * @param inlineStyle - 内联样式对象（输出参数）
+   * @param warnings - 警告信息列表（输出参数）
    */
   private _mapShadows(
     effects: ProcessedShadow[],
     classes: string[],
     extensions: TailwindMapping['extensionsNeeded'],
     inlineStyle: Record<string, string | number>,
+    warnings: string[],
   ): void {
+    const dropShadows: ProcessedShadow[] = [];
+
     for (const eff of effects) {
       if (eff.type === 'inner') {
         // 内阴影直接使用 Tailwind 预设
         classes.push('shadow-inner');
         continue;
       }
+      dropShadows.push(eff);
+    }
 
-      // Drop shadow：尝试匹配预设
-      const preset = this._matchShadowPreset(eff);
-      if (preset) {
-        classes.push(preset);
-      } else {
-        // 非标准阴影：使用内联样式
-        const spreadPart = eff.spread ? ` ${eff.spread}px` : '';
-        inlineStyle.boxShadow = `${eff.x}px ${eff.y}px ${eff.blur}px${spreadPart} ${this._colorToRgba(eff.color)}`;
-        extensions.push({
-          type: 'shadow',
-          suggestedName: `${Math.round(eff.blur)}`,
-          originalValue: inlineStyle.boxShadow as string,
-        });
-      }
+    if (dropShadows.length === 0) return;
+
+    // 多层阴影警告
+    if (dropShadows.length > 1) {
+      warnings.push(`检测到 ${dropShadows.length} 层投影，将合并为单条 box-shadow`);
+    }
+
+    // 尝试匹配第一个阴影为 Tailwind 预设
+    const firstShadow = dropShadows[0]!;
+    const preset = this._matchShadowPreset(firstShadow);
+    if (preset && dropShadows.length === 1) {
+      classes.push(preset);
+      return;
+    }
+
+    // 非标准阴影或多层阴影：使用内联样式合并
+    const shadowParts = dropShadows.map((eff) => {
+      const spreadPart = eff.spread ? ` ${eff.spread}px` : '';
+      return `${eff.x}px ${eff.y}px ${eff.blur}px${spreadPart} ${this._colorToRgba(eff.color)}`;
+    });
+    const shadowValue = shadowParts.join(', ');
+    inlineStyle.boxShadow = shadowValue;
+    this._addExtension(extensions, {
+      type: 'shadow',
+      suggestedName: `shadow-custom-${Math.round(firstShadow.blur)}`,
+      originalValue: shadowValue,
+    });
+    if (!preset) {
+      warnings.push('阴影未匹配到 Tailwind 预设，已使用内联 box-shadow');
     }
   }
 
@@ -958,7 +1012,7 @@ export class TailwindMapper {
         classes.push(weightMatch.className);
       } else {
         classes.push(`font-[${style.fontWeight}]`);
-        extensions.push({
+        this._addExtension(extensions, {
           type: 'font-weight',
           suggestedName: `${style.fontWeight}`,
           originalValue: String(style.fontWeight),
@@ -973,7 +1027,7 @@ export class TailwindMapper {
         classes.push(sizeMatch.className);
       } else {
         classes.push(`text-[${style.fontSize}px]`);
-        extensions.push({
+        this._addExtension(extensions, {
           type: 'font-size',
           suggestedName: `${Math.round(style.fontSize)}`,
           originalValue: `${style.fontSize}px`,
@@ -1051,6 +1105,19 @@ export class TailwindMapper {
   }
 
   // ============ 辅助方法 ============
+
+  /**
+   * 添加需要扩展的 token，并按 type + originalValue 去重。
+   */
+  private _addExtension(
+    extensions: TailwindMapping['extensionsNeeded'],
+    item: TailwindMapping['extensionsNeeded'][number],
+  ): void {
+    const key = `${item.type}:${item.originalValue}`;
+    if (!extensions.some((entry) => `${entry.type}:${entry.originalValue}` === key)) {
+      extensions.push(item);
+    }
+  }
 
   /**
    * 安全获取 TokenMatch 的 className

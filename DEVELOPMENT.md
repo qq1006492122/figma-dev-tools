@@ -1,4 +1,4 @@
-# figma-dev-tools v1.4.2 开发指南
+# figma-dev-tools v1.4.3 开发指南
 
 ## 项目概述
 figma-dev-tools 是一个 Figma 设计稿转代码的 MCP 工具，支持 React + Tailwind CSS / Vue + UnoCSS 代码生成，提供 GUI 配置向导、XSS 安全防护、智能层级修复、SVG 内联渲染、动画检测等完整工具链。

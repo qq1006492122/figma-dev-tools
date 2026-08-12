@@ -104,13 +104,13 @@ const SVG_CACHE_MAX_SIZE = 200;
  * 将 Figma 矢量节点导出为可内联的 SVG JSX/Vue 代码
  */
 export class SvgInlineRenderer {
-  private readonly _client: FigmaClient;
+  private readonly _client: FigmaClient | null;
   private _options: Required<SvgRenderOptions>;
 
   /** SVG 下载缓存（避免重复下载同一节点） */
   private _svgCache: Map<string, Promise<InlineSvgResult | null>> = new Map();
 
-  constructor(client: FigmaClient, options: Partial<SvgRenderOptions> = {}) {
+  constructor(client: FigmaClient | null, options: Partial<SvgRenderOptions> = {}) {
     this._client = client;
     this._options = { ...DEFAULT_SVG_OPTIONS, ...options };
   }
@@ -132,6 +132,7 @@ export class SvgInlineRenderer {
     const results = new Map<string, InlineSvgResult | null>();
 
     if (nodeIds.length === 0) return results;
+    if (!this._client) throw new Error('SvgInlineRenderer 需要 FigmaClient 才能渲染 SVG 节点');
 
     // 1. 批量获取 SVG 导出 URL
     const idList = nodeIds.map((n) => n.nodeId);
@@ -242,6 +243,7 @@ export class SvgInlineRenderer {
     nodeName: string,
     opts: Required<SvgRenderOptions>,
   ): Promise<InlineSvgResult | null> {
+    if (!this._client) throw new Error('SvgInlineRenderer 需要 FigmaClient 才能渲染 SVG 节点');
     // 获取 SVG URL
     const { images: svgUrls } = await this._client.getImages(fileKey, [nodeId], 'svg', opts.scale);
     const url = svgUrls[nodeId];
@@ -258,6 +260,7 @@ export class SvgInlineRenderer {
     _name: string,
     opts: Required<SvgRenderOptions>,
   ): Promise<InlineSvgResult | null> {
+    if (!this._client) throw new Error('SvgInlineRenderer 需要 FigmaClient 才能下载 SVG');
     // 下载 SVG 内容
     const buffer = await this._client.downloadImage(url);
     const rawSvg = buffer.toString('utf-8');

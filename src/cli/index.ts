@@ -51,7 +51,7 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.4.2');
+  .version('1.4.3');
 
 // 全局选项
 program
@@ -818,7 +818,10 @@ program
           try {
             const context = await ctxService.getDesignContext(fileKey, page.id, maxDepth);
             nodesToLint.push(context.node);
-          } catch {}
+          } catch (err) {
+            // 单页获取失败时跳过该页继续处理
+            console.warn(chalk.yellow(`  ↳ Skipped page ${page.id}: ${err instanceof Error ? err.message : err}`));
+          }
         }
       }
 
@@ -1175,7 +1178,10 @@ program
               console.log(chalk.gray('     💡 建议先运行 figma-dev lint 查看详细报告，修复问题后再生成代码'));
             }
           }
-        } catch {}
+        } catch (err) {
+          // Lint 预检失败不应阻断代码生成，仅输出提示
+          console.warn(chalk.yellow(`  ↳ Lint 预检失败（已跳过）: ${err instanceof Error ? err.message : err}`));
+        }
       }
 
       // 3. 生成代码（React 或 Vue）

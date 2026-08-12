@@ -123,7 +123,10 @@ async function findPrettierConfig(startDir: string): Promise<string | null> {
       try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as { prettier?: unknown };
         if (pkg.prettier) return pkgPath;
-      } catch {}
+      } catch (err) {
+        // package.json 解析失败时静默继续（可能是注释 JSON 或格式问题）
+        console.warn(`[figma-dev] Failed to parse ${pkgPath}:`, err instanceof Error ? err.message : err);
+      }
     }
 
     for (const name of configNames) {

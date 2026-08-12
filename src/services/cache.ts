@@ -56,6 +56,20 @@ export interface CacheStats {
 }
 
 /**
+ * 陈旧缓存读取结果
+ */
+export interface StaleCacheResult<T> {
+  /** 缓存数据 */
+  data: T;
+  /** 数据创建时间 */
+  createdAt: number;
+  /** 原始过期时间 */
+  expiresAt: number;
+  /** 数据已存在时长（毫秒） */
+  ageMs: number;
+}
+
+/**
  * 缓存配置
  */
 export interface CacheConfig {
@@ -82,6 +96,9 @@ const DEFAULT_MAX_SIZE = 100 * 1024 * 1024;
 
 /** 默认 TTL：1 小时 */
 const DEFAULT_TTL = 60 * 60 * 1000;
+
+/** 陈旧缓存最大保留时间：7 天。过期数据在该窗口内可作为 401/403/网络异常时的兜底数据。 */
+const STALE_CACHE_GRACE = 7 * 24 * 60 * 60 * 1000;
 
 /** 加密算法 */
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
@@ -272,7 +289,7 @@ export class FigmaCache {
     const keysToDelete: string[] = [];
 
     for (const [key, entry] of this._index.entries()) {
-      if (entry.expiresAt > 0 && entry.expiresAt < now) {
+      if (entry.expiresAt > 0 && entry.expiresAt < now - STALE_CACHE_GRACE) {
         keysToDelete.push(key);
       }
     }
@@ -335,6 +352,33 @@ export class FigmaCache {
   private _updateHitRate(): void {
     const total = this._stats.hits + this._stats.misses;
     this._stats.hitRate = total > 0 ? this._stats.hits / total : 0;
+  }
+
+  /**
+   * 读取缓存文件中的真实数据，并更新 LRU 访问时间。
+   *
+   * 索引中只保存元数据，真实数据始终以文件内容为准，避免索引损坏导致脏数据返回。
+   */
+  private async _readEntryData<T>(key: string, entry: CacheEntry<T>): Promise<T | null> {
+    try {
+      const fileContent = await fs.readFile(this._getEntryPath(key), 'utf8');
+      const decrypted = this._encryption ? decryptData(fileContent) : fileContent;
+
+      if (!decrypted) {
+        await this._deleteEntry(key);
+        return null;
+      }
+
+      const data = JSON.parse(decrypted) as T;
+      entry.lastAccessedAt = Date.now();
+      entry.accessCount++;
+      this._index.set(key, entry as CacheEntry);
+      await this._saveIndex();
+      return data;
+    } catch {
+      await this._deleteEntry(key);
+      return null;
+    }
   }
 
   // ============ 公共 API ============
@@ -403,49 +447,53 @@ export class FigmaCache {
       return null;
     }
 
-    // 检查是否过期
+    // 检查是否过期。过期条目不立即删除，保留一段时间用于鉴权失败或网络异常时降级。
     if (entry.expiresAt > 0 && entry.expiresAt < Date.now()) {
-      await this._deleteEntry(key);
+      this._stats.misses++;
+      this._updateHitRate();
+      return null;
+    }
+
+    const data = await this._readEntryData(key, entry);
+    if (data === null) {
       this._stats.misses++;
       this._updateHitRate();
       await this._saveIndex();
       return null;
     }
 
-    // 从文件读取数据（保证数据完整性）
-    try {
-      const fileContent = await fs.readFile(this._getEntryPath(key), 'utf8');
-      const decrypted = this._encryption ? decryptData(fileContent) : fileContent;
+    this._stats.hits++;
+    this._updateHitRate();
+    return data;
+  }
 
-      if (!decrypted) {
-        // 文件损坏，删除条目
-        await this._deleteEntry(key);
-        this._stats.misses++;
-        this._updateHitRate();
-        await this._saveIndex();
-        return null;
-      }
+  /**
+   * 获取陈旧缓存。
+   *
+   * 用于 Token 失效、付费权限受限或网络异常时的降级场景。读取结果必须显式提示用户数据可能不是最新。
+   */
+  async getStale<T>(key: string, maxAgeMs: number = STALE_CACHE_GRACE): Promise<StaleCacheResult<T> | null> {
+    await this._ensureInit();
 
-      const data = JSON.parse(decrypted) as T;
+    const entry = this._index.get(key) as CacheEntry<T> | undefined;
+    if (!entry) return null;
 
-      // 更新访问统计
-      entry.lastAccessedAt = Date.now();
-      entry.accessCount++;
-      this._index.set(key, entry as CacheEntry);
-
-      this._stats.hits++;
-      this._updateHitRate();
-      await this._saveIndex();
-
-      return data;
-    } catch {
-      // 文件读取失败，删除条目
+    const ageMs = Date.now() - entry.createdAt;
+    if (ageMs > maxAgeMs) {
       await this._deleteEntry(key);
-      this._stats.misses++;
-      this._updateHitRate();
       await this._saveIndex();
       return null;
     }
+
+    const data = await this._readEntryData(key, entry);
+    if (data === null) return null;
+
+    return {
+      data,
+      createdAt: entry.createdAt,
+      expiresAt: entry.expiresAt,
+      ageMs,
+    };
   }
 
   /**
@@ -457,8 +505,6 @@ export class FigmaCache {
     const entry = this._index.get(key);
     if (!entry) return false;
     if (entry.expiresAt > 0 && entry.expiresAt < Date.now()) {
-      await this._deleteEntry(key);
-      await this._saveIndex();
       return false;
     }
     return true;
@@ -542,13 +588,19 @@ export class FigmaCache {
 // ============ 单例管理 ============
 
 let cacheInstance: FigmaCache | null = null;
+let cacheConfigKey: string | null = null;
 
 /**
- * 获取缓存服务单例
+ * 获取缓存服务单例。
+ *
+ * 单例行为：首次调用时创建实例；后续若传入不同配置（如 cacheDir 变化），
+ * 会重建实例以确保配置生效。
  */
 export function createFigmaCache(config?: CacheConfig): FigmaCache {
-  if (!cacheInstance) {
+  const newKey = config ? JSON.stringify(config) : '';
+  if (!cacheInstance || cacheConfigKey !== newKey) {
     cacheInstance = new FigmaCache(config);
+    cacheConfigKey = newKey;
   }
   return cacheInstance;
 }

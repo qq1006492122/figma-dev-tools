@@ -10,7 +10,7 @@
  * - 设计规范检查（含维度评分）
  * - 本地缓存加速
  *
- * @version 1.4.2
+ * @version 1.4.3
  */
 
 import * as fs from 'node:fs';
@@ -39,6 +39,8 @@ import { createTokensExtractor } from './services/tokens-extractor.js';
 import { createVueGenerator } from './services/vue-generator.js';
 import type { CodeGenResult, DesignTokens, TailwindExtension } from './types.js';
 import type { ProcessedNode, StructuredNode } from './types/nodes.js';
+import type { FigmaApiError } from './utils/errors.js';
+import { isFigmaApiError, isFigmaDevError } from './utils/errors.js';
 import { parseFigmaUrl, extractFileKey, extractNodeId } from './utils/figma-url.js';
 
 dotenv.config();
@@ -48,6 +50,7 @@ initI18nSync();
 
 let figmaClient: FigmaClient | null = null;
 let figmaCache: ReturnType<typeof createFigmaCache> | null = null;
+let figmaClientTokenKey = '';
 
 function getFigmaClient(token?: string): FigmaClient {
   const accessToken = token || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
@@ -55,23 +58,193 @@ function getFigmaClient(token?: string): FigmaClient {
   if (!accessToken) {
     throw new Error(
       'Figma Access Token 未配置。请设置 FIGMA_ACCESS_TOKEN 环境变量或在调用时传入 token 参数。\n' +
+        '如需多 Token 自动轮换，可用英文逗号分隔 FIGMA_ACCESS_TOKENS。\n' +
         '获取 Token: https://www.figma.com/developers/api#access-tokens',
     );
   }
 
-  if (!figmaClient || figmaClient.getAccessToken() !== accessToken) {
+  const fallbackTokens = (process.env.FIGMA_ACCESS_TOKENS ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const tokens = Array.from(new Set([accessToken, ...fallbackTokens]));
+  const tokenKey = tokens.join('|');
+
+  if (!figmaClient || figmaClientTokenKey !== tokenKey) {
     if (!figmaCache) {
       figmaCache = createFigmaCache();
     }
-    figmaClient = createFigmaClient({ accessToken, cache: figmaCache });
+    figmaClient = createFigmaClient({
+      accessToken,
+      tokens: fallbackTokens,
+      cache: figmaCache,
+      staleCacheFallback: true,
+    });
+    figmaClientTokenKey = tokenKey;
   }
 
+  figmaClient.clearLastWarning();
   return figmaClient;
+}
+
+/**
+ * getFigmaClient 的安全版本：token 未配置时返回 null 而非抛出异常。
+ * 仅用于 catch 块中附带请求统计，不应作为主要获取方式。
+ */
+function getFigmaClientSafe(token?: string): FigmaClient | undefined {
+  try {
+    return getFigmaClient(token);
+  } catch {
+    return undefined;
+  }
+}
+
+// ============ 统一错误处理与用户感知辅助 ============
+
+/** 工具返回的文本内容块 */
+interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+/** 结构化错误信息（放入 structuredContent.error） */
+interface StructuredError {
+  /** 错误码，如 TOKEN_EXPIRED、PAYMENT_REQUIRED */
+  code: string;
+  /** HTTP 状态码（如果有） */
+  status?: number;
+  /** 用户可读的错误原因 */
+  reason: string;
+  /** 建议操作 */
+  solution: string;
+  /** Figma 返回的原始错误文本 */
+  originalMessage?: string;
+  /** 错误发生时间 ISO 字符串 */
+  timestamp: string;
+  /** 当前请求统计（用于诊断） */
+  requestStats?: {
+    total: number;
+    retried: number;
+    cached: number;
+    staleFallback: number;
+    cacheHitRate: number;
+  };
+}
+
+/**
+ * 将任意异常归一化为结构化错误信息。
+ *
+ * 处理优先级：
+ * 1. FigmaApiError — 包含 HTTP 状态码、错误码、原因、建议
+ * 2. FigmaDevError — 包含错误码和 i18n 信息
+ * 3. 普通 Error — 取 message
+ * 4. 未知类型 — String(error)
+ */
+function normalizeError(error: unknown): StructuredError {
+  const timestamp = new Date().toISOString();
+
+  if (isFigmaApiError(error)) {
+    const apiError = error as FigmaApiError;
+    return {
+      code: apiError.code,
+      status: apiError.status,
+      reason: apiError.message.split('\n')[0] || apiError.name,
+      solution: apiError.message.includes('建议：')
+        ? apiError.message.split('建议：')[1]?.trim() ?? ''
+        : '',
+      originalMessage: apiError.originalMessage,
+      timestamp,
+    };
+  }
+
+  if (isFigmaDevError(error)) {
+    const devError = error;
+    return {
+      code: devError.code,
+      reason: devError.info.reason || devError.message,
+      solution: (devError.info.solutions || []).join('；'),
+      timestamp,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      code: 'UNKNOWN_ERROR',
+      reason: error.message,
+      solution: '请检查参数和网络后重试；如问题持续请查看工具日志。',
+      timestamp,
+    };
+  }
+
+  return {
+    code: 'UNKNOWN_ERROR',
+    reason: String(error),
+    solution: '请检查参数和网络后重试。',
+    timestamp,
+  };
+}
+
+/**
+ * 构造统一的 MCP 工具错误返回。
+ *
+ * @param operation - 操作名称（如 "获取文件信息"），用于拼接用户可见消息
+ * @param error - 捕获到的异常
+ * @param client - 可选的 FigmaClient 实例，用于附带请求统计
+ */
+function buildToolErrorResponse(
+  operation: string,
+  error: unknown,
+  client?: FigmaClient,
+): {
+  content: TextContentBlock[];
+  isError: true;
+  structuredContent: { error: StructuredError };
+} {
+  const structured = normalizeError(error);
+
+  if (client) {
+    structured.requestStats = client.getRequestStats();
+  }
+
+  const lines: string[] = [`❌ ${operation}失败。`];
+
+  if (structured.status) {
+    lines.push(`HTTP ${structured.status} [${structured.code}]`);
+  } else {
+    lines.push(`[${structured.code}]`);
+  }
+
+  lines.push(`原因：${structured.reason}`);
+  if (structured.solution) {
+    lines.push(`建议：${structured.solution}`);
+  }
+  if (structured.originalMessage) {
+    lines.push(`原始响应：${structured.originalMessage}`);
+  }
+
+  return {
+    content: [{ type: 'text', text: lines.join('\n') }],
+    isError: true,
+    structuredContent: { error: structured },
+  };
+}
+
+/**
+ * 将陈旧缓存降级警告追加到工具返回的文本内容顶部。
+ *
+ * @param lines - 已有的文本行数组（会被原地修改）
+ * @param client - FigmaClient 实例，用于读取 lastWarning
+ */
+function prependStaleCacheWarning(lines: string[], client: FigmaClient): void {
+  const warning = client.getLastWarning();
+  if (warning) {
+    lines.unshift(`> ⚠️ ${warning}\n`);
+  }
 }
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.4.2',
+  version: '1.4.3',
 });
 
 server.registerTool(
@@ -130,15 +303,7 @@ server.registerTool(
         structuredContent: result,
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `解析 URL 失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('解析 URL', error);
     }
   },
 );
@@ -191,36 +356,35 @@ server.registerTool(
         componentSetsCount: Object.keys(file.componentSets).length,
         stylesCount: Object.keys(file.styles).length,
         thumbnailUrl: file.thumbnailUrl,
+        dataSource: client.getLastWarning() ? 'stale-cache' : 'live',
+        warning: client.getLastWarning() ?? null,
       };
+
+      const contentLines: string[] = [];
+      prependStaleCacheWarning(contentLines, client);
+      contentLines.push(
+        `# ${file.name}\n\n` +
+          `- **最后修改**: ${file.lastModified}\n` +
+          `- **版本**: ${file.version}\n` +
+          `- **页面数**: ${pages.length}\n` +
+          `- **组件数**: ${result.componentsCount}\n` +
+          `- **组件集数**: ${result.componentSetsCount}\n` +
+          `- **样式数**: ${result.stylesCount}\n\n` +
+          `## 页面列表\n\n` +
+          pages.map((p, i) => `${i + 1}. **${p.name}** (${p.childCount} 个子元素) - ID: \`${p.id}\``).join('\n'),
+      );
 
       return {
         content: [
           {
             type: 'text',
-            text:
-              `# ${file.name}\n\n` +
-              `- **最后修改**: ${file.lastModified}\n` +
-              `- **版本**: ${file.version}\n` +
-              `- **页面数**: ${pages.length}\n` +
-              `- **组件数**: ${result.componentsCount}\n` +
-              `- **组件集数**: ${result.componentSetsCount}\n` +
-              `- **样式数**: ${result.stylesCount}\n\n` +
-              `## 页面列表\n\n` +
-              pages.map((p, i) => `${i + 1}. **${p.name}** (${p.childCount} 个子元素) - ID: \`${p.id}\``).join('\n'),
+            text: contentLines.join('\n'),
           },
         ],
         structuredContent: result,
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `获取文件信息失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('获取文件信息', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -282,6 +446,10 @@ server.registerTool(
       };
 
       let preview = `# 设计 Tokens 提取结果\n\n`;
+      const staleWarning = client.getLastWarning();
+      if (staleWarning) {
+        preview += `> ⚠️ ${staleWarning}\n\n`;
+      }
       preview += `**来源**: ${summary.source}\n\n`;
       preview += `## 统计\n\n`;
       preview += `- 颜色: ${summary.colors} 个\n`;
@@ -305,18 +473,12 @@ server.registerTool(
         structuredContent: {
           summary,
           tokens,
+          dataSource: staleWarning ? 'stale-cache' : 'live',
+          warning: staleWarning ?? null,
         },
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `提取 Tokens 失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('提取 Tokens', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -408,15 +570,7 @@ server.registerTool(
         structuredContent: component,
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `生成组件代码失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('生成组件代码', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -465,11 +619,17 @@ server.registerTool(
         };
       }
 
+      const screenshotLines: string[] = [];
+      prependStaleCacheWarning(screenshotLines, client);
+      screenshotLines.push(
+        `# 节点截图\n\n**节点 ID**: ${nId}\n**格式**: ${format}\n**缩放**: ${scale}x\n\n![Screenshot](${imageUrl})\n\n[查看原图](${imageUrl})`,
+      );
+
       return {
         content: [
           {
             type: 'text',
-            text: `# 节点截图\n\n**节点 ID**: ${nId}\n**格式**: ${format}\n**缩放**: ${scale}x\n\n![Screenshot](${imageUrl})\n\n[查看原图](${imageUrl})`,
+            text: screenshotLines.join('\n'),
           },
         ],
         structuredContent: {
@@ -477,18 +637,11 @@ server.registerTool(
           format,
           scale,
           imageUrl,
+          dataSource: client.getLastWarning() ? 'stale-cache' : 'live',
         },
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `获取截图失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('获取截图', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -515,8 +668,8 @@ server.registerTool(
   async ({ tokens, outputFormat }) => {
     try {
       const designTokens = tokens as unknown as DesignTokens;
-      const client = getFigmaClient();
-      const generator = createCodeGenerator(client);
+      // 纯本地转换，不需要 Figma API 调用，传 null 避免要求配置 Token
+      const generator = createCodeGenerator(null);
 
       let output = '';
       let language = 'css';
@@ -558,15 +711,7 @@ server.registerTool(
         },
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `生成样式配置失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('生成样式配置', error);
     }
   },
 );
@@ -632,15 +777,7 @@ server.registerTool(
         structuredContent: { files },
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `同步到项目失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('同步到项目', error);
     }
   },
 );
@@ -677,15 +814,7 @@ server.registerTool(
         structuredContent: { valid: isValid },
       };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `验证失败: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('验证 Token', error);
     }
   },
 );
@@ -722,6 +851,12 @@ server.registerTool(
       const metadata = await ctxService.getMetadata(key, nId, depth);
 
       let preview = `# 设计概览: ${metadata.name}\n\n`;
+      if (metadata.warnings && metadata.warnings.length > 0) {
+        for (const w of metadata.warnings) {
+          preview += `> ⚠️ ${w}\n\n`;
+        }
+      }
+      preview += `- **数据来源**: ${metadata.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}\n`;
       preview += `- **类型**: ${metadata.type}\n`;
       preview += `- **尺寸**: ${Math.round(metadata.size.width)} × ${Math.round(metadata.size.height)}\n`;
       preview += `- **直接子节点数**: ${metadata.childCount}\n`;
@@ -754,10 +889,7 @@ server.registerTool(
         structuredContent: metadata,
       };
     } catch (error) {
-      return {
-        content: [{ type: 'text', text: `获取元数据失败: ${error instanceof Error ? error.message : String(error)}` }],
-        isError: true,
-      };
+      return buildToolErrorResponse('获取元数据', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -794,6 +926,12 @@ server.registerTool(
       const context = await ctxService.getDesignContext(key, nId, maxDepth);
 
       let preview = `# 设计上下文: ${context.node.name}\n\n`;
+      if (context.warnings && context.warnings.length > 0) {
+        for (const w of context.warnings) {
+          preview += `> ⚠️ ${w}\n\n`;
+        }
+      }
+      preview += `- **数据来源**: ${context.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}\n`;
       preview += `- **语义角色**: ${context.node.role}\n`;
       preview += `- **尺寸**: ${context.node.size ? Math.round(context.node.size.width) + '×' + Math.round(context.node.size.height) : 'N/A'}\n`;
       preview += `- **颜色 token 数**: ${context.colors.length}\n`;
@@ -828,12 +966,7 @@ server.registerTool(
         structuredContent: context,
       };
     } catch (error) {
-      return {
-        content: [
-          { type: 'text', text: `获取设计上下文失败: ${error instanceof Error ? error.message : String(error)}` },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('获取设计上下文', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -887,17 +1020,21 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       const client = getFigmaClient(accessToken);
 
       const ctxService = createDesignContextService(client);
-      const assets = [];
+      const assets: NonNullable<ProcessedNode['asset']>[] = [];
+      const skippedNodeIds: string[] = [];
       for (const nodeId of assetNodeIds) {
         try {
           const ctx = await ctxService.getDesignContext(key, nodeId, 1);
           if (ctx.node.asset) assets.push(ctx.node.asset);
-          function collectAssets(n: typeof ctx.node) {
+          function collectAssets(n: ProcessedNode): void {
             if (n.asset) assets.push(n.asset);
             if (n.children) n.children.forEach(collectAssets);
           }
           collectAssets(ctx.node);
-        } catch {}
+        } catch {
+          // 单个节点获取失败时跳过，不影响其他资源下载
+          skippedNodeIds.push(nodeId);
+        }
       }
 
       const seen = new Set<string>();
@@ -924,15 +1061,16 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       const results = await downloader.downloadAssets(key, sceneName, uniqueAssets);
       const report = AssetDownloader.generateAssetsReport(results);
 
+      const finalReport = skippedNodeIds.length > 0
+        ? `${report}\n\n> ⚠️ 以下节点获取失败已跳过: ${skippedNodeIds.join(', ')}`
+        : report;
+
       return {
-        content: [{ type: 'text', text: report }],
-        structuredContent: { results, projectRoot: root, sceneName },
+        content: [{ type: 'text', text: finalReport }],
+        structuredContent: { results, projectRoot: root, sceneName, skippedNodeIds },
       };
     } catch (error) {
-      return {
-        content: [{ type: 'text', text: `下载资源失败: ${error instanceof Error ? error.message : String(error)}` }],
-        isError: true,
-      };
+      return buildToolErrorResponse('下载资源', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -1026,12 +1164,7 @@ server.registerTool(
         },
       };
     } catch (error) {
-      return {
-        content: [
-          { type: 'text', text: `生成 SVG Sprite 失败: ${error instanceof Error ? error.message : String(error)}` },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('生成 SVG Sprite', error);
     }
   },
 );
@@ -1083,12 +1216,7 @@ server.registerTool(
         structuredContent: { components, componentSets },
       };
     } catch (error) {
-      return {
-        content: [
-          { type: 'text', text: `获取组件列表失败: ${error instanceof Error ? error.message : String(error)}` },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('获取组件列表', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -1140,7 +1268,9 @@ server.registerTool(
           try {
             const context = await ctxService.getDesignContext(key, page.id, maxDepth);
             nodesToLint.push(context.node);
-          } catch {}
+          } catch {
+            // 单页获取失败时跳过，继续检查其他页面
+          }
         }
       }
 
@@ -1160,12 +1290,7 @@ server.registerTool(
         },
       };
     } catch (error) {
-      return {
-        content: [
-          { type: 'text', text: `代码还原质量预检失败: ${error instanceof Error ? error.message : String(error)}` },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('代码还原质量预检', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -1256,7 +1381,9 @@ v1.2.0 新增强化功能：
         try {
           const linter = createDesignLinter();
           lintReport = linter.lint(ctx.node);
-        } catch {}
+        } catch {
+          // 设计规范检查失败不阻塞代码生成
+        }
       }
 
       let result: CodeGenResult;
@@ -1280,9 +1407,18 @@ v1.2.0 新增强化功能：
       }
 
       const lines: string[] = [];
+
+      // 陈旧缓存降级警告（最优先展示）
+      if (ctx.warnings && ctx.warnings.length > 0) {
+        for (const w of ctx.warnings) {
+          lines.push(`> ⚠️ ${w}\n`);
+        }
+      }
+
       lines.push(
         `# ${result.componentName} - ${framework === 'vue' ? 'Vue 3 SFC' : 'React TSX'} 代码 (${styleFormat})\n`,
       );
+      lines.push(`- **数据来源**: ${ctx.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}\n`);
 
       if (libDetection.library !== 'none' && componentMatches.length > 0) {
         lines.push(`## 🧩 检测到组件库: ${libDetection.library}\n`);
@@ -1410,6 +1546,20 @@ v1.2.0 新增强化功能：
         lines.push('');
       }
 
+      // 代码生成阶段产生的样式映射警告（与 ctx.warnings 去重后展示）
+      const ctxWarningsSet = new Set(ctx.warnings ?? []);
+      const codeGenWarnings = (result.warnings ?? []).filter((w) => !ctxWarningsSet.has(w));
+      if (codeGenWarnings.length > 0) {
+        lines.push('## ⚠️ 样式还原警告\n');
+        codeGenWarnings.slice(0, 15).forEach((w) => {
+          lines.push(`- ${w}`);
+        });
+        if (codeGenWarnings.length > 15) {
+          lines.push(`- ...还有 ${codeGenWarnings.length - 15} 条警告（详见 structuredContent.warnings）`);
+        }
+        lines.push('');
+      }
+
       lines.push('## 📋 节点层级精简统计\n');
       lines.push(`- 精简后节点树深度：${maxDepth}`);
       lines.push(`- 节点数量：${countNodes(ctx.node)}`);
@@ -1425,8 +1575,10 @@ v1.2.0 新增强化功能：
           reports: result.reports,
           extensionsNeeded: result.extensionsNeeded,
           pendingAssets: result.pendingAssets,
+          warnings: result.warnings ?? [],
           reusableComponents,
           lintScore: lintReport?.score,
+          dataSource: ctx.dataSource ?? 'live',
           stats: {
             assetCount: ctx.assets.length,
             textCount: ctx.textNodes.length,
@@ -1436,10 +1588,7 @@ v1.2.0 新增强化功能：
         },
       };
     } catch (error) {
-      return {
-        content: [{ type: 'text', text: `生成 JSX 失败: ${error instanceof Error ? error.message : String(error)}` }],
-        isError: true,
-      };
+      return buildToolErrorResponse('生成 JSX', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -1492,12 +1641,7 @@ v1.2.0 增强：输出包含语义标签建议、a11y 属性建议、设计系�
         structuredContent: toStructuredNode(context.node),
       };
     } catch (error) {
-      return {
-        content: [
-          { type: 'text', text: `获取结构化数据失败: ${error instanceof Error ? error.message : String(error)}` },
-        ],
-        isError: true,
-      };
+      return buildToolErrorResponse('获取结构化数据', error, getFigmaClientSafe(accessToken));
     }
   },
 );
@@ -1549,5 +1693,5 @@ function countNodes(node: { children?: unknown[] }): number {
 export async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Figma Dev Tools MCP Server v1.4.2 running via stdio');
+  console.error('Figma Dev Tools MCP Server v1.4.3 running via stdio');
 }
