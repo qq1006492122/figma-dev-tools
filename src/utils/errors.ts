@@ -1,12 +1,13 @@
 /**
  * Figma Dev Tools 错误处理工具
  *
- * 提供统一的错误类和错误格式化功能，所有错误都有中文错误码和详细解决方案。
+ * 提供统一的错误类和错误格式化功能，所有错误都附带结构化错误信息和详细解决方案。
+ * 错误消息按 i18n 当前语言（zh-CN / en-US）输出，默认中文。
  *
  * @module
  */
 
-import { formatError, getErrorInfo, type ErrorCodeInfo } from '../i18n/index.js';
+import { formatError, getErrorInfo, getI18n, type ErrorCodeInfo } from '../i18n/index.js';
 
 // ============ 错误码类型 ============
 
@@ -111,11 +112,20 @@ export class FigmaApiError extends FigmaDevError {
     this.retriable = options.retriable ?? false;
     this.staleCacheRecoverable = options.staleCacheRecoverable ?? false;
     this.originalMessage = options.originalMessage;
+
+    // 错误消息拼装使用 i18n labels，按用户 GUI 选定语言输出
+    const i18n = getI18n();
+    const labels = i18n.t('cli.errors.labels') as {
+      cause: string;
+      suggestion: string;
+      originalResponse: string;
+      requestFailed: string;
+    };
     this.message =
-      `[${errorCode}] Figma API 请求失败 (HTTP ${status})\n` +
-      `原因：${options.reason}\n` +
-      `建议：${options.solution}` +
-      (options.originalMessage ? `\n原始响应：${options.originalMessage}` : '');
+      `[${errorCode}] ${labels.requestFailed} (HTTP ${status})\n` +
+      `${labels.cause}：${options.reason}\n` +
+      `${labels.suggestion}：${options.solution}` +
+      (options.originalMessage ? `\n${labels.originalResponse}：${options.originalMessage}` : '');
   }
 }
 

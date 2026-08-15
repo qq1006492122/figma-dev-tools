@@ -10,7 +10,7 @@
  * - 设计规范检查（含维度评分）
  * - 本地缓存加速
  *
- * @version 1.4.3
+ * @version 1.4.4
  */
 
 import * as fs from 'node:fs';
@@ -24,17 +24,30 @@ import { z } from 'zod';
 import { initI18nSync } from './i18n/index.js';
 import type { A11yReportEntry } from './services/a11y-enhancer.js';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
+import {
+  getBrowserFallbackService,
+  type BrowserFallbackResult,
+} from './services/browser-fallback.js';
 import { createFigmaCache } from './services/cache.js';
 import { createCodeGenerator } from './services/code-generator.js';
 import { createComponentMapper } from './services/component-mapper.js';
 import { createDesignContextService } from './services/design-context.js';
 import { createDesignLinter } from './services/design-linter.js';
 import type { DesignSystemSuggestion } from './services/design-system.js';
+import {
+  getFidelityVerifyService,
+  type FidelityVerifyOptions,
+  type FidelityVerifyResult,
+} from './services/fidelity-verify.js';
 import { createFigmaClient, type FigmaClient } from './services/figma-client.js';
 import { createFileWriter } from './services/file-writer.js';
 import type { FlexFixEntry } from './services/flex-fixer.js';
 import type { ResponsiveSuggestion } from './services/responsive-inferrer.js';
 import { generateSvgSprite, generateSpriteTypes } from './services/svg-sprite-generator.js';
+import {
+  getVisualApproximationService,
+  type VisualApproximationResult,
+} from './services/visual-approximation.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
 import { createVueGenerator } from './services/vue-generator.js';
 import type { CodeGenResult, DesignTokens, TailwindExtension } from './types.js';
@@ -149,9 +162,7 @@ function normalizeError(error: unknown): StructuredError {
       code: apiError.code,
       status: apiError.status,
       reason: apiError.message.split('\n')[0] || apiError.name,
-      solution: apiError.message.includes('建议：')
-        ? apiError.message.split('建议：')[1]?.trim() ?? ''
-        : '',
+      solution: apiError.message.includes('建议：') ? (apiError.message.split('建议：')[1]?.trim() ?? '') : '',
       originalMessage: apiError.originalMessage,
       timestamp,
     };
@@ -244,7 +255,7 @@ function prependStaleCacheWarning(lines: string[], client: FigmaClient): void {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.4.3',
+  version: '1.4.4',
 });
 
 server.registerTool(
@@ -1061,9 +1072,8 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       const results = await downloader.downloadAssets(key, sceneName, uniqueAssets);
       const report = AssetDownloader.generateAssetsReport(results);
 
-      const finalReport = skippedNodeIds.length > 0
-        ? `${report}\n\n> ⚠️ 以下节点获取失败已跳过: ${skippedNodeIds.join(', ')}`
-        : report;
+      const finalReport =
+        skippedNodeIds.length > 0 ? `${report}\n\n> ⚠️ 以下节点获取失败已跳过: ${skippedNodeIds.join(', ')}` : report;
 
       return {
         content: [{ type: 'text', text: finalReport }],
@@ -1690,8 +1700,536 @@ function countNodes(node: { children?: unknown[] }): number {
   return count;
 }
 
+// ============ v1.4.4 付费墙兜底与还原度校验工具 ============
+
+/**
+ * figma_dev_fallback_status - 查询兜底系统状态
+ *
+ * 当 Figma REST API 因付费墙（PAYMENT_REQUIRED）失败时，工具会按以下优先级兜底：
+ * 1. 本地陈旧缓存（7 天内）
+ * 2. Playwright 无头浏览器截图 + Dev Mode CSS 抓取
+ * 3. 视觉近似模式（截图打包 + 近似代码骨架 + TODO 清单）
+ *
+ * 此工具查询当前兜底系统的可用性状态，无需 Figma URL。
+ */
+server.registerTool(
+  'figma_dev_fallback_status',
+  {
+    title: '查询付费墙兜底系统状态',
+    description: `查询当前付费墙兜底系统的可用性状态，包括：
+- Playwright 浏览器引擎是否已安装
+- 当前兜底配置（浏览器类型、DPR、无头模式等）
+- 兜底优先级说明（陈旧缓存 → 浏览器截图 → 视觉近似模式）
+
+无需 Figma URL，仅查询本地环境能力。`,
+    inputSchema: z.object({}),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async () => {
+    try {
+      const fallbackService = getBrowserFallbackService();
+      const availability = await fallbackService.checkAvailability();
+      const options = fallbackService.getOptions();
+
+      const result = {
+        playwright: {
+          available: availability.available,
+          reason: availability.reason ?? null,
+          installHint: availability.installHint ?? null,
+        },
+        config: {
+          enabled: options.enabled,
+          browser: options.browser,
+          headless: options.headless,
+          timeout: options.timeout,
+          devicePixelRatio:
+            options.devicePixelRatio === 0 ? 'auto-detect' : options.devicePixelRatio,
+          captureDevModeCss: options.captureDevModeCss,
+          focusNode: options.focusNode,
+        },
+        fallbackPriority: [
+          '1. 本地陈旧缓存（7 天内，AES-256-GCM 加密）',
+          '2. Playwright 无头浏览器截图 + Dev Mode CSS 抓取',
+          '3. 视觉近似模式（截图打包 + 近似代码骨架 + TODO 清单，预期还原度 ~70-80%）',
+        ],
+        expectedFidelity: {
+          normal: '95-100%',
+          staleCache: '85-95%（陈旧数据，可能非最新设计）',
+          browserFallback: '70-80%（仅截图，无节点树）',
+        },
+      };
+
+      const statusIcon = availability.available ? '✅' : '❌';
+      const lines = [
+        `# 付费墙兜底系统状态\n`,
+        `## Playwright 浏览器引擎\n`,
+        `${statusIcon} 可用: ${availability.available}`,
+      ];
+
+      if (!availability.available) {
+        lines.push(`原因: ${availability.reason}`);
+        lines.push(`安装建议: ${availability.installHint}`);
+      }
+
+      lines.push(`\n## 当前配置\n`);
+      lines.push(`- 启用: ${options.enabled}`);
+      lines.push(`- 浏览器: ${options.browser}`);
+      lines.push(`- 无头模式: ${options.headless}`);
+      lines.push(`- 超时: ${options.timeout}ms`);
+      lines.push(
+        `- DPR: ${options.devicePixelRatio === 0 ? '自动探测' : options.devicePixelRatio + 'x'}`,
+      );
+      lines.push(`- 抓取 Dev Mode CSS: ${options.captureDevModeCss}`);
+      lines.push(`- 定位 node 元素: ${options.focusNode}\n`);
+
+      lines.push(`## 兜底优先级\n`);
+      result.fallbackPriority.forEach((p) => lines.push(`- ${p}`));
+
+      lines.push(`\n## 预期还原度\n`);
+      lines.push(`- 正常模式: ${result.expectedFidelity.normal}`);
+      lines.push(`- 陈旧缓存: ${result.expectedFidelity.staleCache}`);
+      lines.push(`- 浏览器兜底: ${result.expectedFidelity.browserFallback}`);
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: result,
+      };
+    } catch (error) {
+      return buildToolErrorResponse('查询兜底系统状态', error);
+    }
+  },
+);
+
+/**
+ * figma_dev_fallback_capture - 触发浏览器兜底截图
+ *
+ * 当用户已知 Figma 付费墙阻断时，可主动调用此工具触发浏览器兜底：
+ * 1. 启动 Playwright 无头浏览器
+ * 2. 注入 Token Cookie 加载设计稿页面
+ * 3. 按 node-id 定位并截图
+ * 4. 抓取 Dev Mode CSS（如可访问）
+ * 5. 进入视觉近似模式生成代码骨架 + TODO 清单
+ */
+server.registerTool(
+  'figma_dev_fallback_capture',
+  {
+    title: '触发浏览器兜底截图（付费墙兜底）',
+    description: `当 Figma REST API 因付费墙失败时，主动触发浏览器兜底：
+1. 启动 Playwright 无头浏览器加载 Figma 设计稿页面
+2. 注入 Figma Access Token 为 Cookie 实现登录态
+3. 按 node-id 定位到指定画板并截图
+4. 尝试抓取 Dev Mode 侧栏的 CSS 属性
+5. 进入视觉近似模式：生成近似代码骨架 + TODO 清单（预期还原度 ~70-80%）
+
+注意：需要先安装 Playwright（npm install playwright && npx playwright install chromium）。
+截图仅为保底方案，无法精确还原节点树，部分细节需人工校对。`,
+    inputSchema: z.object({
+      figmaUrl: z
+        .string()
+        .describe('Figma 设计稿 URL（含 node-id 参数，如 https://www.figma.com/design/xxx?node-id=14-7721）'),
+      accessToken: z
+        .string()
+        .optional()
+        .describe('Figma Access Token（可选，优先使用环境变量 FIGMA_ACCESS_TOKEN）'),
+      devicePixelRatio: z
+        .number()
+        .min(0)
+        .max(4)
+        .optional()
+        .describe(
+          '截图 devicePixelRatio，0=自动探测（默认），1/2/3=强制指定倍率',
+        ),
+      framework: z
+        .enum(['react', 'vue', 'html'])
+        .optional()
+        .describe('近似代码骨架的目标框架，默认 react'),
+      inlineScreenshot: z
+        .boolean()
+        .optional()
+        .describe('是否将截图转为 base64 内联到结果中（便于直接回传），默认 false'),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ figmaUrl, accessToken, devicePixelRatio, framework, inlineScreenshot }) => {
+    try {
+      const token =
+        accessToken || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
+      if (!token) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: '❌ 浏览器兜底需要 Figma Access Token。请设置 FIGMA_ACCESS_TOKEN 环境变量或传入 token 参数。',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // 配置兜底服务
+      const fallbackService = getBrowserFallbackService();
+      if (devicePixelRatio !== undefined) {
+        fallbackService.updateOptions({ devicePixelRatio });
+      }
+
+      // 执行浏览器兜底截图
+      const fallbackResult: BrowserFallbackResult = await fallbackService.captureScreenshot(
+        figmaUrl,
+        token,
+      );
+
+      // 进入视觉近似模式
+      const approximationService = getVisualApproximationService({
+        framework: framework ?? 'react',
+        inlineScreenshot: inlineScreenshot ?? false,
+      });
+      const approximationResult: VisualApproximationResult =
+        await approximationService.generateApproximation(fallbackResult);
+
+      const lines = [
+        `# 浏览器兜底截图完成（视觉近似模式）\n`,
+        `> ${approximationResult.banner}\n`,
+        `## 截图信息`,
+        `- 截图路径: ${approximationResult.screenshotPath}`,
+        `- 尺寸: ${approximationResult.width}x${approximationResult.height}px`,
+        `- DPR: ${approximationResult.devicePixelRatio}x`,
+        `- 操作系统: ${approximationResult.os}`,
+        `- 节点定位: ${fallbackResult.nodeFocused ? '✅ 成功' : '❌ 回退整页'}`,
+        `- 预期还原度: ~${approximationResult.expectedFidelity}%\n`,
+      ];
+
+      if (approximationResult.devModeCss) {
+        lines.push(`## Dev Mode CSS（参考）`);
+        lines.push('```css');
+        lines.push(approximationResult.devModeCss);
+        lines.push('```\n');
+      }
+
+      if (approximationResult.skeletonPath) {
+        lines.push(`## 近似代码骨架`);
+        lines.push(`- 文件路径: ${approximationResult.skeletonPath}\n`);
+      }
+
+      if (approximationResult.todoPath) {
+        lines.push(`## TODO 清单`);
+        lines.push(`- 文件路径: ${approximationResult.todoPath}\n`);
+      }
+
+      if (approximationResult.warnings.length > 0) {
+        lines.push(`## 警告信息`);
+        approximationResult.warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
+        lines.push('');
+      }
+
+      lines.push(`## TODO 清单内容`);
+      lines.push(approximationResult.todoMarkdown);
+
+      const structured = {
+        screenshotPath: approximationResult.screenshotPath,
+        skeletonPath: approximationResult.skeletonPath ?? null,
+        todoPath: approximationResult.todoPath ?? null,
+        width: approximationResult.width,
+        height: approximationResult.height,
+        devicePixelRatio: approximationResult.devicePixelRatio,
+        os: approximationResult.os,
+        nodeFocused: fallbackResult.nodeFocused,
+        devModeCss: approximationResult.devModeCss ?? null,
+        expectedFidelity: approximationResult.expectedFidelity,
+        warnings: approximationResult.warnings,
+        capturedAt: approximationResult.capturedAt,
+      };
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: structured,
+      };
+    } catch (error) {
+      return buildToolErrorResponse('浏览器兜底截图', error);
+    }
+  },
+);
+
+/**
+ * figma_verify_fidelity - 还原度校验工具
+ *
+ * 将 Figma 设计稿截图与生成代码的渲染截图进行像素级 diff，
+ * 输出量化还原度评分（0-100%）+ 差异热力图。
+ *
+ * 工作流程：
+ * 1. 获取 Figma 截图（通过 getImages API URL 或本地文件路径）
+ * 2. 使用 Playwright 渲染生成代码并截图
+ * 3. 使用 pixelmatch 进行像素 diff
+ * 4. 输出还原度评分 + 差异热力图 + 等级描述
+ */
+server.registerTool(
+  'figma_verify_fidelity',
+  {
+    title: '还原度校验（像素 diff）',
+    description: `将 Figma 设计稿截图与生成代码的渲染截图进行像素级 diff，输出量化还原度评分。
+
+工作流程：
+1. 获取 Figma 节点截图（通过 figmaUrl 调用 Figma Images API，或传入本地截图路径）
+2. 使用 Playwright 渲染生成代码并截图（支持 HTML 字符串或 HTML 文件路径）
+3. 使用 pixelmatch 进行像素 diff（业界标准像素 diff 库，16k+ stars）
+4. 输出还原度评分（0-100%）、差异像素数、差异热力图
+
+还原度等级：
+- excellent（95-100%）：几乎完全一致
+- good（85-94%）：还原良好，少量细节差异
+- acceptable（70-84%）：可接受，部分区域需校对
+- poor（<70%）：差异较大，需重新校对
+
+依赖：pixelmatch + pngjs + playwright（均为可选依赖，未安装时给出安装提示）`,
+    inputSchema: z.object({
+      figmaUrl: z
+        .string()
+        .optional()
+        .describe(
+          'Figma 设计稿 URL（如提供，自动调用 Figma Images API 获取截图）。与 figmaScreenshotPath 二选一',
+        ),
+      figmaScreenshotPath: z
+        .string()
+        .optional()
+        .describe('Figma 截图本地文件路径（如已有截图，直接读取）。与 figmaUrl 二选一'),
+      codeContent: z
+        .string()
+        .describe('生成代码内容（HTML 字符串 或 HTML 文件路径）'),
+      codeSourceType: z
+        .enum(['html-string', 'file-path'])
+        .default('html-string')
+        .describe('代码来源类型：html-string=直接传 HTML 字符串，file-path=传 HTML 文件路径'),
+      threshold: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe('颜色差异阈值（0-1），默认 0.1。值越小越严格'),
+      devicePixelRatio: z
+        .number()
+        .min(1)
+        .max(4)
+        .optional()
+        .describe('代码截图的 devicePixelRatio，默认 2'),
+      viewportWidth: z
+        .number()
+        .min(1)
+        .max(8192)
+        .optional()
+        .describe('代码截图的视口宽度（像素），默认用 Figma 截图宽度'),
+      viewportHeight: z
+        .number()
+        .min(1)
+        .max(8192)
+        .optional()
+        .describe('代码截图的视口高度（像素），默认用 Figma 截图高度'),
+      outputDir: z
+        .string()
+        .optional()
+        .describe('差异热力图与截图缓存输出目录，默认系统临时目录'),
+      accessToken: z
+        .string()
+        .optional()
+        .describe('Figma Access Token（可选，优先使用环境变量）'),
+      figmaScale: z
+        .number()
+        .min(1)
+        .max(4)
+        .default(2)
+        .describe('Figma 截图缩放比例（1-4），默认 2。仅当使用 figmaUrl 时生效'),
+    }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({
+    figmaUrl,
+    figmaScreenshotPath,
+    codeContent,
+    codeSourceType,
+    threshold,
+    devicePixelRatio,
+    viewportWidth,
+    viewportHeight,
+    outputDir,
+    accessToken,
+    figmaScale,
+  }) => {
+    try {
+      // ============ 1. 确定 Figma 截图来源 ============
+      let figmaScreenshotSource: string;
+
+      if (figmaScreenshotPath) {
+        // 直接使用本地截图路径
+        figmaScreenshotSource = figmaScreenshotPath;
+      } else if (figmaUrl) {
+        // 通过 Figma Images API 获取截图 URL
+        const key = extractFileKey(figmaUrl);
+        const nId = extractNodeId(figmaUrl);
+        if (!key || !nId) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: '❌ 无法从 figmaUrl 解析 fileKey 或 nodeId，请确认 URL 格式正确，或改用 figmaScreenshotPath 参数。',
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const client = getFigmaClient(accessToken);
+        const imageResult = await client.getImages(key, [nId], 'png', figmaScale);
+        const imageUrl = imageResult.images[nId];
+        if (!imageUrl) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: '❌ 获取 Figma 截图失败，节点可能不存在或无法导出。建议先用 figma_get_screenshot 工具获取截图后传入 figmaScreenshotPath。',
+              },
+            ],
+            isError: true,
+          };
+        }
+        figmaScreenshotSource = imageUrl;
+      } else {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: '❌ 必须提供 figmaUrl 或 figmaScreenshotPath 之一作为 Figma 截图来源。',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // ============ 2. 配置并执行还原度校验 ============
+      const verifyService = getFidelityVerifyService();
+      const optionsToUpdate: Partial<FidelityVerifyOptions> = {};
+      if (threshold !== undefined) optionsToUpdate.threshold = threshold;
+      if (devicePixelRatio !== undefined) optionsToUpdate.devicePixelRatio = devicePixelRatio;
+      if (viewportWidth !== undefined) optionsToUpdate.viewportWidth = viewportWidth;
+      if (viewportHeight !== undefined) optionsToUpdate.viewportHeight = viewportHeight;
+      if (outputDir !== undefined) optionsToUpdate.outputDir = outputDir;
+
+      if (Object.keys(optionsToUpdate).length > 0) {
+        verifyService.updateOptions(optionsToUpdate);
+      }
+
+      // 先检查依赖可用性
+      const deps = await verifyService.checkDependencies();
+      if (!deps.available) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `❌ 还原度校验依赖缺失: ${deps.missingDependencies.join(', ')}\n\n安装建议: ${deps.installHint}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const result: FidelityVerifyResult = await verifyService.verifyFidelity(
+        figmaScreenshotSource,
+        codeContent,
+        codeSourceType,
+      );
+
+      // ============ 3. 构造输出 ============
+      const gradeIcon: Record<string, string> = {
+        excellent: '🟢',
+        good: '🟡',
+        acceptable: '🟠',
+        poor: '🔴',
+      };
+
+      const lines = [
+        `# 还原度校验结果\n`,
+        `## 评分`,
+        `${gradeIcon[result.grade] ?? '⚪'} 还原度: ${result.fidelityScore}% (${result.grade})`,
+        `${result.gradeDescription}\n`,
+        `## 像素 diff 统计`,
+        `- 差异像素: ${result.diffPixels.toLocaleString()} / ${result.totalPixels.toLocaleString()}`,
+        `- 差异占比: ${(result.diffRatio * 100).toFixed(2)}%\n`,
+        `## 截图信息`,
+        `- Figma 截图: ${result.figmaWidth}x${result.figmaHeight}px`,
+        `- 代码截图: ${result.codeWidth}x${result.codeHeight}px`,
+        `- Figma 截图缓存: ${result.figmaScreenshotPath}`,
+        `- 代码截图缓存: ${result.codeScreenshotPath}\n`,
+      ];
+
+      if (result.diffImagePath) {
+        lines.push(`## 差异热力图`);
+        lines.push(`- 文件路径: ${result.diffImagePath}`);
+        lines.push(`- 红色区域为差异像素\n`);
+      }
+
+      if (result.warnings.length > 0) {
+        lines.push(`## 警告信息`);
+        result.warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
+        lines.push('');
+      }
+
+      // 还原度建议
+      lines.push(`## 改进建议`);
+      if (result.grade === 'excellent') {
+        lines.push('- 还原度优秀，无需额外校对');
+      } else if (result.grade === 'good') {
+        lines.push('- 检查差异热力图中的红色区域，校对少量细节');
+      } else if (result.grade === 'acceptable') {
+        lines.push('- 重点检查差异热力图中的红色区域，校对字体/颜色/间距');
+        lines.push('- 建议用 figma_get_design_context 重新获取精确节点信息');
+      } else {
+        lines.push('- 还原度较差，建议重新生成代码');
+        lines.push('- 检查是否使用了正确的 node-id');
+        lines.push('- 确认 Figma 设计稿中的自动布局设置是否完整');
+      }
+
+      const structured = {
+        fidelityScore: result.fidelityScore,
+        grade: result.grade,
+        gradeDescription: result.gradeDescription,
+        diffPixels: result.diffPixels,
+        totalPixels: result.totalPixels,
+        diffRatio: result.diffRatio,
+        figmaWidth: result.figmaWidth,
+        figmaHeight: result.figmaHeight,
+        codeWidth: result.codeWidth,
+        codeHeight: result.codeHeight,
+        diffImagePath: result.diffImagePath ?? null,
+        codeScreenshotPath: result.codeScreenshotPath,
+        figmaScreenshotPath: result.figmaScreenshotPath,
+        warnings: result.warnings,
+        verifiedAt: result.verifiedAt,
+      };
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: structured,
+      };
+    } catch (error) {
+      return buildToolErrorResponse('还原度校验', error, getFigmaClientSafe(accessToken));
+    }
+  },
+);
+
 export async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Figma Dev Tools MCP Server v1.4.3 running via stdio');
+  console.error('Figma Dev Tools MCP Server v1.4.4 running via stdio');
 }

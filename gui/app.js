@@ -2,8 +2,8 @@ const I18N = {
   'zh-CN': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: '配置向导 v1.4.0',
-      footer: 'Figma Dev Tools v1.4.0 — 在 AI 编辑器中直接调用 MCP 工具',
+      subtitle: '配置向导 v1.4.4',
+      footer: 'Figma Dev Tools v1.4.4 — 在 AI 编辑器中直接调用 MCP 工具',
     },
     steps: {
       welcome: '欢迎',
@@ -69,6 +69,7 @@ const I18N = {
       installFailed: '❌ 安装失败',
       noEditors: '未检测到支持的编辑器',
       manualHint: '你可以稍后手动配置其他编辑器',
+      download: '去官网下载',
       allDone: '所有检测到的编辑器已配置完成',
     },
     framework: {
@@ -77,7 +78,7 @@ const I18N = {
       react: 'React',
       reactDesc: 'React + TypeScript + Tailwind CSS（推荐，一级支持）',
       vue: 'Vue 3',
-      vueDesc: 'Vue 3 + <script setup lang="ts">（v1.4.0 新增）',
+      vueDesc: 'Vue 3 + <script setup lang="ts">（已支持）',
       html: 'HTML/CSS',
       htmlDesc: '纯 HTML 和 CSS',
       outputDir: '设计 Tokens 输出目录',
@@ -98,6 +99,12 @@ const I18N = {
       mcpHint: '💡 重启你的 AI 编辑器即可使用 MCP 工具',
       closeWindow: '关闭此窗口',
       quickStart: '快速开始',
+      globalInstallTitle: '全局安装 CLI 工具',
+      globalInstallDesc: '全局安装 figma-dev-tools 后可在任意目录直接使用 figma-dev 命令',
+      globalInstallBtn: '全局安装',
+      globalInstalling: '正在安装...',
+      globalInstallSuccess: '✅ 全局安装成功！可在任意目录使用 figma-dev 命令',
+      globalInstallFailed: '❌ 安装失败',
     },
     common: {
       back: '上一步',
@@ -110,8 +117,8 @@ const I18N = {
   'en-US': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: 'Setup Wizard v1.4.0',
-      footer: 'Figma Dev Tools v1.4.0 — Use MCP tools directly in AI editors',
+      subtitle: 'Setup Wizard v1.4.4',
+      footer: 'Figma Dev Tools v1.4.4 — Use MCP tools directly in AI editors',
     },
     steps: {
       welcome: 'Welcome',
@@ -179,6 +186,7 @@ const I18N = {
       installFailed: '❌ Installation failed',
       noEditors: 'No supported editors detected',
       manualHint: 'You can manually configure other editors later',
+      download: 'Download',
       allDone: 'All detected editors configured',
     },
     framework: {
@@ -187,7 +195,7 @@ const I18N = {
       react: 'React',
       reactDesc: 'React + TypeScript + Tailwind CSS (Recommended, first-class support)',
       vue: 'Vue 3',
-      vueDesc: 'Vue 3 + <script setup lang="ts"> (v1.4.0 new!)',
+      vueDesc: 'Vue 3 + <script setup lang="ts"> (Supported)',
       html: 'HTML/CSS',
       htmlDesc: 'Plain HTML and CSS',
       outputDir: 'Design Tokens output directory',
@@ -208,6 +216,12 @@ const I18N = {
       mcpHint: '💡 Restart your AI editor to use MCP tools',
       closeWindow: 'Close this window',
       quickStart: 'Quick Start',
+      globalInstallTitle: 'Install CLI Globally',
+      globalInstallDesc: 'Install figma-dev-tools globally to use the figma-dev command from any directory',
+      globalInstallBtn: 'Install Globally',
+      globalInstalling: 'Installing...',
+      globalInstallSuccess: '✅ Installed globally! figma-dev command available everywhere',
+      globalInstallFailed: '❌ Installation failed',
     },
     common: {
       back: 'Back',
@@ -244,6 +258,11 @@ class App {
       framework: 'react',
       outputDir: './src/styles/figma',
       configComplete: false,
+      globalInstalling: false, // 是否正在全局安装
+      globalInstalled: false, // 是否已全局安装
+      globalInstallError: '', // 全局安装错误信息
+      globalInstallStatus: '', // 当前安装状态文字
+      globalInstallLogs: [], // 实时安装日志行
     };
     this.init();
   }
@@ -578,12 +597,14 @@ class App {
       '<div class="text-xs text-gray-500 mt-1">' +
       this.t('framework.reactDesc') +
       '</div></div>' +
-      '<div class="framework-option disabled" data-framework="vue">' +
-      '<div class="text-3xl mb-2 opacity-50">💚</div>' +
-      '<div class="font-semibold text-gray-400">' +
+      '<div class="framework-option ' +
+      (this.state.framework === 'vue' ? 'selected' : '') +
+      '" data-framework="vue">' +
+      '<div class="text-3xl mb-2">💚</div>' +
+      '<div class="font-semibold text-gray-900">' +
       this.t('framework.vue') +
       '</div>' +
-      '<div class="text-xs text-gray-400 mt-1">' +
+      '<div class="text-xs text-gray-500 mt-1">' +
       this.t('framework.vueDesc') +
       '</div></div>' +
       '<div class="framework-option ' +
@@ -643,6 +664,23 @@ class App {
       this.t('complete.cmdMetadata') +
       '</span></div>' +
       '</div></div>' +
+      // 全局安装 CLI 区域：未安装/安装中显示完整卡片，安装成功后只显示简洁成功条
+      (this.state.globalInstalled
+        ? '<div class="bg-green-50 border border-green-200 rounded-xl p-4 max-w-md mx-auto mb-6 text-left">' +
+          '<div class="text-green-700 text-sm font-medium">' +
+          this.t('complete.globalInstallSuccess') +
+          '</div></div>'
+        : '<div class="bg-blue-50 border border-blue-200 rounded-xl p-5 text-left max-w-md mx-auto mb-6">' +
+          '<div class="font-medium text-gray-900 mb-2">📦 ' +
+          this.t('complete.globalInstallTitle') +
+          '</div>' +
+          '<p class="text-gray-500 text-sm mb-3">' +
+          this.t('complete.globalInstallDesc') +
+          '</p>' +
+          '<div id="global-install-container">' +
+          this._renderGlobalInstallContent() +
+          '</div>' +
+          '</div>') +
       '<a href="https://gitee.com/shanxi-youcha/figma-dev-tools" target="_blank" class="link inline-flex items-center gap-1 mb-6">📚 ' +
       this.t('complete.tutorialLink') +
       ' →</a>' +
@@ -689,12 +727,17 @@ class App {
         '<span class="status-badge" style="background:#f3f4f6;color:#9ca3af;">' +
         this.t('editors.notDetected') +
         '</span>';
-      buttonHtml =
-        '<button class="btn-install" data-editor="' +
-        editor.name +
-        '" data-install="true" style="background:#9ca3af;">' +
-        this.t('editors.install') +
-        '</button>';
+      // 未检测到编辑器时，显示"去官网下载"链接按钮，引导用户前往官网安装
+      if (editor.website) {
+        buttonHtml =
+          '<a href="' +
+          editor.website +
+          '" target="_blank" rel="noopener noreferrer" class="btn-install" style="background:#3b82f6;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">' +
+          this.t('editors.download') +
+          ' →</a>';
+      } else {
+        buttonHtml = '<span></span>';
+      }
     }
 
     return (
@@ -745,6 +788,161 @@ class App {
     }
 
     this.renderEditorsList();
+  }
+
+  // 全局安装 figma-dev-tools，让 figma-dev 命令在任意目录可用
+  // 通过 SSE (Server-Sent Events) 接收实时安装进度
+  installGlobal() {
+    if (this.state.globalInstalling || this.state.globalInstalled) return;
+
+    this.state.globalInstalling = true;
+    this.state.globalInstallError = '';
+    this.state.globalInstallLogs = []; // 实时日志行
+    this.render();
+
+    // 使用 EventSource 接收 SSE 流（POST 方法通过 fetch 的 ReadableStream 模拟）
+    const controller = new AbortController();
+
+    fetch('/api/install-global', {
+      method: 'POST',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        // 持续读取 SSE 流
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          // SSE 事件以 \n\n 分隔
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const block of lines) {
+            if (!block.startsWith('data: ')) continue;
+            try {
+              const event = JSON.parse(block.slice(6));
+
+              if (event.type === 'start') {
+                // 安装开始
+                this.state.globalInstallStatus = event.data.message;
+                this._updateInstallUI();
+              } else if (event.type === 'progress') {
+                // 安装进度，追加日志
+                if (event.data.message) {
+                  // 拆分多行日志，逐行追加
+                  const newLines = event.data.message.split('\n').filter((l) => l.trim());
+                  this.state.globalInstallLogs.push(...newLines);
+                  // 限制日志条数，避免内存溢出
+                  if (this.state.globalInstallLogs.length > 50) {
+                    this.state.globalInstallLogs = this.state.globalInstallLogs.slice(-50);
+                  }
+                  this._updateInstallUI();
+                }
+              } else if (event.type === 'success') {
+                // 安装成功
+                this.state.globalInstalling = false;
+                this.state.globalInstalled = true;
+                this.showToast(this.t('complete.globalInstallSuccess'), 'success');
+                this.render();
+              } else if (event.type === 'error') {
+                // 安装失败
+                this.state.globalInstalling = false;
+                this.state.globalInstallError = event.data.message || 'Unknown error';
+                this.showToast(this.t('complete.globalInstallFailed'), 'error');
+                this.render();
+              }
+            } catch (e) {
+              // JSON 解析失败，忽略
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') return;
+        this.state.globalInstalling = false;
+        this.state.globalInstallError = error.message || String(error);
+        this.showToast(this.t('complete.globalInstallFailed'), 'error');
+        this.render();
+      });
+  }
+
+  /** 局部更新安装区域 UI（避免完整 rerender 导致日志区域闪烁） */
+  _updateInstallUI() {
+    const container = document.getElementById('global-install-container');
+    if (!container) return;
+    container.innerHTML = this._renderGlobalInstallContent();
+    // 自动滚动到日志底部
+    const logArea = document.getElementById('install-log-area');
+    if (logArea) logArea.scrollTop = logArea.scrollHeight;
+  }
+
+  /** 渲染全局安装区域内容（按钮 + 进度条 + 日志） */
+  _renderGlobalInstallContent() {
+    if (this.state.globalInstalled) {
+      // 安装成功：文案已自带 ✅，无需重复添加
+      return (
+        '<div class="text-green-600 text-sm font-medium mb-2">' +
+        this.t('complete.globalInstallSuccess') +
+        '</div>'
+      );
+    }
+
+    let html = '';
+
+    // 状态文字 + spinner
+    if (this.state.globalInstalling) {
+      html +=
+        '<div class="flex items-center gap-2 mb-3">' +
+        '<div class="spinner"></div>' +
+        '<span class="text-sm text-gray-600">' +
+        (this.state.globalInstallStatus || this.t('complete.globalInstalling')) +
+        '</span></div>';
+
+      // 进度条（不确定模式，动画效果）
+      html +=
+        '<div class="w-full bg-gray-200 rounded-full h-2 mb-3 overflow-hidden">' +
+        '<div class="install-progress-bar h-full bg-blue-500 rounded-full"></div>' +
+        '</div>';
+
+      // 实时日志区域
+      const logs = this.state.globalInstallLogs || [];
+      if (logs.length > 0) {
+        html +=
+          '<div id="install-log-area" class="bg-gray-900 text-gray-300 rounded-lg p-3 text-xs font-mono max-h-40 overflow-y-auto mb-2">' +
+          logs.map((line) => '<div class="leading-relaxed">' + this._escapeHtml(line) + '</div>').join('') +
+          '</div>';
+      }
+    } else {
+      // 未安装状态：显示安装按钮
+      html +=
+        '<button id="btn-global-install" class="btn-primary">📦 ' +
+        this.t('complete.globalInstallBtn') +
+        '</button>';
+
+      // 显示错误信息
+      if (this.state.globalInstallError) {
+        html +=
+          '<p class="text-red-500 text-sm mt-2">' +
+          this.t('complete.globalInstallFailed') +
+          ': ' +
+          this._escapeHtml(this.state.globalInstallError) +
+          '</p>';
+      }
+    }
+
+    return html;
+  }
+
+  /** HTML 转义，防止日志中的特殊字符破坏 DOM */
+  _escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   renderEditorsList() {
@@ -941,6 +1139,10 @@ class App {
     doneBtn?.addEventListener('click', () => {
       window.close();
     });
+
+    // 绑定全局安装按钮事件
+    const globalInstallBtn = document.getElementById('btn-global-install');
+    globalInstallBtn?.addEventListener('click', () => this.installGlobal());
   }
 }
 

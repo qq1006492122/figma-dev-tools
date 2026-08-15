@@ -448,6 +448,21 @@ export interface FigmaNode {
   readonly characters?: string;
   /** 文本样式（TEXT 节点） */
   readonly style?: FigmaTypeStyle;
+  /**
+   * 富文本字符样式覆盖索引数组（TEXT 节点）。
+   *
+   * v1.4.4 新增类型字段：Figma TEXT 节点用此数组表示每个字符的样式索引，
+   * 配合 styleOverrideTable 实现富文本（一段文字中部分加粗、变色等）。
+   * 索引 0 表示使用节点基础 style；其他数字对应 styleOverrideTable 中的 key。
+   */
+  readonly characterStyleOverrides?: readonly number[];
+  /**
+   * 富文本样式覆盖表（TEXT 节点）。
+   *
+   * v1.4.4 新增类型字段：与 characterStyleOverrides 配合，
+   * key 是样式索引（字符串），value 是该段的 FigmaTypeStyle。
+   */
+  readonly styleOverrideTable?: Readonly<Record<string, FigmaTypeStyle>>;
   /** 绑定的样式 ID 映射 */
   readonly styles?: FigmaNodeStyles;
   /** 关联的 Component ID（INSTANCE 节点） */

@@ -388,14 +388,22 @@ export const zhCN = {
           code: 'TOKEN_INVALID',
           title: 'Figma Token 无效',
           reason: '当前 Access Token 无法通过 Figma 认证。',
-          solutions: ['重新生成 Figma Personal Access Token', '确认勾选 File content (Read only) 权限', '更新环境变量 FIGMA_ACCESS_TOKEN 或调用参数 accessToken'],
+          solutions: [
+            '重新生成 Figma Personal Access Token',
+            '确认勾选 File content (Read only) 权限',
+            '更新环境变量 FIGMA_ACCESS_TOKEN 或调用参数 accessToken',
+          ],
           docs: 'https://www.figma.com/developers/api#access-tokens',
         },
         TOKEN_EXPIRED: {
           code: 'TOKEN_EXPIRED',
           title: 'Figma Token 已过期',
           reason: '当前 Token 已过期或被撤销，无法读取设计稿结构。',
-          solutions: ['在 Figma Settings 中重新生成 Token', '如果配置了多个 Token，工具会自动尝试切换到下一个', '更新 Token 后重新拉取设计数据'],
+          solutions: [
+            '在 Figma Settings 中重新生成 Token',
+            '如果配置了多个 Token，工具会自动尝试切换到下一个',
+            '更新 Token 后重新拉取设计数据',
+          ],
           docs: 'https://www.figma.com/developers/api#access-tokens',
         },
         FILE_PERMISSION_DENIED: {
@@ -408,13 +416,21 @@ export const zhCN = {
           code: 'PAYMENT_REQUIRED',
           title: 'Figma 付费或席位权限受限',
           reason: 'Figma 返回付费、席位或 Dev Mode 相关限制，当前 Token 无法读取完整设计数据。',
-          solutions: ['确认 Figma 组织/团队席位是否有效', '确认应用或 Token 对应账号是否具备所需访问权限', '如果本机已有缓存，工具会尝试返回最近一次缓存并标记为陈旧数据'],
+          solutions: [
+            '确认 Figma 组织/团队席位是否有效',
+            '确认应用或 Token 对应账号是否具备所需访问权限',
+            '如果本机已有缓存，工具会尝试返回最近一次缓存并标记为陈旧数据',
+          ],
         },
         FORBIDDEN: {
           code: 'FORBIDDEN',
           title: 'Figma 请求被拒绝',
           reason: 'Figma 返回 403，但未能从响应中判断具体原因。',
-          solutions: ['检查 Token 权限和文件协作权限', '稍后重试，或使用截图/导出资源补充输入', '若本地有旧缓存，可选择基于陈旧缓存继续分析'],
+          solutions: [
+            '检查 Token 权限和文件协作权限',
+            '稍后重试，或使用截图/导出资源补充输入',
+            '若本地有旧缓存，可选择基于陈旧缓存继续分析',
+          ],
         },
         SERVER_ERROR: {
           code: 'SERVER_ERROR',
@@ -426,7 +442,117 @@ export const zhCN = {
           code: 'STALE_CACHE_USED',
           title: '正在使用陈旧缓存',
           reason: '实时请求失败，当前结果来自本地历史缓存，可能不是最新设计稿。',
-          solutions: ['恢复 Token 或文件权限后重新拉取', '将生成结果与 Figma 最新截图比对', '不要把陈旧缓存结果视为最终还原结果'],
+          solutions: [
+            '恢复 Token 或文件权限后重新拉取',
+            '将生成结果与 Figma 最新截图比对',
+            '不要把陈旧缓存结果视为最终还原结果',
+          ],
+        },
+        FILE_NOT_FOUND: {
+          code: 'FILE_NOT_FOUND',
+          title: '文件或节点不存在',
+          reason: 'Figma 返回 404，文件或节点不存在，也可能是当前账号无权限导致。',
+          solutions: [
+            '检查 fileKey/nodeId 是否正确',
+            '确认当前账号是否有该文件访问权限',
+            '让文件所有者把当前 Figma 账号加入协作',
+          ],
+        },
+        RATE_LIMITED: {
+          code: 'RATE_LIMITED',
+          title: 'Figma API 请求频率超限',
+          reason: '短时间内请求过多，触发 Figma 速率限制。',
+          solutions: [
+            '工具会根据 Retry-After 自动退避重试',
+            '若仍失败，请稍后再试',
+            '考虑配置多 Token 轮换分散请求',
+          ],
+        },
+        NETWORK_ERROR: {
+          code: 'NETWORK_ERROR',
+          title: '网络错误',
+          reason: '请求 Figma API 时发生网络连接错误或超时。',
+          solutions: [
+            '检查网络连接是否正常',
+            '检查 HTTP_PROXY/HTTPS_PROXY 环境变量或代理配置',
+            '若使用企业自签名证书，请配置 ssl.caCertPath',
+          ],
+        },
+      },
+      // 错误消息模板词（用于 FigmaApiError 拼装）
+      labels: {
+        cause: '原因',
+        suggestion: '建议',
+        originalResponse: '原始响应',
+        requestFailed: 'Figma API 请求失败',
+        staleCacheWarning: (hours: number) =>
+          `实时请求失败，已回退到本地陈旧缓存（约 ${hours} 小时前），生成结果可能不是最新设计稿。`,
+        httpsRequired: 'Figma API Base URL 必须使用 HTTPS（本地调试除外）',
+        networkError:
+          'Figma API 请求失败：网络连接错误或请求超时。请检查网络设置、HTTP_PROXY/HTTPS_PROXY 环境变量或代理配置。',
+        networkErrorWithMessage: (msg: string) => `Figma API 请求失败：${msg}`,
+        // v1.4.4 浏览器兜底 / 视觉近似模式相关提示
+        playwrightNotInstalled: 'Playwright 未安装',
+        playwrightInstallHint:
+          '运行 npm install playwright && npx playwright install chromium 安装浏览器引擎',
+        fallbackDisabled: '浏览器兜底已禁用（enabled=false）',
+        fallbackUnavailable: (reason: string, hint: string) =>
+          `浏览器兜底不可用：${reason}。${hint}`,
+        fallbackTokenRequired: '浏览器兜底需要 Figma Access Token 注入 Cookie',
+        fallbackParseFileKeyFailed: (url: string) => `无法从 URL 解析 fileKey: ${url}`,
+        devModeCssNotFound: '未找到 Dev Mode CSS 侧栏（可能需要 Figma 付费订阅或页面结构变化）',
+        approximateModeBanner:
+          '⚠️ 近似模式（~70-80% 还原度）：因 Figma 付费墙限制无法获取节点 JSON，已通过浏览器截图 + 视觉算法生成近似代码，部分细节需人工校对。',
+        approximateTodoTitle: '近似模式待人工校对项',
+        // v1.4.4 还原度校验相关提示
+        fidelityDepsInstallHint:
+          '运行 npm install pixelmatch pngjs 安装备用依赖，并确保已安装 Playwright（npm install playwright && npx playwright install chromium）',
+      },
+      // HTTP 状态码细分失败原因（供 _classifyHttpFailure 使用）
+      httpFailures: {
+        status401: {
+          expired: {
+            reason: 'Figma Access Token 已过期或被撤销。',
+            solution: '请重新生成 Token；如配置了多个 Token，工具会自动尝试下一个。',
+          },
+          invalid: {
+            reason: 'Figma Access Token 无效。',
+            solution: '请重新生成 Token；如配置了多个 Token，工具会自动尝试下一个。',
+          },
+        },
+        status403: {
+          payment: {
+            reason: 'Figma 返回付费、席位或 Dev Mode 权限限制。',
+            solution: '请确认 Figma 组织席位或对应权限；本地若有历史缓存，将自动返回陈旧缓存并提示。',
+          },
+          token: {
+            reason: 'Token 认证失败或权限不足。',
+            solution: '请重新生成 Token，或确认该 Token 拥有 File content (Read only) 权限。',
+          },
+          permission: {
+            reason: '当前账号没有该文件或节点的访问权限。',
+            solution: '请确认文件链接正确，并让文件所有者把当前 Figma 账号加入协作。',
+          },
+          forbidden: {
+            reason: 'Figma 拒绝了本次请求，但响应中没有给出更明确的原因。',
+            solution: '请检查 Token 权限、文件权限或 Figma 付费/席位状态；本地若有缓存可降级读取。',
+          },
+        },
+        status404: {
+          reason: '文件或节点不存在，也可能是当前账号无权限导致 Figma 返回 404。',
+          solution: '请检查 fileKey/nodeId 是否正确，并确认当前账号是否有该文件访问权限。',
+        },
+        status429: {
+          reason: 'Figma API 请求频率超限。',
+          solution: '工具会根据 Retry-After 自动退避重试；仍失败时请稍后再试。',
+        },
+        status5xx: {
+          reason: (status: number) => `Figma 服务端异常 (HTTP ${status})。`,
+          solution: '工具已自动重试；若持续失败，请查看 https://status.figma.com。',
+        },
+        network: {
+          reason: (status: number) => `Figma API 请求失败 (HTTP ${status})。`,
+          solution: '请检查参数、网络或代理配置后重试。',
         },
       },
     },

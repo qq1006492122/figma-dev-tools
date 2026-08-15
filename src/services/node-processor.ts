@@ -28,6 +28,7 @@ import type {
   ProcessedAutoLayout,
   ProcessedTextStyle,
   ProcessedAbsolutePosition,
+  RichTextSegment,
   ProcessedAsset,
   NodeSemanticRole,
   ProcessingStats,
@@ -256,6 +257,25 @@ function convertFill(fill: FigmaPaint): ProcessedFill | null {
         opacity: fill.opacity,
       };
     }
+    // v1.4.4 新增：径向/角度/菱形渐变映射，此前全部丢失导致设计稿失真
+    case 'GRADIENT_RADIAL':
+    case 'GRADIENT_ANGULAR':
+    case 'GRADIENT_DIAMOND': {
+      if (!fill.gradientStops || !fill.gradientHandlePositions) return null;
+      // 将 Figma 的 GRADIENT_RADIAL 等映射为 ProcessedGradientFill 的 type
+      // GRADIENT_RADIAL → 'gradient-radial'，GRADIENT_ANGULAR → 'gradient-angular'，GRADIENT_DIAMOND → 'gradient-diamond'
+      const typeMap = {
+        GRADIENT_RADIAL: 'gradient-radial',
+        GRADIENT_ANGULAR: 'gradient-angular',
+        GRADIENT_DIAMOND: 'gradient-diamond',
+      } as const;
+      return {
+        type: typeMap[fill.type as 'GRADIENT_RADIAL' | 'GRADIENT_ANGULAR' | 'GRADIENT_DIAMOND'],
+        gradientHandlePositions: fill.gradientHandlePositions.map((p) => ({ x: p.x, y: p.y })),
+        gradientStops: fill.gradientStops.map((s) => ({ position: s.position, color: s.color })),
+        opacity: fill.opacity,
+      };
+    }
     case 'IMAGE': {
       return {
         type: 'image',
@@ -406,6 +426,10 @@ function extractAutoLayout(node: FigmaNode): ProcessedAutoLayout | undefined {
 function extractTextStyle(node: FigmaNode): ProcessedTextStyle | undefined {
   if (node.type !== 'TEXT' || !node.style) return undefined;
 
+  // v1.4.4 新增：解析富文本分段（characterStyleOverrides + styleOverrideTable）
+  // 当 TEXT 节点包含多段样式时，切分为 richTextSegments 供代码生成使用
+  const richTextSegments = extractRichTextSegments(node);
+
   return {
     fontFamily: node.style.fontFamily,
     fontWeight: node.style.fontWeight,
@@ -416,7 +440,69 @@ function extractTextStyle(node: FigmaNode): ProcessedTextStyle | undefined {
     textAlignVertical: node.style.textAlignVertical,
     textDecoration: node.style.textDecoration,
     textCase: node.style.textCase,
+    richTextSegments,
   };
+}
+
+/**
+ * 解析富文本分段（v1.4.4 新增）
+ *
+ * 当 TEXT 节点包含 characterStyleOverrides（每字符样式索引数组）+
+ * styleOverrideTable（样式索引到样式对象的映射）时，将文本按样式差异切分为多段。
+ *
+ * 当前版本仅解析并透传 richTextSegments，分段渲染（用 <span> 包裹）计划在 v1.4.5 实现。
+ *
+ * @param node - Figma TEXT 节点
+ * @returns 富文本段数组，无富文本时返回 undefined
+ */
+function extractRichTextSegments(node: FigmaNode): RichTextSegment[] | undefined {
+  // 无字符样式覆盖或无样式表时，不是富文本
+  if (!node.characterStyleOverrides || node.characterStyleOverrides.length === 0) return undefined;
+  if (!node.styleOverrideTable || Object.keys(node.styleOverrideTable).length === 0) return undefined;
+  if (!node.characters || node.characters.length === 0) return undefined;
+
+  const segments: RichTextSegment[] = [];
+  const overrides = node.characterStyleOverrides;
+  const text = node.characters;
+
+  // 按样式索引分组连续字符
+  let currentStyleIndex = overrides[0] ?? 0;
+  let currentStart = 0;
+
+  for (let i = 1; i <= overrides.length; i++) {
+    const styleIndex = i < overrides.length ? (overrides[i] ?? 0) : -1;
+    if (styleIndex !== currentStyleIndex || i === overrides.length) {
+      // 当前段结束，提取文本
+      const segmentText = text.slice(currentStart, i);
+      if (segmentText) {
+        // 索引 0 表示使用节点基础 style，无覆盖
+        if (currentStyleIndex === 0) {
+          segments.push({ text: segmentText, styleOverrides: {} });
+        } else {
+          // 从 styleOverrideTable 取该段样式
+          const overrideStyle = node.styleOverrideTable[String(currentStyleIndex)];
+          if (overrideStyle) {
+            segments.push({
+              text: segmentText,
+              styleOverrides: {
+                fontWeight: overrideStyle.fontWeight,
+                fontSize: overrideStyle.fontSize,
+                fontFamily: overrideStyle.fontFamily,
+              },
+            });
+          } else {
+            // 样式索引在表中不存在，降级为无覆盖
+            segments.push({ text: segmentText, styleOverrides: {} });
+          }
+        }
+      }
+      currentStyleIndex = styleIndex;
+      currentStart = i;
+    }
+  }
+
+  // 仅当有多段不同样式时才返回（单段无意义）
+  return segments.length > 1 ? segments : undefined;
 }
 
 /**
@@ -651,6 +737,14 @@ export class NodeProcessor {
   private _visitedPath: string[] = [];
   /** 是否已超过节点数限制 */
   private _nodeLimitExceeded = false;
+  /**
+   * v1.4.4 新增：当前正在处理的节点的父节点绝对边界（absoluteBoundingBox）。
+   *
+   * 用于在 _processNode 递归过程中传递父节点位置信息，
+   * 计算 layoutMode=NONE 节点相对父容器的 left/top/right/bottom。
+   * 在每次进入子节点处理前更新，退出后恢复（栈式管理）。
+   */
+  private _parentAbsoluteBBox: { x: number; y: number; width: number; height: number } | null = null;
 
   /**
    * 构造函数 - 初始化节点处理器
@@ -846,7 +940,12 @@ export class NodeProcessor {
       const shouldFlattenGroupChildren = node.type === 'GROUP' && !hasVisualProps(node) && node.children.length > 1;
 
       for (const child of node.children) {
+        // v1.4.4 保存父节点绝对边界，用于子节点计算相对定位
+        const savedParentBBox = this._parentAbsoluteBBox;
+        this._parentAbsoluteBBox = node.absoluteBoundingBox ?? null;
         const processedChild = this._processNode(child, depth + 1, null, new Set(visited));
+        // 恢复父节点边界（栈式管理）
+        this._parentAbsoluteBBox = savedParentBBox;
         if (processedChild) {
           if (shouldFlattenGroupChildren && this.options.flattenGroups) {
             this.stats.flattenedGroupCount++;
@@ -894,11 +993,36 @@ export class NodeProcessor {
     }
 
     let _absolutePosition: ProcessedAbsolutePosition | undefined;
+    // v1.4.4 修复：绝对定位 left/top 此前用的是页面绝对坐标（absoluteBoundingBox.x/y），
+    // 应为相对父容器的偏移。这里通过 FigmaNode 的 absoluteBoundingBox 减去父节点的 absoluteBoundingBox 计算。
     if (node.layoutMode === 'NONE' && node.absoluteBoundingBox && parent?.size) {
-      _absolutePosition = {
-        left: node.absoluteBoundingBox.x,
-        top: node.absoluteBoundingBox.y,
-      };
+      // 获取父节点的绝对边界（从 ProcessedNode 反查不到，需从 _parentAbsoluteBBox 缓存取）
+      const parentBBox = this._parentAbsoluteBBox;
+      if (parentBBox) {
+        // 相对父容器的 left/top = 节点绝对坐标 - 父节点绝对坐标
+        _absolutePosition = {
+          left: Math.round(node.absoluteBoundingBox.x - parentBBox.x),
+          top: Math.round(node.absoluteBoundingBox.y - parentBBox.y),
+        };
+        // 若节点右边/底边更靠近父容器边缘，也计算 right/bottom
+        const nodeRight = node.absoluteBoundingBox.x + node.absoluteBoundingBox.width;
+        const nodeBottom = node.absoluteBoundingBox.y + node.absoluteBoundingBox.height;
+        const parentRight = parentBBox.x + parentBBox.width;
+        const parentBottom = parentBBox.y + parentBBox.height;
+        // 只有当 right/bottom 比 left/top 更自然时才设置（这里简化为始终计算，让 CSS 选择更合适的）
+        if (nodeRight > parentRight - 100) {
+          _absolutePosition.right = Math.round(parentRight - nodeRight);
+        }
+        if (nodeBottom > parentBottom - 100) {
+          _absolutePosition.bottom = Math.round(parentBottom - nodeBottom);
+        }
+      } else {
+        // 无父节点绝对边界时降级为绝对坐标（根节点场景）
+        _absolutePosition = {
+          left: Math.round(node.absoluteBoundingBox.x),
+          top: Math.round(node.absoluteBoundingBox.y),
+        };
+      }
     }
 
     if (role === 'reusable-component') {
@@ -914,6 +1038,8 @@ export class NodeProcessor {
       opacity: node.opacity,
       rotation: node.rotation,
       clipsContent: node.clipsContent === true,
+      // v1.4.4 透传 isMask 字段，供 tailwind-mapper 检测矢量遮罩
+      isMask: node.isMask === true,
       size,
       layout,
       alignSelf:

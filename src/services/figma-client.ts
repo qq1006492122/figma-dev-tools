@@ -33,6 +33,7 @@ import type {
   FigmaPaint,
 } from '../types.js';
 import { FigmaApiError, type ErrorCode } from '../utils/errors.js';
+import { getI18n } from '../i18n/index.js';
 import { FigmaCache } from './cache.js';
 
 // ============ 类型定义 ============
@@ -461,17 +462,46 @@ export class FigmaClient {
 
   /**
    * 根据 HTTP 状态码和响应文本细分失败原因。
+   * reason/solution 从 i18n httpFailures 段落按当前语言解析，确保错误消息国际化。
    */
   private _classifyHttpFailure(status: number, data?: FigmaApiErrorResponse): HttpFailureClassification {
     const text = this._getResponseText(data);
     const has = (...keywords: string[]): boolean => keywords.some((keyword) => text.includes(keyword));
 
+    // 从 i18n 取 HTTP 失败原因结构（按用户 GUI 选定语言解析）
+    const i18n = getI18n();
+    const httpFailures = i18n.t('errors.httpFailures') as Record<
+      string,
+      Record<string, { reason: string | ((status: number) => string); solution: string }> | { reason: string | ((status: number) => string); solution: string }
+    >;
+
+    // 工具函数：按状态码 key + 子分类 key 解析 reason/solution（支持函数式 reason）
+    const resolveFailure = (
+      statusKey: string,
+      subKey?: string,
+    ): { reason: string; solution: string } => {
+      const group = httpFailures[statusKey];
+      if (!group) {
+        return { reason: `HTTP ${status}`, solution: '' };
+      }
+      const entry = subKey
+        ? (group as Record<string, { reason: string | ((status: number) => string); solution: string }>)[subKey]
+        : (group as { reason: string | ((status: number) => string); solution: string });
+      if (!entry) {
+        return { reason: `HTTP ${status}`, solution: '' };
+      }
+      const reason = typeof entry.reason === 'function' ? entry.reason(status) : entry.reason;
+      return { reason, solution: entry.solution };
+    };
+
     if (status === 401) {
       const expired = has('expired', 'expire', 'invalid token', 'unauthorized');
+      const subKey = expired ? 'expired' : 'invalid';
+      const { reason, solution } = resolveFailure('status401', subKey);
       return {
         code: expired ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
-        reason: expired ? 'Figma Access Token 已过期或被撤销。' : 'Figma Access Token 无效。',
-        solution: '请重新生成 Token；如配置了多个 Token，工具会自动尝试下一个。',
+        reason,
+        solution,
         retriable: false,
         tokenRecoverable: true,
         staleCacheRecoverable: true,
@@ -480,10 +510,11 @@ export class FigmaClient {
 
     if (status === 403) {
       if (has('payment', 'paid', 'seat', 'billing', 'upgrade', 'subscription', 'dev mode', 'developer mode')) {
+        const { reason, solution } = resolveFailure('status403', 'payment');
         return {
           code: 'PAYMENT_REQUIRED',
-          reason: 'Figma 返回付费、席位或 Dev Mode 权限限制。',
-          solution: '请确认 Figma 组织席位或对应权限；本地若有历史缓存，将自动返回陈旧缓存并提示。',
+          reason,
+          solution,
           retriable: false,
           tokenRecoverable: false,
           staleCacheRecoverable: true,
@@ -491,10 +522,11 @@ export class FigmaClient {
       }
 
       if (has('token', 'auth', 'credential', 'forbidden token')) {
+        const { reason, solution } = resolveFailure('status403', 'token');
         return {
           code: 'TOKEN_INVALID',
-          reason: 'Token 认证失败或权限不足。',
-          solution: '请重新生成 Token，或确认该 Token 拥有 File content (Read only) 权限。',
+          reason,
+          solution,
           retriable: false,
           tokenRecoverable: true,
           staleCacheRecoverable: true,
@@ -502,20 +534,22 @@ export class FigmaClient {
       }
 
       if (has('permission', 'access', 'not allowed', 'not found', 'file')) {
+        const { reason, solution } = resolveFailure('status403', 'permission');
         return {
           code: 'FILE_PERMISSION_DENIED',
-          reason: '当前账号没有该文件或节点的访问权限。',
-          solution: '请确认文件链接正确，并让文件所有者把当前 Figma 账号加入协作。',
+          reason,
+          solution,
           retriable: false,
           tokenRecoverable: false,
           staleCacheRecoverable: true,
         };
       }
 
+      const { reason, solution } = resolveFailure('status403', 'forbidden');
       return {
         code: 'FORBIDDEN',
-        reason: 'Figma 拒绝了本次请求，但响应中没有给出更明确的原因。',
-        solution: '请检查 Token 权限、文件权限或 Figma 付费/席位状态；本地若有缓存可降级读取。',
+        reason,
+        solution,
         retriable: false,
         tokenRecoverable: false,
         staleCacheRecoverable: true,
@@ -523,10 +557,11 @@ export class FigmaClient {
     }
 
     if (status === 404) {
+      const { reason, solution } = resolveFailure('status404');
       return {
         code: 'FILE_NOT_FOUND',
-        reason: '文件或节点不存在，也可能是当前账号无权限导致 Figma 返回 404。',
-        solution: '请检查 fileKey/nodeId 是否正确，并确认当前账号是否有该文件访问权限。',
+        reason,
+        solution,
         retriable: false,
         tokenRecoverable: false,
         staleCacheRecoverable: true,
@@ -534,10 +569,11 @@ export class FigmaClient {
     }
 
     if (status === 429) {
+      const { reason, solution } = resolveFailure('status429');
       return {
         code: 'RATE_LIMITED',
-        reason: 'Figma API 请求频率超限。',
-        solution: '工具会根据 Retry-After 自动退避重试；仍失败时请稍后再试。',
+        reason,
+        solution,
         retriable: true,
         tokenRecoverable: false,
         staleCacheRecoverable: true,
@@ -545,20 +581,22 @@ export class FigmaClient {
     }
 
     if (status >= 500) {
+      const { reason, solution } = resolveFailure('status5xx');
       return {
         code: 'SERVER_ERROR',
-        reason: `Figma 服务端异常 (HTTP ${status})。`,
-        solution: '工具已自动重试；若持续失败，请查看 https://status.figma.com。',
+        reason,
+        solution,
         retriable: true,
         tokenRecoverable: false,
         staleCacheRecoverable: true,
       };
     }
 
+    const { reason: networkReason, solution: networkSolution } = resolveFailure('network');
     return {
       code: 'NETWORK_ERROR',
-      reason: data?.err || data?.message || `Figma API 请求失败 (HTTP ${status})。`,
-      solution: '请检查参数、网络或代理配置后重试。',
+      reason: data?.err || data?.message || networkReason,
+      solution: networkSolution,
       retriable: status === 408,
       tokenRecoverable: false,
       staleCacheRecoverable: status >= 500 || status === 408,
@@ -613,7 +651,11 @@ export class FigmaClient {
       }
 
       const ageHours = Math.round(stale.ageMs / (60 * 60 * 1000));
-      this._lastWarning = `实时请求失败，已回退到本地陈旧缓存（约 ${ageHours} 小时前），生成结果可能不是最新设计稿。`;
+      const i18n = getI18n();
+      const labels = i18n.t('errors.labels') as {
+        staleCacheWarning: (hours: number) => string;
+      };
+      this._lastWarning = labels.staleCacheWarning(ageHours);
       this._requestStats.staleFallback++;
       return stale.data;
     }
@@ -663,10 +705,12 @@ export class FigmaClient {
       lastRequestAt: 0,
     };
 
-    // HTTPS 强制检查
+    // HTTPS 强制检查（错误消息走 i18n）
     const baseURL = config.baseURL || DEFAULT_BASE_URL;
     if (!this._isLocalhost(baseURL) && !baseURL.startsWith(HTTPS_PROTOCOL)) {
-      throw new Error('Figma API Base URL 必须使用 HTTPS（本地调试除外）');
+      const i18n = getI18n();
+      const labels = i18n.t('errors.labels') as { httpsRequired: string };
+      throw new Error(labels.httpsRequired);
     }
 
     // 代理配置
@@ -745,13 +789,14 @@ export class FigmaClient {
 
         if (error.request) {
           // 请求已发出但未收到响应（网络问题、DNS 失败、超时等）。交给陈旧缓存降级逻辑处理。
-          throw new Error(
-            'Figma API 请求失败：网络连接错误或请求超时。' +
-              '请检查网络设置、HTTP_PROXY/HTTPS_PROXY 环境变量或代理配置。',
-          );
+          const i18n = getI18n();
+          const labels = i18n.t('errors.labels') as { networkError: string };
+          throw new Error(labels.networkError);
         }
 
-        throw new Error(`Figma API 请求失败：${error.message}`);
+        const i18n = getI18n();
+        const labels = i18n.t('errors.labels') as { networkErrorWithMessage: (msg: string) => string };
+        throw new Error(labels.networkErrorWithMessage(error.message));
       },
     );
   }

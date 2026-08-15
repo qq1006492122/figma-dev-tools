@@ -388,45 +388,182 @@ export const enUS = {
           code: 'TOKEN_INVALID',
           title: 'Invalid Figma token',
           reason: 'The current access token did not pass Figma authentication.',
-          solutions: ['Regenerate a Figma Personal Access Token', 'Confirm File content (Read only) scope is selected', 'Update FIGMA_ACCESS_TOKEN or the accessToken argument'],
+          solutions: [
+            'Regenerate a Figma Personal Access Token',
+            'Confirm File content (Read only) scope is selected',
+            'Update FIGMA_ACCESS_TOKEN or the accessToken argument',
+          ],
           docs: 'https://www.figma.com/developers/api#access-tokens',
         },
         TOKEN_EXPIRED: {
           code: 'TOKEN_EXPIRED',
           title: 'Figma token expired',
           reason: 'The current token has expired or been revoked.',
-          solutions: ['Regenerate the token in Figma Settings', 'If multiple tokens are configured, the tool will try the next one', 'Pull design data again after updating the token'],
+          solutions: [
+            'Regenerate the token in Figma Settings',
+            'If multiple tokens are configured, the tool will try the next one',
+            'Pull design data again after updating the token',
+          ],
           docs: 'https://www.figma.com/developers/api#access-tokens',
         },
         FILE_PERMISSION_DENIED: {
           code: 'FILE_PERMISSION_DENIED',
           title: 'File access denied',
           reason: 'The token is valid, but the current account cannot access this Figma file.',
-          solutions: ['Verify the file URL', 'Ask the file owner to invite the current Figma account', 'Check team-level access restrictions'],
+          solutions: [
+            'Verify the file URL',
+            'Ask the file owner to invite the current Figma account',
+            'Check team-level access restrictions',
+          ],
         },
         PAYMENT_REQUIRED: {
           code: 'PAYMENT_REQUIRED',
           title: 'Payment or seat restriction',
           reason: 'Figma returned a payment, seat, or Dev Mode access restriction.',
-          solutions: ['Verify the organization or team seat is active', 'Confirm the token account has the required access level', 'If local cache exists, the tool can return stale data with a warning'],
+          solutions: [
+            'Verify the organization or team seat is active',
+            'Confirm the token account has the required access level',
+            'If local cache exists, the tool can return stale data with a warning',
+          ],
         },
         FORBIDDEN: {
           code: 'FORBIDDEN',
           title: 'Figma request forbidden',
           reason: 'Figma returned 403, but the exact cause could not be determined from the response.',
-          solutions: ['Check token scopes and file permissions', 'Retry later or provide screenshots/exported assets as fallback', 'Use stale local cache when available'],
+          solutions: [
+            'Check token scopes and file permissions',
+            'Retry later or provide screenshots/exported assets as fallback',
+            'Use stale local cache when available',
+          ],
         },
         SERVER_ERROR: {
           code: 'SERVER_ERROR',
           title: 'Figma server error',
           reason: 'Figma API returned a 5xx server error.',
-          solutions: ['The tool has retried automatically', 'Check https://status.figma.com', 'Retry code generation later'],
+          solutions: [
+            'The tool has retried automatically',
+            'Check https://status.figma.com',
+            'Retry code generation later',
+          ],
         },
         STALE_CACHE_USED: {
           code: 'STALE_CACHE_USED',
           title: 'Stale cache is being used',
           reason: 'The live request failed and the result came from local historical cache. It may be outdated.',
-          solutions: ['Refresh token or file permission, then pull again', 'Compare generated output with the latest Figma screenshot', 'Do not treat stale cache output as final'],
+          solutions: [
+            'Refresh token or file permission, then pull again',
+            'Compare generated output with the latest Figma screenshot',
+            'Do not treat stale cache output as final',
+          ],
+        },
+        FILE_NOT_FOUND: {
+          code: 'FILE_NOT_FOUND',
+          title: 'File or node not found',
+          reason: 'Figma returned 404. The file or node does not exist, or the current account lacks permission.',
+          solutions: [
+            'Verify the fileKey/nodeId',
+            'Confirm the current account has access to the file',
+            'Ask the file owner to invite the current Figma account',
+          ],
+        },
+        RATE_LIMITED: {
+          code: 'RATE_LIMITED',
+          title: 'Figma API rate limit exceeded',
+          reason: 'Too many requests in a short period triggered Figma rate limiting.',
+          solutions: [
+            'The tool will auto-backoff based on Retry-After',
+            'If it still fails, retry later',
+            'Consider configuring multiple tokens to spread load',
+          ],
+        },
+        NETWORK_ERROR: {
+          code: 'NETWORK_ERROR',
+          title: 'Network error',
+          reason: 'A network connection error or timeout occurred while requesting the Figma API.',
+          solutions: [
+            'Check the network connection',
+            'Check HTTP_PROXY/HTTPS_PROXY env vars or proxy config',
+            'If using a self-signed enterprise certificate, configure ssl.caCertPath',
+          ],
+        },
+      },
+      // Error message template labels (used by FigmaApiError assembly)
+      labels: {
+        cause: 'Cause',
+        suggestion: 'Suggestion',
+        originalResponse: 'Original response',
+        requestFailed: 'Figma API request failed',
+        staleCacheWarning: (hours: number) =>
+          `Live request failed, fell back to local stale cache (about ${hours} hours ago). Output may not reflect the latest design.`,
+        httpsRequired: 'Figma API Base URL must use HTTPS (except for local debugging)',
+        networkError:
+          'Figma API request failed: network connection error or request timeout. Please check network settings, HTTP_PROXY/HTTPS_PROXY env vars or proxy config.',
+        networkErrorWithMessage: (msg: string) => `Figma API request failed: ${msg}`,
+        // v1.4.4 browser fallback / visual approximation mode prompts
+        playwrightNotInstalled: 'Playwright is not installed',
+        playwrightInstallHint:
+          'Run npm install playwright && npx playwright install chromium to install the browser engine',
+        fallbackDisabled: 'Browser fallback is disabled (enabled=false)',
+        fallbackUnavailable: (reason: string, hint: string) =>
+          `Browser fallback unavailable: ${reason}. ${hint}`,
+        fallbackTokenRequired: 'Browser fallback requires Figma Access Token to inject as Cookie',
+        fallbackParseFileKeyFailed: (url: string) => `Failed to parse fileKey from URL: ${url}`,
+        devModeCssNotFound:
+          'Dev Mode CSS panel not found (may require Figma paid subscription or page structure changed)',
+        approximateModeBanner:
+          '⚠️ Approximate mode (~70-80% fidelity): Unable to fetch node JSON due to Figma paywall. Approximate code generated via browser screenshot + visual algorithm. Some details require manual review.',
+        approximateTodoTitle: 'Approximate mode manual review checklist',
+        // v1.4.4 fidelity verification prompts
+        fidelityDepsInstallHint:
+          'Run npm install pixelmatch pngjs to install dependencies, and ensure Playwright is installed (npm install playwright && npx playwright install chromium)',
+      },
+      // HTTP status code subclassification failures (used by _classifyHttpFailure)
+      httpFailures: {
+        status401: {
+          expired: {
+            reason: 'Figma Access Token has expired or been revoked.',
+            solution: 'Regenerate the token; if multiple tokens are configured, the tool will try the next one.',
+          },
+          invalid: {
+            reason: 'Figma Access Token is invalid.',
+            solution: 'Regenerate the token; if multiple tokens are configured, the tool will try the next one.',
+          },
+        },
+        status403: {
+          payment: {
+            reason: 'Figma returned a payment, seat, or Dev Mode permission restriction.',
+            solution:
+              'Confirm the Figma organization seat or corresponding permission; if local cache exists, stale cache will be returned with a warning.',
+          },
+          token: {
+            reason: 'Token authentication failed or insufficient permission.',
+            solution: 'Regenerate the token, or confirm it has File content (Read only) scope.',
+          },
+          permission: {
+            reason: 'The current account does not have access to this file or node.',
+            solution: 'Verify the file URL and ask the file owner to invite the current Figma account.',
+          },
+          forbidden: {
+            reason: 'Figma refused the request, but no specific reason was given in the response.',
+            solution:
+              'Check token scopes, file permissions, or Figma payment/seat status; if local cache exists, it can be used as fallback.',
+          },
+        },
+        status404: {
+          reason: 'File or node does not exist, or the current account lacks permission (Figma returned 404).',
+          solution: 'Verify the fileKey/nodeId and confirm the current account has access.',
+        },
+        status429: {
+          reason: 'Figma API request rate limit exceeded.',
+          solution: 'The tool will auto-backoff based on Retry-After; if it still fails, retry later.',
+        },
+        status5xx: {
+          reason: (status: number) => `Figma server error (HTTP ${status}).`,
+          solution: 'The tool has retried automatically; if it persists, check https://status.figma.com.',
+        },
+        network: {
+          reason: (status: number) => `Figma API request failed (HTTP ${status}).`,
+          solution: 'Check parameters, network, or proxy config and retry.',
         },
       },
     },

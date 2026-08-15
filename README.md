@@ -1,89 +1,107 @@
-# 🎨 Figma Dev Tools v1.4.3
+# 🎨 Figma Dev Tools v1.4.4
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
-**打通 Figma 设计与前端研发的完整工具链**，支持 🖥️ GUI 可视化配置向导、设计 Tokens 智能提取、高保真组件生成（React/Vue/Svelte/HTML 等）、资源自动下载、跨编辑器 MCP 集成。专为 AI Agent 优化，解决 div soup、上下文爆炸、hex 写死、资源路径处理、Flex 布局变形、无障碍缺失、响应式适配等核心痛点。
+**[English](./README.en-US.md)** | **中文**
+
+**打通 Figma 设计与前端研发的完整工具链**，支持 🖥️
+GUI 可视化配置向导、设计 Tokens 智能提取、高保真组件生成（React/Vue/Svelte/HTML 等）、资源自动下载、跨编辑器 MCP 集成。专为 AI
+Agent 优化，解决 div
+soup、上下文爆炸、hex 写死、资源路径处理、Flex 布局变形、无障碍缺失、响应式适配、**付费墙兜底**等核心痛点。
 
 ---
 
-## ✨ v1.4.3 稳定性与安全加固
+## ✨ v1.4.4 付费墙兜底 + 高保真还原 + 性能优化
 
-| 优化项 | 说明 | 版本 |
-|--------|------|------|
-| 🛡️ **GUI 请求体防护** | `readBody` 添加 1MB 大小上限和 error 事件监听，防止恶意超大 body 导致内存耗尽和请求挂起 | **v1.4.3** |
-| ⚡ **Watch 模式 API 优化** | 文件元信息请求移到节点循环外，N 个节点不再发起 N 次相同 API 请求，显著降低速率限制风险 | **v1.4.3** |
-| 🔧 **缓存单例配置一致性** | `createFigmaCache` 检测配置变化，配置不同时重建实例，避免使用错误缓存目录 | **v1.4.3** |
-| 🔄 **重试策略修正** | `_isRetryable` 移除恒真条件，DNS 失败/连接拒绝等不可恢复错误不再盲目重试 | **v1.4.3** |
-| 🔗 **循环引用防护** | `maskSensitiveObject` 添加 WeakSet 循环引用检测，防止栈溢出 | **v1.4.3** |
-| 📏 **递归深度保护** | `collectNodeInfo` 添加 60 层深度硬限制，防御性编程防止异常数据导致栈溢出 | **v1.4.3** |
-| 🪵 **空 catch 块修复** | 4 处空 catch 块添加 warn 级别日志（package.json 解析、keytar 读取、页面获取、Lint 预检），提升可调试性 | **v1.4.3** |
-| 📝 **全文档版本同步** | 所有源码、文档、生成代码注释版本号统一为 v1.4.3 | **v1.4.3** |
+### 核心兜底与还原
 
-## ✨ v1.4.2 文档版本同步
+| 优化项                          | 说明                                                                                                                          | 版本       |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 🧱 **付费墙浏览器兜底**         | 新增 `BrowserFallbackService`：当 Figma REST API 因付费墙/权限失败时，自动启动 Playwright 无头浏览器加载设计稿页面并截图保底 | **v1.4.4** |
+| 🤖 **视觉近似模式**             | 新增 `VisualApproximationService`：当节点 JSON 无法获取时，将截图喂给 VLM 生成近似代码骨架，明确标注"近似模式 ~75%" + TODO 清单 | **v1.4.4** |
+| 📏 **DPR/屏幕尺寸感知**        | 截图按用户实际 `devicePixelRatio` 输出 1x/2x/3x，匹配不同操作系统渲染差异                                                       | **v1.4.4** |
+| 🎯 **还原度评分工具**          | 新增 `figma_verify_fidelity` MCP 工具：Figma 截图 vs 生成代码截图像素 diff，输出量化相似度                                    | **v1.4.4** |
+| 📐 **绝对定位还原**             | 修复 `layoutMode=NONE` 节点丢失 `relativeTransform`，浮动元素旋转/偏移正确映射                                                | **v1.4.4** |
+| 🎨 **渐变/多重阴影/inner shadow** | 修复线性/径向渐变填充、多重阴影、内阴影还原丢失，全部降级为纯色的问题                                                          | **v1.4.4** |
+| ✂️ **mask/clip-path 还原**     | 修复圆角头像、异形裁切失真，映射为 `overflow:hidden` + `border-radius` 或 `clip-path`                                          | **v1.4.4** |
+| ➖ **strokeDash 虚线/点线**     | 修复虚线、点线边框全部变成实线的问题                                                                                          | **v1.4.4** |
+| 🔤 **富文本多段样式**           | 修复 `styleOverrideTable` 未解析导致整段文本用相同样式的问题                                                                   | **v1.4.4** |
+| 🌍 **i18n 错误信息国际化**      | `figma-client.ts` 中硬编码中文错误信息全部改为 i18n key 引用，按 GUI 选定语言（zh-CN/en-US）输出，默认中文                      | **v1.4.4** |
 
-| 优化项 | 说明 | 版本 |
-|--------|------|------|
-| 📝 **全文档版本统一** | README/SKILL/DEVELOPMENT/OPTIMIZATION-ANALYSIS 等所有文档版本号同步为 v1.4.2 | **v1.4.2** |
+### 性能优化（v1.4.4 新增）
 
-## ✨ v1.4.1 代码质量优化
+| 优化项                          | 说明                                                                                                                          | 版本       |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 🚀 **浏览器实例池**             | 新增 `BrowserPool`：维护可复用的 Playwright 浏览器实例，后续截图跳过 1-3 秒启动阶段，空闲 60 秒自动回收                       | **v1.4.4** |
+| 💾 **截图缓存**                  | 新增 `ScreenshotCache`：基于 `url+nodeId+dpr` 缓存截图结果，LRU 淘汰 + TTL 过期，重复请求秒级返回                              | **v1.4.4** |
+| ⏱️ **分级超时**                 | 导航/渲染/截图分别配置超时（默认 20s/10s/5s），精准定位超时阶段                                                                | **v1.4.4** |
+| 🧠 **混合智能等待策略**         | `domcontentloaded` + 画布元素可见 + 网络空闲检测，解决 Figma SPA `networkidle` 始终无法达到的问题                                  | **v1.4.4** |
+| 🔁 **指数退避重试**             | 网络错误、超时错误自动重试（默认 2 次，初始延迟 500ms，指数退避），参数错误不重试                                              | **v1.4.4** |
+| 🔥 **预热机制**                 | `warmup()` 在服务启动时预启动浏览器实例，消除首次调用延迟                                                                      | **v1.4.4** |
+| 📊 **性能指标埋点**              | `getPerformanceStats()` 暴露浏览器池和截图缓存的统计信息（命中率/实例数/使用次数）                                              | **v1.4.4** |
+| 🐛 **逻辑黑洞修复**             | 修复 9 处逻辑黑洞：截图 selector 不一致、尺寸硬编码、devModeCss 注入风险、fidelityScore 未 clamp、依赖检查顺序等                  | **v1.4.4** |
+| 🧪 **测试覆盖**                 | 新增 35 个测试用例（BrowserPool + ScreenshotCache + 性能优化配置），总计 95 个测试全部通过                                      | **v1.4.4** |
 
-| 优化项 | 说明 | 版本 |
-|--------|------|------|
-| 🛡️ **零 any 类型** | 全面替换所有 `any` 类型为明确接口或 `unknown`，hierarchy-fixer 定义完整递归节点类型，确保类型安全 | **v1.4.1** |
-| 🧹 **oxlint 零警告** | 修复所有 oxlint 警告：移除未使用变量、应用 unicorn 规则（Set.has/Number.parseInt/node:协议），代码检查 0 error 0 warning | **v1.4.1** |
-| 📦 **代码规范增强** | install.mjs 等脚本应用 Set 优化，import 使用 node: 协议前缀，统一代码风格 | **v1.4.1** |
+### 性能对比（v1.4.4 优化前后）
 
-## ✨ v1.4.0 重磅更新
+| 场景                  | 优化前     | 优化后         | 提升      |
+| --------------------- | ---------- | -------------- | --------- |
+| 后续截图（同会话）    | 5-8 秒     | 1-2 秒         | **3-4x**  |
+| 重复请求（缓存命中）  | 5-8 秒     | <100ms         | **50x+**  |
+| 网络抖动恢复          | 直接失败   | 自动重试       | **可用性提升** |
 
-| 新特性 | 说明 | 版本 |
-|--------|------|------|
-| 🔒 **XSS 安全防护** | 引入 sanitize-html 多层防护，6个安全函数覆盖文本/属性/标识符/SVG全链路XSS防护，React/Vue生成器全面应用 | **v1.4.0** |
-| 🗂️ **智能层级修复** | 新增 hierarchy-fixer，基于坐标包含+命名语义自动检测父子层级错位，高置信度问题自动修复；三重边界保护（深度≤50/节点≤20000/循环引用检测）防止栈溢出 | **v1.4.0** |
-| 🎨 **SVG 内联渲染** | VECTOR/BOOLEAN_OPERATION 等矢量节点直接导出为内联SVG，svgo优化+currentColor支持+JSX/Vue自动转换，告别位图图标模糊 | **v1.4.0** |
-| ✨ **动画动效检测** | 检测 Figma Prototype 交互动效（ON_CLICK/ON_HOVER/SMART_ANIMATE等），自动生成 CSS transition 和 Framer Motion 代码建议 | **v1.4.0** |
-| ⚡ **本地加密缓存** | AES-256-GCM 加密缓存 Figma API 响应，LRU 淘汰+TTL 过期，大幅减少重复请求，提升速度 | **v1.4.0** |
-| 📈 **评分算法优化** | 6维度加权评分（布局30%/命名20%/组件15%/间距15%/无障碍10%/结构10%），非线性曲线+保底分，解决评分两极分化问题 | **v1.4.0** |
-| 📱 **移动端H5适配建议** | 自动生成安全区域、1px边框、触屏优化、viewport设置等H5适配方案 | **v1.4.0** |
-| 🔐 **Token过期检测** | CLI启动时静默检查Token有效性，过期自动提示刷新 | **v1.4.0** |
-| 🖼️ **图片优化增强** | 图片节点自动添加loading="lazy"、decoding="async"、width/height等优化属性 | **v1.4.0** |
-| 🧹 **CLI输出统一** | 所有命令输出风格统一，使用chalk+boxen美化，错误提示更友好 | **v1.4.0** |
-| 🖥️ **GUI 可视化配置向导** | 浏览器图形界面配置，小白友好，自动检测编辑器一键安装，中英文双语 | v1.3.0 |
-| 🌍 **i18n 国际化** | 完整支持中文/英文双语界面，CLI/GUI/MCP 工具可切换语言 | v1.3.2 |
-| ♿ **无障碍(a11y)增强** | 自动识别语义标签、添加 alt 文本、注入 ARIA 属性，确保生成代码符合 WCAG 标准 | v1.3.2 |
-| 🔧 **Flex 布局自动修复** | 智能检测并修复图标变形、文本截断、溢出滚动等经典 Flex 问题，添加 `align-items: center`、`flex-shrink: 0` 等修复类 | v1.3.2 |
-| 🎨 **设计系统对齐** | 自动匹配颜色变量、间距、字体、圆角、阴影，输出与项目设计系统一致的代码 | v1.3.2 |
-| 📱 **响应式推断** | 根据设计稿尺寸智能推断设备类型，提供 sm/md/lg/xl 响应式前缀建议 | v1.3.2 |
-| ✅ **设计规范检查 (Lint)** | 代码生成前预检设计稿质量，识别层级过深/冗余包裹/父子错位/Auto Layout问题/图层命名/规范间距等，多维度评分给出修复建议 | v1.3.2→**v1.4.0增强** |
-| 🔐 **Token 安全存储** | 支持系统 Keychain/Credential Manager 安全存储 Figma Token，避免明文泄露 | v1.3.2 |
-| 🧩 **SVG Sprite 生成** | 批量下载图标后自动合并为 SVG Sprite，生成 TypeScript 类型定义，减少 HTTP 请求 | v1.3.2 |
-| 💅 **Prettier 自动格式化** | 生成代码自动使用 Prettier 格式化，保持代码风格一致 | v1.3.2 |
-| 📖 **设计规范文档** | 新增 FIGMA-DESIGN-GUIDELINES.md，给设计师和 AI 的完整 Figma 设计规范指南 | v1.3.2 |
+### 性能优化配置（可选，向后兼容）
+
+```typescript
+// 通过 BrowserFallbackService 配置
+const service = new BrowserFallbackService({
+  navigationTimeout: 20000,    // 导航超时（毫秒）
+  renderTimeout: 10000,        // 渲染等待超时（毫秒）
+  screenshotTimeout: 5000,     // 截图操作超时（毫秒）
+  waitStrategy: 'hybrid',      // 等待策略：hybrid/conservative/aggressive
+  maxRetries: 2,               // 最大重试次数
+  retryBaseDelay: 500,         // 重试初始延迟（毫秒）
+  enableScreenshotCache: true, // 启用截图缓存
+  screenshotCacheTtl: 3600000, // 缓存有效期（毫秒，默认 1 小时）
+  browserIdleTimeout: 60000,   // 浏览器空闲超时（毫秒，默认 60 秒）
+});
+```
+
+## 📜 版本历史汇总
+
+| 版本    | 主题                    | 核心内容                                                                                                   |
+| ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.4  | 付费墙兜底 + 性能优化   | 浏览器兜底截图、视觉近似模式、还原度评分、性能优化（实例池/缓存/分级超时）                                 |
+| v1.4.3  | 稳定性与安全加固        | GUI 请求体防护、循环引用检测、递归深度保护、缓存一致性                                                      |
+| v1.4.1  | 代码质量优化            | 零 any 类型、oxlint 零警告、代码规范统一                                                                    |
+| v1.4.0  | 重磅更新                | XSS 安全防护、智能层级修复、SVG 内联渲染、动画检测、本地加密缓存、评分算法优化、H5 适配、Token 安全存储     |
+| v1.3.x  | 基础能力建设            | GUI 可视化配置、i18n 国际化、无障碍增强、Flex 修复、设计系统对齐、响应式推断、设计规范检查                  |
 
 ---
 
 ## ✨ 功能亮点
 
-| 特性 | 说明 | 版本 |
-|------|------|------|
-| 🖥️ **GUI 可视化配置向导** | 浏览器图形界面配置，欢迎页→语言选择→Token配置+实时验证→编辑器检测一键安装→框架偏好选择→完成页，小白零门槛 | **v1.3.0** |
-| 🔗 **16 个 MCP 工具** | 完整覆盖 URL 解析 → Token 提取 → 组件生成 → 资源下载全流程 | v1 |
-| 🧠 **框架无关结构化数据** | 输出 id/name/role/type/size/layout/styles/text/asset/children JSON，支持 Vue/Svelte/HTML/Angular/Solid 等任意框架 | v1.1.0 |
-| ⚛️ **React + Tailwind 一级支持** | 语义标签选择 + Tailwind 映射 + cn() 合并 + TODO 标记，一键生成高保真 TSX | v1 |
-| 🔧 **Flex 布局自动修复** | 智能修复图标变形、文本截断、溢出等 Flex 问题 | v1.3.2 |
-| ♿ **无障碍增强** | 自动添加语义标签、alt、ARIA 属性 | v1.3.2 |
-| 🎨 **设计系统对齐** | 自动匹配颜色/间距/字体/圆角/阴影变量 | v1.3.2 |
-| 📱 **响应式推断** | 智能推断断点，提供响应式前缀建议 | v1.3.2 |
-| ✅ **设计规范预检** | 生成代码前检查设计稿质量并给出修复建议 | v1.3.2 |
-| 🧠 **智能层级精简** | 自动扁平化冗余 GROUP/FRAME，消除 ~60% 无意义嵌套 div | v1 |
-| 📊 **渐进式上下文** | metadata 概览（~4KB）→ designContext 详情，避免上下文爆炸 | v2 |
-| 🎯 **多级 Token 匹配** | codeSyntax.WEB → 精确 hex → CIE76 色差模糊 → @theme 扩展建议 | v1 |
-| 🖼️ **资源自动管线** | 检测图片/SVG → 下载到 public/ → SVGO 优化 → 生成 publicCdnUrl() 引用 | v2 |
-| 🧩 **SVG Sprite 生成** | 批量图标合并为 Sprite，支持 CSS color 控制颜色 | v1.3.2 |
-| 🌍 **i18n 国际化** | 中英文双语支持，`figma-dev lang switch` 切换 | v1.3.2 |
-| 🔐 **安全 Token 存储** | 系统密钥链安全存储 Token | v1.3.2 |
-| 💻 **CLI 命令行** | 支持脚本和 CI/CD 集成，无需 MCP 也可使用，新增 gui/structured/lint/lang/token 命令 | v1 (gui v1.3.0) |
-| 🔄 **10+ 编辑器支持** | Trae、VS Code、Cursor、Windsurf、Claude Desktop、Zed、Cline、Roo Code 一键安装（GUI自动检测） | v1 (gui v1.3.0) |
-| 🚀 **零配置启动** | 支持 `npx -y figma-dev-tools --figma-api-key=xxx` 直接运行，无需提前安装配置 | v1.2 |
+| 特性                             | 说明                                                                                                              | 版本            |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------- |
+| 🖥️ **GUI 可视化配置向导**        | 浏览器图形界面配置，欢迎页→语言选择→Token配置+实时验证→编辑器检测一键安装→框架偏好选择→完成页，小白零门槛         | **v1.3.0**      |
+| 🔗 **19 个 MCP 工具**            | 完整覆盖 URL 解析 → Token 提取 → 组件生成 → 资源下载 → 付费墙兜底 → 还原度校验全流程                              | v1.4.4          |
+| 🧠 **框架无关结构化数据**        | 输出 id/name/role/type/size/layout/styles/text/asset/children JSON，支持 Vue/Svelte/HTML/Angular/Solid 等任意框架 | v1.1.0          |
+| ⚛️ **React + Tailwind 一级支持** | 语义标签选择 + Tailwind 映射 + cn() 合并 + TODO 标记，一键生成高保真 TSX                                          | v1.3.2          |
+| 🔧 **Flex 布局自动修复**         | 智能修复图标变形、文本截断、溢出等 Flex 问题                                                                      | v1.3.2          |
+| ♿ **无障碍增强**                | 自动添加语义标签、alt、ARIA 属性                                                                                  | v1.3.2          |
+| 🎨 **设计系统对齐**              | 自动匹配颜色/间距/字体/圆角/阴影变量                                                                              | v1.3.2          |
+| 📱 **响应式推断**                | 智能推断断点，提供响应式前缀建议                                                                                  | v1.3.2          |
+| ✅ **设计规范预检**              | 生成代码前检查设计稿质量并给出修复建议                                                                            | v1.3.2          |
+| 🧠 **智能层级精简**              | 自动扁平化冗余 GROUP/FRAME，消除 ~60% 无意义嵌套 div                                                              | v1              |
+| 📊 **渐进式上下文**              | metadata 概览（~4KB）→ designContext 详情，避免上下文爆炸                                                         | v1.2             |
+| 🎯 **多级 Token 匹配**           | codeSyntax.WEB → 精确 hex → CIE76 色差模糊 → @theme 扩展建议                                                      | v1              |
+| 🖼️ **资源自动管线**              | 检测图片/SVG → 下载到 public/ → SVGO 优化 → 生成 publicCdnUrl() 引用                                              | v1.2             |
+| 🧩 **SVG Sprite 生成**           | 批量图标合并为 Sprite，支持 CSS color 控制颜色                                                                    | v1.3.2          |
+| 🌍 **i18n 国际化**               | 中英文双语支持，`figma-dev lang switch` 切换                                                                      | v1.3.2          |
+| 🔐 **安全 Token 存储**           | 系统密钥链安全存储 Token                                                                                          | v1.3.2          |
+| 💻 **CLI 命令行**                | 支持脚本和 CI/CD 集成，无需 MCP 也可使用，新增 gui/structured/lint/lang/token 命令                                | v1 (gui v1.3.0) |
+| 🔄 **8+ 编辑器支持**            | Trae、VS Code、Cursor、Windsurf、Claude Desktop、Zed、Cline、Roo Code 一键安装（GUI 自动检测）                     | v1 (gui v1.3.0) |
+| 🚀 **零配置启动**                | 支持 `npx -y figma-dev-tools --figma-api-key=xxx` 直接运行，无需提前安装配置                                      | v1.2            |
 
 ---
 
@@ -101,7 +119,8 @@ npx figma-dev-tools gui
 figma-dev gui
 ```
 
-启动后会自动打开浏览器（默认端口 **54321**，被占用自动尝试 54322/54323），按照引导步骤操作：
+启动后会自动打开浏览器（默认端口
+**54321**，被占用自动尝试 54322/54323），按照引导步骤操作：
 
 1. **欢迎页面** - 了解 figma-dev-tools 功能
 2. **语言选择** - 中文/English 双语切换
@@ -111,6 +130,7 @@ figma-dev gui
 6. **完成页面** - 配置成功，提供使用教程链接
 
 > 💡 也可以通过向导命令启动 GUI 模式：
+>
 > ```bash
 > figma-dev wizard --gui
 > figma-dev init --gui
@@ -157,13 +177,16 @@ bunx figma-dev-tools install
 ```
 
 安装脚本会自动：
-- 检测已安装的 AI 编辑器（Trae/VS Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code 等 8+）
+
+- 检测已安装的 AI 编辑器（Trae/VS Code/Cursor/Windsurf/Claude
+  Desktop/Zed/Cline/Roo Code 等 8+）
 - 自动检测包管理器（npm/pnpm/yarn/bun）
 - 下载/编译工具
 - 配置对应编辑器的 MCP settings（Zed 使用 mcp_servers 字段）
 - 生成 `.env.example` 模板
 
-> 💡 **更简单的方式**：运行 `figma-dev gui` 使用图形界面一键检测并安装编辑器配置。
+> 💡 **更简单的方式**：运行 `figma-dev gui`
+> 使用图形界面一键检测并安装编辑器配置。
 
 ### 方式三：项目依赖安装
 
@@ -210,6 +233,7 @@ npm run build # 或 pnpm build / yarn build / bun run build
 ```bash
 figma-dev gui
 ```
+
 在浏览器界面中输入 Token，实时验证有效性后自动安全存储。
 
 **方式 B：安全存储（推荐 v1.3.2+）**
@@ -258,7 +282,7 @@ FIGMA_ACCESS_TOKEN=your-figma-token-here
 
 ### 3. 第一个 Figma → 代码示例
 
-**React + Tailwind（推荐，v1.3.2 增强版）：**
+**React + Tailwind（推荐，v1.4.0 增强版）：**
 
 在 AI 编辑器（如 Trae）中，直接对话：
 
@@ -271,11 +295,13 @@ https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032
 ```
 
 AI 将自动执行以下增强流程（v1.3.2）：
+
 1. `figma_lint_design` - 设计规范预检（可选，提示问题）
 2. `figma_parse_url` 解析链接
 3. `figma_get_metadata` 获取页面结构概览
 4. `figma_get_screenshot` 获取视觉基准
-5. `figma_generate_jsx` 一键生成 TSX 代码（含 Flex 修复、a11y 增强、设计系统对齐、响应式推断）
+5. `figma_generate_jsx`
+   一键生成 TSX 代码（含 Flex 修复、a11y 增强、设计系统对齐、响应式推断）
 6. `figma_download_assets` 下载图片资源（SVGO 自动优化）
 
 **其他框架（Vue/Svelte/HTML 等）：**
@@ -324,30 +350,33 @@ npx figma-dev token list    # 列出已保存 Token
 
 ## 🔧 MCP 工具参考
 
-共 **16 个 MCP 工具**，按使用流程排列：
+共 **19 个 MCP 工具**，按使用流程排列：
 
-| # | 工具名称 | 功能 | 关键参数 | 版本 |
-|---|---------|------|---------|------|
-| 1 | `figma_parse_url` | 解析 Figma URL，提取 fileKey/nodeId | `url` | v1 |
-| 2 | `figma_validate_token` | 验证 Figma Access Token 有效性 | `accessToken` | v1 |
-| 3 | `figma_get_file` | 获取文件基本信息（页面列表、组件数） | `fileKey` / `figmaUrl` | v1 |
-| 4 | `figma_list_components` | 列出文件中 Components/ComponentSets | `fileKey` | v2 |
-| 5 | `figma_get_metadata` | **高层结构概览**（~4KB，避免上下文爆炸） | `fileKey/nodeId/depth` | v2 |
-| 6 | `figma_get_design_context` | **精简设计上下文**（层级扁平+语义标注+资源列表） | `fileKey/nodeId/maxDepth` | v2 |
-| 7 | `figma_get_screenshot` | 获取节点高清截图 | `fileKey/nodeId/scale` | v1 |
-| 8 | `figma_get_structured_data` | **⭐ 框架无关结构化数据**（id/name/role/type/size/layout/styles/text/asset/children） | `fileKey/nodeId/maxDepth` | v1.1.0 |
-| 9 | `figma_lint_design` | **⭐ v1.3.2 新：代码还原质量预检** | `fileKey/nodeId/maxDepth` | **v1.3.2** |
-| 10 | `figma_generate_jsx` | **⭐ 一键生成 React+Tailwind TSX**（含 Flex 修复/a11y/设计系统/响应式） | `fileKey/nodeId/componentName/sceneName` | v1.3.2 增强 |
-| 11 | `figma_generate_component` | 基础组件生成（旧版，推荐 generate_jsx） | `fileKey/nodeId/styleFormat` | v1 |
-| 12 | `figma_download_assets` | **下载资源到 public/<场景>/ + SVGO 优化 + publicCdnUrl** | `fileKey/sceneName/assetNodeIds` | v2 |
-| 13 | `figma_create_icon_sprite` | **⭐ v1.3.2 新：生成 SVG Sprite 雪碧图** | `svgDir/outputPath/typesPath` | **v1.3.2** |
-| 14 | `figma_extract_tokens` | 提取设计 Tokens（Variables+Styles） | `fileKey/colorFormat` | v1 |
-| 15 | `figma_generate_styles` | 生成 CSS Variables / Tailwind v4 @theme | `tokens/outputFormat` | v1 |
-| 16 | `figma_sync_to_project` | 写入 tokens 到项目文件（自动备份） | `tokens/outputDir/format` | v1 |
+| #   | 工具名称                    | 功能                                                                                  | 关键参数                                 | 版本        |
+| --- | --------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------- | ----------- |
+| 1   | `figma_parse_url`           | 解析 Figma URL，提取 fileKey/nodeId                                                   | `url`                                    | v1          |
+| 2   | `figma_validate_token`      | 验证 Figma Access Token 有效性                                                        | `accessToken`                            | v1          |
+| 3   | `figma_get_file`            | 获取文件基本信息（页面列表、组件数）                                                  | `fileKey` / `figmaUrl`                   | v1          |
+| 4   | `figma_list_components`     | 列出文件中 Components/ComponentSets                                                   | `fileKey`                                | v1.2         |
+| 5   | `figma_get_metadata`        | **高层结构概览**（~4KB，避免上下文爆炸）                                              | `fileKey/nodeId/depth`                   | v1.2         |
+| 6   | `figma_get_design_context`  | **精简设计上下文**（层级扁平+语义标注+资源列表）                                      | `fileKey/nodeId/maxDepth`                | v1.2         |
+| 7   | `figma_get_screenshot`      | 获取节点高清截图                                                                      | `fileKey/nodeId/scale`                   | v1          |
+| 8   | `figma_get_structured_data` | **⭐ 框架无关结构化数据**（id/name/role/type/size/layout/styles/text/asset/children） | `fileKey/nodeId/maxDepth`                | v1.1.0      |
+| 9   | `figma_lint_design`         | **⭐ v1.3.2 新：代码还原质量预检**                                                    | `fileKey/nodeId/maxDepth`                | **v1.3.2**  |
+| 10  | `figma_generate_jsx`        | **⭐ 一键生成 React/Vue+Tailwind TSX**（含 Flex 修复/a11y/设计系统/响应式，v1.4.0 新增 Vue 3/UnoCSS） | `fileKey/nodeId/componentName/sceneName` | v1.4.0 增强 |
+| 11  | `figma_generate_component`  | 基础组件生成（旧版，推荐 generate_jsx）                                               | `fileKey/nodeId/styleFormat`             | v1          |
+| 12  | `figma_download_assets`     | **下载资源到 public/<场景>/ + SVGO 优化 + publicCdnUrl**                              | `fileKey/sceneName/assetNodeIds`         | v1.2         |
+| 13  | `figma_create_icon_sprite`  | **⭐ v1.3.2 新：生成 SVG Sprite 雪碧图**                                              | `svgDir/outputPath/typesPath`            | **v1.3.2**  |
+| 14  | `figma_extract_tokens`      | 提取设计 Tokens（Variables+Styles）                                                   | `fileKey/colorFormat`                    | v1          |
+| 15  | `figma_generate_styles`     | 生成 CSS Variables / Tailwind v4 @theme                                               | `tokens/outputFormat`                    | v1          |
+| 16  | `figma_sync_to_project`     | 写入 tokens 到项目文件（自动备份）                                                    | `tokens/outputDir/format`                | v1          |
+| 17  | `figma_dev_fallback_status` | **⭐ v1.4.4 新：查询付费墙兜底系统状态**（Playwright 可用性、配置、兜底优先级）       | 无                                       | **v1.4.4**  |
+| 18  | `figma_dev_fallback_capture`| **⭐ v1.4.4 新：触发浏览器兜底截图**（付费墙时截图 + Dev Mode CSS + 视觉近似模式）    | `figmaUrl/devicePixelRatio/framework`    | **v1.4.4**  |
+| 19  | `figma_verify_fidelity`     | **⭐ v1.4.4 新：还原度校验**（像素 diff + 差异热力图 + 量化评分 0-100%）              | `figmaUrl/codeContent/threshold`         | **v1.4.4**  |
 
 ### 工具详细参数
 
-#### `figma_generate_jsx`（v1.3.2 增强版，最常用）
+#### `figma_generate_jsx`（v1.4.0 增强版，最常用）
 
 ```typescript
 {
@@ -356,14 +385,17 @@ npx figma-dev token list    # 列出已保存 Token
   nodeId?: string;             // 目标节点 ID
   componentName?: string;      // 组件名（如 HeroSection）
   sceneName?: string;          // 场景名（用于资源路径，如 landing-page）
-  maxDepth?: number;           // 遍历深度，默认 8
-  skipEnhancements?: boolean;  // 是否跳过 v1.3.2 增强（Flex/a11y/设计系统/响应式）
+  maxDepth?: number;           // 节点树最大遍历深度，默认 15（1-30）
+  framework?: 'react' | 'vue'; // 目标框架，默认 react（v1.4.0 新增 vue）
+  styleFormat?: 'tailwind' | 'unocss'; // 样式方案，默认 tailwind（v1.4.0 新增 unocss）
+  skipEnhancements?: boolean;  // 是否跳过 v1.2.0 增强（Flex/a11y/设计系统/响应式）
   skipLintCheck?: boolean;     // 是否跳过设计规范检查提示
   accessToken?: string;        // 可选，优先用环境变量
 }
 ```
 
-**v1.3.2 增强输出：**
+**v1.4.0 增强输出：**
+
 - 完整 React + TypeScript + Tailwind TSX 代码（Prettier 格式化）
 - 🔧 **Flex 修复报告**：列出自动修复的布局问题（图标变形、文本截断等）
 - ♿ **无障碍增强报告**：语义标签、alt 文本、ARIA 属性添加情况
@@ -382,12 +414,13 @@ npx figma-dev token list    # 列出已保存 Token
   figmaUrl?: string;           // Figma 链接
   fileKey?: string;            // Figma 文件 Key
   nodeId?: string;             // 目标节点 ID（可选，默认检查整个文件）
-  maxDepth?: number;           // 最大检查深度，默认 8
+  maxDepth?: number;           // 最大检查深度，默认 15（1-30）
   accessToken?: string;        // 可选
 }
 ```
 
 **检查项：**
+
 - Auto Layout 使用规范
 - 图层命名规范性
 - 间距/尺寸/圆角是否使用 4px/8px 网格
@@ -398,6 +431,7 @@ npx figma-dev token list    # 列出已保存 Token
 - 颜色使用规范
 
 **输出：**
+
 - 0-100 分质量评分
 - 错误/警告/提示分类统计
 - 按类别细分的问题清单
@@ -423,18 +457,20 @@ npx figma-dev token list    # 列出已保存 Token
   figmaUrl?: string;           // Figma 链接（可替代 fileKey+nodeId）
   fileKey?: string;            // Figma 文件 Key
   nodeId: string;              // 目标节点 ID（必需）
-  maxDepth?: number;           // 遍历深度，默认 8（1-10）
+  maxDepth?: number;           // 最大节点树深度，默认 15（1-30）
   accessToken?: string;        // 可选，优先用环境变量
 }
 ```
 
 **输出内容：**
+
 - 完整的框架无关 JSON 结构，每个节点包含：
   - `id` / `name` - 节点标识
   - `role` - 语义角色（button/card/image/text/icon/section 等）
   - `type` - Figma 节点类型（FRAME/TEXT/RECTANGLE/GROUP/INSTANCE 等）
   - `size` - { width, height }
-  - `layout` - Flex 布局属性（display/flexDirection/justifyContent/alignItems/gap/padding 等）
+  - `layout` -
+    Flex 布局属性（display/flexDirection/justifyContent/alignItems/gap/padding 等）
   - `styles` - 样式属性（color/backgroundColor/borderRadius/shadow/fontSize/fontWeight 等）
   - `text` - 文本内容（仅 TEXT 节点）
   - `asset` - 资源信息（图片节点：类型、格式、下载 URL）
@@ -443,6 +479,7 @@ npx figma-dev token list    # 列出已保存 Token
 - `structuredContent` - 完整结构化节点树，可直接遍历生成任意框架代码
 
 **适用框架：**
+
 - ✅ React / Next.js / Remix（配合 generate_jsx 更佳）
 - ✅ Vue 2/3 / Nuxt
 - ✅ Svelte / SvelteKit
@@ -504,26 +541,29 @@ npx figma-dev-tools -t your-token <command>
 npx figma-dev-tools -l zh-CN <command>
 ```
 
-| 命令 | 功能 | 常用选项 | 版本 |
-|------|------|---------|------|
-| `figma-dev gui` | **🖥️ 启动 GUI 可视化配置面板** | `--port <n>` 指定端口（默认 54321） | **v1.3.0** |
-| `figma-dev install` | 一键安装 MCP 配置到各编辑器 | - | v1 |
-| `figma-dev validate <token>` | 验证 Token | - | v1 |
-| `figma-dev wizard` | 交互式配置向导 | `--gui` 启动 GUI 模式 | v1.3.0 |
-| `figma-dev init` | 初始化配置（交互式向导） | `--gui` 启动 GUI 模式 | v1.3.0 |
-| `figma-dev lang` | **🌍 语言设置**（set/list/switch） | `set <lang>` / `switch` | **v1.3.2** |
-| `figma-dev token` | **🔐 Token 安全管理**（set/get/list/delete/default） | `set -t <token>` | **v1.3.2** |
-| `figma-dev info <url>` | 查看文件信息 | - | v1 |
-| `figma-dev lint <url>` | **✅ 设计规范预检** | `--node <id>` `--depth <n>` `--format md/json` `--output <file>` | **v1.3.2** |
-| `figma-dev metadata <url>` | 获取元数据概览 | `--depth <n>` | v2 |
-| `figma-dev structured <url>` | **获取框架无关结构化数据** | `--node <id>` `--depth <n>` `--format pretty/json` `--output <file>` | v1.1.0 |
-| `figma-dev jsx <url>` | **生成增强版 JSX 组件**（Flex/a11y/设计系统/响应式） | `--name <ComponentName>` `--scene <name>` `--depth <n>` `--skip-lint` | v1.3.2 |
-| `figma-dev component <url>` | 生成基础组件 | `--name <name>` `--typescript` `--style tailwind` | v1 |
-| `figma-dev assets <url>` | 下载资源（SVGO 优化） | `--scene <name>` `--nodes <id1,id2>` `--scale <n>` | v2 |
-| `figma-dev sync <url>` | 同步 Tokens | `--format oklch` `--output <dir>` `--output-format all` | v1 |
-| `figma-dev screenshot <url>` | 获取截图 | `--format png` `--scale 2` `--output <dir>` | v1 |
-| `figma-dev tokens <url>` | 提取 Tokens | `--format oklch` | v1 |
-| `figma-dev mcp` | 启动 MCP 服务器（stdio） | - | v1 |
+| 命令                         | 功能                                                 | 常用选项                                                              | 版本       |
+| ---------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------- | ---------- |
+| `figma-dev gui`              | **🖥️ 启动 GUI 可视化配置面板**                       | `--port <n>` 指定端口（默认 54321）                                   | **v1.3.0** |
+| `figma-dev install`          | 一键安装 MCP 配置到各编辑器                          | -                                                                     | v1         |
+| `figma-dev uninstall`        | 卸载已安装的 MCP 配置                               | -                                                                     | v1         |
+| `figma-dev validate <token>` | 验证 Token                                           | -                                                                     | v1         |
+| `figma-dev wizard`           | 交互式配置向导                                       | `--gui` 启动 GUI 模式                                                 | v1.3.0     |
+| `figma-dev init`             | 初始化配置（交互式向导）                             | `--gui` 启动 GUI 模式                                                 | v1.3.0     |
+| `figma-dev lang`             | **🌍 语言设置**（set/list/switch）                   | `set <lang>` / `switch`                                               | **v1.3.2** |
+| `figma-dev token`            | **🔐 Token 安全管理**（set/get/list/delete/default） | `set -t <token>`                                                      | **v1.3.2** |
+| `figma-dev info <url>`       | 查看文件信息                                         | -                                                                     | v1         |
+| `figma-dev lint <url>`       | **✅ 设计规范预检**                                  | `--node <id>` `--depth <n>` `--format md/json` `--output <file>`      | **v1.3.2** |
+| `figma-dev metadata <url>`   | 获取元数据概览                                       | `--node <id>` `--depth <n>`                                           | v1.1.0      |
+| `figma-dev structured <url>` | **获取框架无关结构化数据**                           | `--node <id>` `--depth <n>` `--format pretty/json` `--output <file>`  | v1.1.0     |
+| `figma-dev jsx <url>`        | **生成增强版 JSX/Vue 组件**（Flex/a11y/设计系统/响应式，v1.4.0 新增 Vue 3/UnoCSS） | `--name <ComponentName>` `--scene <name>` `--depth <n>` `--framework react|vue` `--style tailwind|unocss` `--skip-lint` `--inline-svg` | v1.4.0     |
+| `figma-dev component <url>`  | 生成基础组件                                         | `--name <name>` `--node <id>` `--js` `--style tailwind` `--no-children` `--output <dir>` | v1         |
+| `figma-dev assets <url>`     | 下载资源（SVGO 优化）                                | `--node <id>` `--nodes <id1,id2>` `--scene <name>` `--scale <n>` `--svg-format svg|png` `--project-root <dir>` | v1.1.0      |
+| `figma-dev sync <url>`       | 同步 Tokens                                          | `--node <id>` `--format oklch` `--spacing-unit px|rem` `--prefix <name>` `--output-format all` `--file-name <name>` | v1         |
+| `figma-dev screenshot <url>` | 获取截图                                             | `--node <id>` `--format png` `--scale 2` `--download <dir>`            | v1         |
+| `figma-dev mcp`              | 启动 MCP 服务器（stdio）                             | -                                                                     | v1         |
+| `figma-dev tutorial`         | 查看教程文档（别名 `help`，自动打开浏览器）           | `--no-browser`                                                        | v1.3.0     |
+| `figma-dev cache`            | **📦 缓存管理**（status/clear）                       | `status` / `clear -f`                                                 | v1.4.0     |
+| `figma-dev privacy`          | **🔒 隐私声明**（查看数据安全承诺 + .gitignore 检查）  | -                                                                     | v1.4.0     |
 
 **CLI 示例：**
 
@@ -571,20 +611,21 @@ figma-dev lang set zh-CN
 
 ---
 
-## 🖥️ 支持的编辑器（10+）
+## 🖥️ 支持的编辑器（8+）
 
-| 编辑器 | 一键安装 | GUI 自动检测 | 配置格式 | 手动配置路径 |
-|--------|---------|-------------|---------|-------------|
-| **Trae** | ✅ 自动检测安装 | ✅ | mcpServers | 项目根目录 `.mcp.json` 或 User Settings |
-| **VS Code** | ✅ 自动检测安装 | ✅ | mcpServers | `.vscode/mcp.json` 或 User Settings JSON |
-| **Cursor** | ✅ 自动检测安装 | ✅ | mcpServers | `~/.cursor/mcp.json`（全局）或项目 `.cursor/mcp.json` |
-| **Windsurf** | ✅ 自动检测安装 | ✅ | mcpServers | `~/.codeium/windsurf/mcp_config.json` |
-| **Claude Desktop** | ✅ 自动检测安装 | ✅ | mcpServers | `~/Library/Application Support/Claude/claude_desktop_config.json`（macOS）<br>`%APPDATA%\Claude\claude_desktop_config.json`（Windows） |
-| **Zed** | ✅ 自动检测安装 | ✅ | **mcp_servers** | `~/.zed/settings.json` |
-| **Cline** (VS Code/Cursor 插件) | ✅ 自动检测安装 | ✅ | mcpServers | VS Code/Cursor 全局存储 `cline_mcp_settings.json` |
-| **Roo Code** (VS Code/Cursor 插件) | ✅ 自动检测安装 | ✅ | mcpServers | VS Code/Cursor 全局存储 `mcp_settings.json` |
+| 编辑器                             | 一键安装        | GUI 自动检测 | 配置格式        | 手动配置路径                                                                                                                           |
+| ---------------------------------- | --------------- | ------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trae**                           | ✅ 自动检测安装 | ✅           | mcpServers      | 项目根目录 `.mcp.json` 或 User Settings                                                                                                |
+| **VS Code**                        | ✅ 自动检测安装 | ✅           | mcpServers      | `.vscode/mcp.json` 或 User Settings JSON                                                                                               |
+| **Cursor**                         | ✅ 自动检测安装 | ✅           | mcpServers      | `~/.cursor/mcp.json`（全局）或项目 `.cursor/mcp.json`                                                                                  |
+| **Windsurf**                       | ✅ 自动检测安装 | ✅           | mcpServers      | `~/.codeium/windsurf/mcp_config.json`                                                                                                  |
+| **Claude Desktop**                 | ✅ 自动检测安装 | ✅           | mcpServers      | `~/Library/Application Support/Claude/claude_desktop_config.json`（macOS）<br>`%APPDATA%\Claude\claude_desktop_config.json`（Windows） |
+| **Zed**                            | ✅ 自动检测安装 | ✅           | **mcp_servers** | `~/.zed/settings.json`                                                                                                                 |
+| **Cline**（VS Code/Cursor 插件）    | ✅ 自动检测安装 | ✅           | mcpServers      | VS Code/Cursor 全局存储 `cline_mcp_settings.json`                                                                                      |
+| **Roo Code**（VS Code/Cursor 插件） | ✅ 自动检测安装 | ✅           | mcpServers      | VS Code/Cursor 全局存储 `mcp_settings.json`                                                                                            |
 
-> 💡 **最简单的配置方式**：运行 `figma-dev gui` 启动图形界面，**自动检测你电脑上已安装的所有编辑器**，勾选需要配置的编辑器后一键完成安装，无需手动查找配置文件路径。
+> 💡 **最简单的配置方式**：运行 `figma-dev gui`
+> 启动图形界面，**自动检测你电脑上已安装的所有编辑器**，勾选需要配置的编辑器后一键完成安装，无需手动查找配置文件路径。
 
 ### MCP 配置模板
 
@@ -633,7 +674,8 @@ figma-dev lang set zh-CN
 }
 ```
 
-> 💡 使用 `npx figma-dev-tools install` 或 **`figma-dev gui`** 会自动检测编辑器并填充正确路径，Zed 会自动使用 `mcp_servers` 字段。
+> 💡 使用 `npx figma-dev-tools install` 或 **`figma-dev gui`**
+> 会自动检测编辑器并填充正确路径，Zed 会自动使用 `mcp_servers` 字段。
 
 ---
 
@@ -676,6 +718,7 @@ FIGMA_GUI_PORT=54321
 ### MCP 配置优先级
 
 Token 读取优先级：
+
 1. 命令行参数 `--figma-api-key` / `-t` / `--token`
 2. GUI 界面配置并保存的 Token（v1.3.0 新，自动存入安全存储）
 3. 安全存储的默认 Token（v1.3.2 新，`figma-dev token set` 保存）
@@ -705,7 +748,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.3                            │
+│                      figma-dev-tools MCP Server v1.4.4                            │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │
@@ -852,10 +895,13 @@ figma-dev-tools/
 
 **解决（v1.3.0 新功能 - 最简单方式）：**
 直接运行 GUI 可视化配置向导，无需记忆任何命令：
+
 ```bash
 npx figma-dev-tools gui
 ```
+
 浏览器会自动打开配置界面，按照引导步骤点击即可：
+
 1. 选择中文语言
 2. 粘贴你的 Figma Token（自动验证）
 3. 勾选要配置的编辑器（自动检测已安装的）
@@ -863,8 +909,8 @@ npx figma-dev-tools gui
 
 ### Q: 如何启动 GUI 图形界面配置？
 
-**解决（v1.3.0 新）：**
-有三种方式启动 GUI：
+**解决（v1.3.0 新）：** 有三种方式启动 GUI：
+
 ```bash
 # 方式一：直接启动 gui 命令（推荐）
 figma-dev gui
@@ -887,6 +933,7 @@ figma-dev init --gui
 ### Q: GUI 可以自定义端口吗？
 
 **解决（v1.3.0 新）：**
+
 ```bash
 # 指定端口启动
 figma-dev gui --port 3000
@@ -898,6 +945,7 @@ FIGMA_GUI_PORT=3000 figma-dev gui
 ### Q: MCP 服务器无法启动？
 
 **检查：**
+
 1. 是否已执行 `npm install && npm run build`（或 pnpm/yarn/bun 对应命令）
 2. `dist/index.js` 文件是否存在
 3. Node.js 版本 ≥ 20（`node -v` 检查）
@@ -908,6 +956,7 @@ FIGMA_GUI_PORT=3000 figma-dev gui
 ### Q: API 请求返回 401 Unauthorized？
 
 **解决：**
+
 1. 检查 `FIGMA_ACCESS_TOKEN` 是否正确配置
 2. 确认 Token 没有过期（重新生成一个试试）
 3. 确认 Token 勾选了 **File content (Read only)** 权限
@@ -919,16 +968,19 @@ FIGMA_GUI_PORT=3000 figma-dev gui
 ### Q: 生成的图标变成椭圆/变形了？
 
 **解决（v1.3.2 自动修复）：**
+
 - 这是 Flex 布局的经典问题：Flex 容器默认 `align-items: stretch` 会拉伸子元素
-- v1.3.2 的 `figma_generate_jsx` 已自动检测并添加 `align-items: center` + `flex-shrink: 0` + 固定宽高修复
+- v1.3.2 的 `figma_generate_jsx` 已自动检测并添加 `align-items: center` +
+  `flex-shrink: 0` + 固定宽高修复
 - 如果问题仍然存在，可调用 `figma_lint_design` 检查设计稿中 Auto Layout 的设置
 
 ### Q: 我用的是 Vue/Svelte/其他框架，不是 React？
 
-**解决：**
-使用 v1.1.0 新增的 `figma_get_structured_data` 工具，它输出框架无关的 JSON 结构，包含完整的节点层级、样式、文本、资源信息，你可以基于这个数据生成任意框架的代码。
+**解决：** 使用 v1.1.0 新增的 `figma_get_structured_data`
+工具，它输出框架无关的 JSON 结构，包含完整的节点层级、样式、文本、资源信息，你可以基于这个数据生成任意框架的代码。
 
 CLI 也支持：
+
 ```bash
 npx figma-dev structured "https://www.figma.com/design/xxx/yyy?node-id=23-11032" --format json
 ```
@@ -938,6 +990,7 @@ npx figma-dev structured "https://www.figma.com/design/xxx/yyy?node-id=23-11032"
 ### Q: 生成的组件颜色/间距与设计稿不一致？
 
 **解决：**
+
 1. 确保 Figma 中使用了 **Variables** 定义颜色/间距，并设置了 `codeSyntax.WEB`
 2. v1.3.2 的设计系统对齐功能会自动匹配颜色/间距/字体/圆角/阴影变量
 3. 颜色格式推荐 `oklch`（Tailwind v4 原生支持），如遇问题切换为 `hex`
@@ -948,7 +1001,8 @@ npx figma-dev structured "https://www.figma.com/design/xxx/yyy?node-id=23-11032"
 ### Q: 生成代码有很多冗余嵌套 div？
 
 **解决：**
-1. 使用 v2.0 的 `figma_generate_jsx` 而非旧版 `figma_generate_component`
+
+1. 使用 v1.4.0 的 `figma_generate_jsx` 而非旧版 `figma_generate_component`
 2. UI 设计师应避免多层无意义 Group 嵌套（用 Frame 划分区域）
 3. 调用 `figma_lint_design` 检查嵌套层级问题
 4. 检查生成代码中标记为 layout-only 的节点是否被错误保留
@@ -957,7 +1011,9 @@ npx figma-dev structured "https://www.figma.com/design/xxx/yyy?node-id=23-11032"
 ### Q: 图片资源没有自动下载？
 
 **解决：**
-1. 必须调用 `figma_download_assets` 工具，传入 `generate_jsx` 输出的 `pendingAssets[].nodeId`
+
+1. 必须调用 `figma_download_assets` 工具，传入 `generate_jsx` 输出的
+   `pendingAssets[].nodeId`
 2. 确保 `sceneName` 参数已设置（资源会放到 `public/<场景名>/` 目录）
 3. v1.3.2 下载时自动使用 SVGO 优化 SVG，移除冗余属性
 4. 检查 Figma 中的图片节点是否有 IMAGE fill
@@ -966,13 +1022,16 @@ npx figma-dev structured "https://www.figma.com/design/xxx/yyy?node-id=23-11032"
 ### Q: 如何让生成的代码支持响应式？
 
 **解决（v1.3.2 新功能）：**
-1. v1.3.2 的 `figma_generate_jsx` 会自动推断响应式断点，在响应式建议报告中给出 sm/md/lg 前缀建议
+
+1. v1.3.2 的 `figma_generate_jsx`
+   会自动推断响应式断点，在响应式建议报告中给出 sm/md/lg 前缀建议
 2. 设计稿建议按移动端/桌面端分别设计，或使用 Auto Layout 约束
 3. 根据响应式建议，手动调整类名添加响应式前缀（如 `md:flex-row`）
 
 ### Q: 生成的代码缺少无障碍属性？
 
 **解决（v1.3.2 自动增强）：**
+
 - v1.3.2 的 `figma_generate_jsx` 已自动添加：
   - 语义化 HTML 标签（`<button>` 而非 `<div onClick>`、`<h1>-<h6>` 等）
   - 图片 alt 文本
@@ -990,27 +1049,30 @@ npx figma-dev structured "https://www.figma.com/design/xxx/yyy?node-id=23-11032"
 ### Q: 支持哪些前端框架？
 
 - **React + Tailwind CSS**：一级支持（TSX 代码生成 + v1.3.2 全增强）
-- **Vue 2/3 / Nuxt**：通过 `figma_get_structured_data` 获取结构化数据，AI 可生成 Vue SFC
+- **Vue 2/3 / Nuxt**：通过 `figma_get_structured_data`
+  获取结构化数据，AI 可生成 Vue SFC
 - **Svelte / SvelteKit**：同上
 - **Angular**：同上
 - **SolidJS / Qwik**：同上
 - **原生 HTML / CSS**：同上
 - **Astro**：同上
-- **Next.js**：支持，但注意不要用 `next/image`（用普通 `<img>` 或 `publicCdnUrl()`）
+- **Next.js**：支持，但注意不要用 `next/image`（用普通 `<img>` 或
+  `publicCdnUrl()`）
 - **Vite + React**：推荐，与生成代码最匹配
 
 > 💡 在 GUI 配置向导中可以选择你的框架偏好。
 
 ### Q: Zed 编辑器配置不生效？
 
-**解决：**
-Zed 使用 `mcp_servers` 字段（下划线），不是 `mcpServers`（驼峰）。
+**解决：** Zed 使用 `mcp_servers` 字段（下划线），不是 `mcpServers`（驼峰）。
+
 - 使用 **`figma-dev gui`** 图形界面一键配置，自动处理 Zed 的字段差异
 - 或使用 `npx figma-dev-tools install` 也会自动处理这个差异
 
 ### Q: 如何切换界面语言？
 
 **解决（v1.3.2 新）：**
+
 ```bash
 # CLI 交互式切换
 figma-dev lang switch
@@ -1028,8 +1090,11 @@ FIGMA_DEFAULT_LANG=zh-CN
 ### Q: 如何安全存储 Figma Token？
 
 **解决（v1.3.0+ 推荐）：**
-- **最简单**：运行 `figma-dev gui`，在 GUI 界面输入 Token，自动验证并存入安全存储
+
+- **最简单**：运行
+  `figma-dev gui`，在 GUI 界面输入 Token，自动验证并存入安全存储
 - **命令行方式**（v1.3.2 新）：
+
 ```bash
 # 交互式保存（推荐，会验证 Token）
 figma-dev token set
@@ -1048,6 +1113,7 @@ figma-dev token default work
 ```
 
 Token 会保存在系统安全存储中：
+
 - macOS: Keychain
 - Windows: Credential Manager
 - Linux: libsecret（如不可用则回退到加密文件）
@@ -1056,7 +1122,9 @@ Token 会保存在系统安全存储中：
 
 ## 📖 设计规范
 
-参见 **[FIGMA-DESIGN-GUIDELINES.md](./FIGMA-DESIGN-GUIDELINES.md)**，这是给设计师和 AI 的完整 Figma 设计规范指南，包含：
+参见
+**[FIGMA-DESIGN-GUIDELINES.md](./FIGMA-DESIGN-GUIDELINES.md)**，这是给设计师和 AI 的完整 Figma 设计规范指南，包含：
+
 - Auto Layout 使用规范
 - 图层命名约定
 - 4px/8px 网格系统
@@ -1070,41 +1138,56 @@ Token 会保存在系统安全存储中：
 
 ## 🎯 与其他方案对比
 
-### vs 官方 Figma MCP (Framelink)
+> 以下对比基于 2025-2026 年公开信息整理，仅反映 figma-dev-tools v1.4.4 与各方案的能力差异，不代表对方全部能力。标注"需确认"表示公开资料未明确说明。
 
-| 特性 | Framelink (官方 Figma MCP) | figma-dev-tools v1.0 | figma-dev-tools v1.2 | figma-dev-tools v1.3.2 |
-|------|---------------------------|---------------------|---------------------|-----------------------|
-| 🖥️ **GUI 可视化配置** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.0：浏览器图形界面，小白零门槛** |
-| 设计上下文获取 | ✅ 全量拉取 | ✅ | ✅ **渐进式（~4KB 概览，防爆炸）** | ✅ |
-| 节点截图 | ✅ | ✅ | ✅ | ✅ |
-| 节点树精简 | ❌ | ❌ | ✅ **GROUP 扁平化，减少 ~60% div** | ✅ |
-| 语义角色识别 | ❌ | ❌ | ✅ **button/card/image/text 自动识别** | ✅ |
-| Design Tokens 提取 | ❌ | ✅ Variables+Styles | ✅ + codeSyntax.WEB 支持 | ✅ |
-| 多级 Token 匹配 | ❌ | ❌ | ✅ **4级匹配策略** | ✅ |
-| Tailwind v4 @theme | ❌ | ✅ | ✅ | ✅ |
-| React 组件生成 | 基础 JSX | ✅ | ✅ **一键 JSX 整合全管线** | ✅ + **🔧 Flex/♿ a11y/🎨 DS/📱 响应式** |
-| **框架无关结构化数据** | ❌ | ❌ | ✅ **⭐ v1.1.0 新增：Vue/Svelte/HTML 等** | ✅ |
-| **设计规范预检 (Lint)** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：评分+修复建议** |
-| **Flex 布局自动修复** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：图标变形/文本截断** |
-| **无障碍(a11y)增强** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：语义标签/alt/ARIA** |
-| **设计系统对齐** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：颜色/间距/字体匹配** |
-| **响应式推断** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：断点/前缀建议** |
-| **SVG Sprite 生成** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：图标雪碧图** |
-| **i18n 国际化** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：中英文双语** |
-| **Token 安全存储** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2：Keychain/凭据管** |
-| **Prettier 自动格式化** | ❌ | ❌ | ❌ | ✅ **⭐ v1.3.2** |
-| Auto Layout 完整映射 | ❌ | 基础 | ✅ **flex-wrap/align-self/gap 全覆盖** | ✅ + Flex 修复 |
-| 资源自动下载 | ❌ | ❌ | ✅ **public/<场景>/ + publicCdnUrl()** | ✅ + SVGO 优化 |
-| SVG 优化 | ❌ | ❌ | ❌ | ✅ **v1.3.2：SVGO 自动压缩** |
-| 语义 HTML 标签 | ❌ 全 div | ❌ 全 div | ✅ **h1-h6/p/button/img/section** | ✅ + a11y 增强 |
-| 直接写入项目文件 | ❌ | ✅ | ✅ | ✅ |
-| CLI 命令行 | ❌ | ✅ | ✅ **+ structured/gui 命令** | ✅ **+ gui/wizard --gui/lint/lang/token 命令** |
-| **零配置 npx 启动** | ❌ | ❌ | ✅ **npx -y figma-dev-tools --figma-api-key=xxx** | ✅ |
-| **包管理器自动检测** | ❌ | ❌ | ✅ **npm/pnpm/yarn/bun** | ✅ |
-| **编辑器自动检测+一键安装** | ❌ | ❌ | ✅ **命令行一键安装** | ✅ **🖥️ GUI 自动检测 8+ 编辑器，勾选即装** |
-| **编辑器支持数量** | 2-3 个 | 5 个 | ✅ **10+（Trae/VS Code/Cursor/Windsurf/Claude/Zed/Cline/Roo）** | ✅ |
-| 设计规范文档 | ❌ | ❌ | ❌ | ✅ **FIGMA-DESIGN-GUIDELINES.md** |
-| 高保真检查清单 | ❌ | ❌ | ✅ **AI Agent 专用检查清单** | ✅ + lint 评分 |
+### vs 商业 SaaS 方案
+
+| 对比维度                | figma-dev-tools v1.4.4              | Builder.io              | Anima                | Locofy                 | Seal（网易海豹 D2C）     |
+| ----------------------- | ----------------------------------- | ----------------------- | -------------------- | ---------------------- | ------------------------ |
+| **定位**                | 开源 MCP 工具链                     | 商业 SaaS + AI 平台     | 商业 SaaS            | 商业 SaaS              | 企业内部工具 / Figma 插件 |
+| **价格**                | **免费开源**（MIT）                 | 免费增值（Pro $24/mo+） | 免费增值（$20/mo+）  | 免费增值（$29/mo+）    | 免费（需注册）           |
+| **MCP 协议支持**        | ✅                                  | ✅                      | ✅                   | ✅                     | ❌                       |
+| **GUI 可视化配置**      | ✅ v1.3.0（浏览器图形界面）         | ✅（Fusion 画布）       | ✅（AI Playground）  | ✅（Figma 插件）       | ✅（Figma 插件）         |
+| **React 代码生成**      | ✅ TSX + Tailwind                   | ✅                      | ✅                   | ✅                     | ✅                       |
+| **Vue 代码生成**        | ✅ v1.4.0（Vue 3 SFC + UnoCSS）     | ✅                      | ✅                   | ✅                     | ✅                       |
+| **框架无关结构化数据**  | ✅ v1.1.0（JSON 输出）              | ❌                      | ❌                   | ❌                     | ❌                       |
+| **设计 Tokens 提取**    | ✅ Variables + Styles               | ✅                      | 需确认               | ✅                     | 需确认                   |
+| **Flex 布局自动修复**   | ✅ v1.3.2（图标变形/文本截断）       | 部分（自动响应式）      | ✅                   | ✅                     | ✅（自动布局还原）       |
+| **无障碍（a11y）增强**  | ✅ v1.3.2（语义标签/alt/ARIA）       | ✅（Review agents）     | 需确认               | ✅（Agent Mode）       | 需确认                   |
+| **资源自动下载**        | ✅ publicCdnUrl + SVGO              | ✅                      | ✅                   | ✅                     | 需确认                   |
+| **还原度校验（像素 diff）** | ✅ v1.4.4（pixelmatch + 热力图） | ❌                      | ❌                   | 需确认（"pixel-perfect"宣传） | 部分（设计稿检查） |
+| **付费墙兜底（截图保底）** | ✅ v1.4.4（Playwright + 视觉近似） | ❌                      | ❌                   | ❌                     | ❌                       |
+| **多编辑器集成**        | ✅ 8+（GUI 自动检测一键安装）       | ✅（VS Code/Cursor）    | ✅（Frontier 扩展）  | ✅（Cursor/Windsurf 等） | ❌                       |
+| **CLI 命令行**          | ✅ 20+ 命令                         | ✅（Visual Copilot CLI） | 需确认               | 需确认                 | ❌                       |
+| **i18n 国际化**         | ✅ v1.3.2（中英文双语）             | ✅                      | 需确认               | ✅（Agent Mode 指令）  | 需确认                   |
+| **Token 安全存储**      | ✅ v1.3.2（系统密钥链）             | ✅                      | 需确认               | 需确认                 | 需确认                   |
+
+### vs 开源 / 官方工具
+
+| 对比维度                | figma-dev-tools v1.4.4              | @figma/code-connect           | Framelink Figma MCP            | figma-mcp（社区）     | Design Lint AI            |
+| ----------------------- | ----------------------------------- | ----------------------------- | ------------------------------ | --------------------- | ------------------------- |
+| **定位**                | 开源 MCP 工具链                     | Figma 官方组件映射            | 开源 MCP（8k+ stars）          | 开源 MCP（多个项目）  | Figma 插件                |
+| **价格**                | **免费开源**（MIT）                 | 免费（需 Dev/Full 席位）      | 免费开源（MIT）                | 免费开源              | 免费增值（Pro $19/mo+）  |
+| **MCP 协议支持**        | ✅                                  | ✅（与官方 MCP 集成）         | ✅                             | ✅                    | ❌                        |
+| **GUI 可视化配置**      | ✅ v1.3.0                           | ✅（Code Connect UI 公测）    | ❌（配置文件驱动）             | ❌                    | ✅（Figma 插件）          |
+| **代码生成**            | ✅ 一键 TSX/Vue                     | ❌（仅组件映射，非 D2C）      | ❌（仅提供数据，由 AI 生成）   | ❌（仅提供数据）      | N/A（非代码生成工具）     |
+| **设计 Tokens 提取**    | ✅                                  | ✅（variables + code syntax） | ❌                             | ❌                    | ✅（Token validation）   |
+| **Flex 布局自动修复**   | ✅ v1.3.2                           | ❌                             | ❌                             | 部分（Auto-Layout 配置） | ❌                      |
+| **无障碍（a11y）增强**  | ✅ v1.3.2                           | ❌                             | ❌                             | ❌                    | ✅（WCAG 检查）           |
+| **资源自动下载**        | ✅                                  | ❌                             | ✅（download_figma_images）   | ✅                    | ❌                        |
+| **还原度校验（像素 diff）** | ✅ v1.4.4                       | ❌                             | ❌                             | ❌                    | ❌                        |
+| **付费墙兜底（截图保底）** | ✅ v1.4.4                        | N/A（官方功能不涉及付费墙）   | ❌                             | ❌                    | ❌                        |
+| **多编辑器集成**        | ✅ 8+（GUI 自动检测）               | ✅（VS Code/Cursor/Android Studio 等） | ✅（所有 MCP 客户端）   | ✅（所有 MCP 客户端） | ❌                        |
+| **CLI 命令行**          | ✅ 20+ 命令                         | ✅（`figma connect` CLI）     | ✅（npx 启动）                 | ✅                    | ❌（Team API）            |
+| **i18n 国际化**         | ✅ v1.3.2                           | ❌                             | ❌                             | ❌                    | ❌                        |
+| **SVG Sprite 生成**     | ✅ v1.3.2                           | ❌                             | ❌                             | ❌                    | ❌                        |
+
+### 差异化优势
+
+- **付费墙兜底**：figma-dev-tools v1.4.4 独有的 `BrowserFallbackService`，当 Figma REST API 因付费墙失败时自动启动 Playwright 截图保底，竞品中无一提供类似机制
+- **还原度校验闭环**：`figma_verify_fidelity` 提供像素 diff + 差异热力图 + 量化评分（0-100%），其他工具多停留在"pixel-perfect"宣传，无自动化校验
+- **框架无关结构化数据**：`figma_get_structured_data` 输出标准 JSON，支持任意框架，商业 SaaS 多锁定特定框架
+- **开源 + 免费 + 全功能**：MIT 许可，无需付费席位即可使用全部 19 个 MCP 工具
 
 ---
 

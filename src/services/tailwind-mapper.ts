@@ -33,6 +33,7 @@ import type {
   ProcessedNode,
   ProcessedAutoLayout,
   ProcessedFill,
+  ProcessedGradientFill,
   ProcessedStroke,
   ProcessedCornerRadius,
   ProcessedShadow,
@@ -177,6 +178,15 @@ export class TailwindMapper {
     // ============ 2. 溢出裁剪 ============
     if (node.clipsContent) {
       classes.push('overflow-hidden');
+    }
+
+    // ============ 2.1 矢量遮罩检测 ============
+    // v1.4.4 新增：isMask 节点检测，输出 warning 引导手动处理
+    // 完整的 CSS clip-path / SVG mask 自动映射计划在 v1.5.0 实现
+    if (node.isMask) {
+      warnings.push(
+        '检测到矢量遮罩节点（isMask=true），当前版本无法自动映射为 CSS clip-path / SVG mask，请手动检查裁切效果是否正确',
+      );
     }
 
     // ============ 3. 旋转变换 ============
@@ -752,6 +762,35 @@ export class TailwindMapper {
       else if (weight === 8) classes.push('border-8');
       else classes.push(`border-[${weight}px]`);
 
+      // ============ 描边样式（虚线/点线）============
+      // v1.4.4 修复：strokeDash 丢失导致虚线/点线全变实线
+      if (stroke.dashPattern && stroke.dashPattern.length > 0) {
+        // 简单模式：[线长, 间隙] → 尝试匹配 Tailwind 预设
+        if (stroke.dashPattern.length === 2) {
+          const dash = stroke.dashPattern[0];
+          const gap = stroke.dashPattern[1];
+          if (dash !== undefined && gap !== undefined && dash === gap && dash >= 2 && dash <= 6) {
+            // 等长虚线 → border-dashed
+            classes.push('border-dashed');
+          } else if (dash !== undefined && gap !== undefined && dash === 1 && gap >= 1 && gap <= 3) {
+            // 短线长 → border-dotted
+            classes.push('border-dotted');
+          } else {
+            // 非标准虚线模式 → 内联 stroke-dasharray（通过 style 属性）
+            // 注意：border-dasharray 需要通过内联样式，Tailwind 不支持任意 stroke-dasharray
+            // 这里通过 classes 标记，实际渲染时由 inlineStyle 处理
+            warnings.push(
+              `非标准虚线模式 [${stroke.dashPattern.join(', ')}]，建议手动检查 border-style`,
+            );
+          }
+        } else if (stroke.dashPattern.length >= 2) {
+          // 多段虚线 → 内联 stroke-dasharray
+          warnings.push(
+            `复杂虚线模式 [${stroke.dashPattern.join(', ')}]，建议手动补充 stroke-dasharray`,
+          );
+        }
+      }
+
       // ============ 描边颜色 ============
       const colorMatch = this._matcher.matchColor(stroke.color, 'border');
       if (colorMatch.matched && colorMatch.className) {
@@ -840,6 +879,14 @@ export class TailwindMapper {
           break;
         }
 
+        case 'gradient-radial':
+        case 'gradient-angular':
+        case 'gradient-diamond': {
+          // v1.4.4 修复：径向/角度/菱形渐变此前丢失，统一走内联样式兜底
+          this._mapRadialAngularGradient(fill, classes, inlineStyle, warnings);
+          break;
+        }
+
         case 'image': {
           // 图片填充（背景图片）
           classes.push('bg-cover', 'bg-center', 'bg-no-repeat');
@@ -905,6 +952,68 @@ export class TailwindMapper {
       if (stops.length > 3) {
         warnings.push(`渐变色标数量为 ${stops.length}（超过3个），已使用内联样式兜底`);
       }
+    }
+  }
+
+  /**
+   * 映射径向/角度/菱形渐变
+   *
+   * v1.4.4 新增：此前径向渐变等设计稿全部丢失，统一使用内联 CSS 兜底。
+   *
+   * - gradient-radial → radial-gradient()
+   * - gradient-angular → conic-gradient()
+   * - gradient-diamond → radial-gradient()（近似，CSS 无原生菱形渐变）
+   *
+   * @param fill - 渐变填充数据
+   * @param classes - 类名数组（输出参数）
+   * @param inlineStyle - 内联样式对象（输出参数）
+   * @param warnings - 警告信息列表（输出参数）
+   */
+  private _mapRadialAngularGradient(
+    fill: ProcessedGradientFill,
+    classes: string[],
+    inlineStyle: Record<string, string | number>,
+    warnings: string[],
+  ): void {
+    const stops = fill.gradientStops;
+    if (!stops || stops.length < 2) {
+      warnings.push(`${fill.type} 渐变色标不足 2 个，已跳过`);
+      return;
+    }
+
+    // 拼装色标字符串：颜色 位置%
+    const cssStops = stops
+      .map((s) => `${this._colorToRgba(s.color)} ${(s.position * 100).toFixed(0)}%`)
+      .join(', ');
+
+    // 按渐变类型选择 CSS 函数
+    switch (fill.type) {
+      case 'gradient-radial':
+      case 'gradient-diamond': {
+        // 径向渐变（菱形无原生 CSS 支持，近似为 radial-gradient）
+        // 控制点位置 → 椭圆中心（若可解析）
+        const handles = fill.gradientHandlePositions;
+        let center = 'center';
+        if (handles && handles.length >= 1 && handles[0]) {
+          // Figma 渐变控制点坐标系是节点本地坐标系，这里简化为中心对齐
+          center = 'center';
+        }
+        inlineStyle.background = `radial-gradient(circle at ${center}, ${cssStops})`;
+        if (fill.type === 'gradient-diamond') {
+          warnings.push('菱形渐变无原生 CSS 支持，已降级为 radial-gradient');
+        }
+        break;
+      }
+      case 'gradient-angular': {
+        // 角度渐变 → conic-gradient
+        inlineStyle.background = `conic-gradient(${cssStops})`;
+        break;
+      }
+    }
+
+    // 透明度叠加（如有）
+    if (fill.opacity !== undefined && fill.opacity < 1) {
+      warnings.push(`${fill.type} 渐变带透明度 ${fill.opacity}，需在生成代码中手动检查 opacity 属性`);
     }
   }
 

@@ -181,12 +181,19 @@ export interface ProcessedSolidFill {
 }
 
 /**
- * 线性渐变填充
+ * 渐变填充（支持线性/径向/角度/菱形）
+ *
+ * v1.4.4 扩展：新增 gradient-radial / gradient-angular / gradient-diamond 类型，
+ * 此前仅支持 gradient-linear，导致径向渐变等设计稿失真。
  */
 export interface ProcessedGradientFill {
-  type: 'gradient-linear';
+  /** 渐变类型 */
+  type: 'gradient-linear' | 'gradient-radial' | 'gradient-angular' | 'gradient-diamond';
+  /** 渐变控制点位置（Figma gradientHandlePositions） */
   gradientHandlePositions: GradientHandlePosition[];
+  /** 渐变色标 */
   gradientStops: GradientStop[];
+  /** 透明度 */
   opacity?: number;
 }
 
@@ -281,6 +288,36 @@ export interface ProcessedTextStyle {
   textDecoration?: FigmaTextDecoration;
   /** 文本大小写 */
   textCase?: FigmaTextCase;
+  /**
+   * 富文本分段（v1.4.4 新增）。
+   *
+   * 当 TEXT 节点包含 characterStyleOverrides + styleOverrideTable 时，
+   * 将文本按样式差异切分为多段，每段附带独立的样式信息。
+   * 代码生成时用 <span> 包裹不同样式段，实现富文本还原。
+   * 当前版本（v1.4.4）仅解析并透传，分段渲染计划在 v1.4.5 实现。
+   */
+  richTextSegments?: RichTextSegment[];
+}
+
+/**
+ * 富文本段（v1.4.4 新增）
+ *
+ * 表示 TEXT 节点中一段连续的、样式一致的文本。
+ */
+export interface RichTextSegment {
+  /** 该段文本内容 */
+  text: string;
+  /** 该段文本的样式覆盖（与节点基础 style 的差异） */
+  styleOverrides: {
+    /** 字重覆盖（如局部加粗） */
+    fontWeight?: number;
+    /** 字号覆盖 */
+    fontSize?: number;
+    /** 字体族覆盖 */
+    fontFamily?: string;
+    /** 颜色覆盖（fillStyle） */
+    color?: FigmaColor;
+  };
 }
 
 /**
@@ -370,6 +407,15 @@ export interface StructuredNode {
   rotation?: number;
   /** 是否裁剪子节点溢出内容 */
   clipsContent: boolean;
+  /**
+   * 是否为遮罩节点（Figma isMask）。
+   *
+   * v1.4.4 新增：此前 isMask 信息在 node-processor 中被消费但未透传到 ProcessedNode，
+   * 导致矢量遮罩场景（如异形裁切、复杂 clip-path）在代码生成时静默丢失。
+   * 当前版本检测到 isMask=true 时会输出 warning 引导手动处理，
+   * 完整的 CSS clip-path / SVG mask 自动映射计划在 v1.5.0 实现。
+   */
+  isMask?: boolean;
   /** 尺寸信息 */
   size?: ProcessedSize;
   /** 相对父节点的位置 */

@@ -1,30 +1,36 @@
-# figma-dev-tools v1.4.3 开发指南
+# figma-dev-tools v1.4.4 开发指南
 
 ## 项目概述
-figma-dev-tools 是一个 Figma 设计稿转代码的 MCP 工具，支持 React + Tailwind CSS / Vue + UnoCSS 代码生成，提供 GUI 配置向导、XSS 安全防护、智能层级修复、SVG 内联渲染、动画检测等完整工具链。
+
+figma-dev-tools 是一个 Figma 设计稿转代码的 MCP 工具，支持 React + Tailwind CSS
+/ Vue +
+UnoCSS 代码生成，提供 GUI 配置向导、XSS 安全防护、智能层级修复、SVG 内联渲染、动画检测等完整工具链。
 
 ## 环境要求
+
 - Node.js >= 20
 - pnpm >= 10.26.2（也支持 npm/yarn/bun）
 
 ## 常用命令
-| 命令 | 说明 |
-|------|------|
-| `npm install` | 安装依赖 |
-| `npm run dev` | 开发模式（监听文件变化） |
-| `npm run build` | TypeScript 编译 |
-| `npm run cli` | 运行 CLI 命令 |
-| `npm test` | 运行测试 |
-| `npm run test:watch` | 监听模式运行测试 |
-| `npm start` | 运行编译后的代码 |
+
+| 命令                 | 说明                     |
+| -------------------- | ------------------------ |
+| `npm install`        | 安装依赖                 |
+| `npm run dev`        | 开发模式（监听文件变化） |
+| `npm run build`      | TypeScript 编译          |
+| `npm run cli`        | 运行 CLI 命令            |
+| `npm test`           | 运行测试                 |
+| `npm run test:watch` | 监听模式运行测试         |
+| `npm start`          | 运行编译后的代码         |
 
 ## 项目结构
+
 ```
 figma-dev-tools/
 ├── bin/                    # CLI 入口
 │   └── figma-dev.js
 ├── src/
-│   ├── index.ts           # MCP 服务器入口（14个MCP工具）
+│   ├── index.ts           # MCP 服务器入口（19 个 MCP 工具）
 │   ├── cli/               # CLI 命令实现
 │   │   └── index.ts
 │   ├── i18n/              # 国际化（zh-CN/en-US）
@@ -50,7 +56,7 @@ figma-dev-tools/
 │   │   ├── hierarchy-fixer.ts   # v1.4.0新增：智能层级修复
 │   │   ├── component-mapper.ts  # v1.4.0新增：组件库映射（shadcn/ui等检测）
 │   │   ├── interaction-inferrer.ts # v1.4.0新增：交互逻辑推断（按钮/表单/Tab/弹窗等状态自动推断）
-│   │   ├── watch-mode.ts        # v1.4.0新增：Watch模式（轮询Figma变更自动重生代码）
+│   │   ├── watch-mode.ts        # v1.4.0新增：Watch 模式（轮询 Figma 变更自动重新生成代码）
 │   │   ├── cache.ts             # v1.4.0新增：AES加密本地缓存
 │   │   ├── gui-server.ts        # GUI配置向导服务器
 │   │   ├── token-store.ts       # Token 安全存储
@@ -85,6 +91,7 @@ figma-dev-tools/
 ## ⚠️ 开发注意事项
 
 ### 1. 临时文件清理
+
 - **任务执行完成后必须删除临时脚本文件**，包括但不限于：
   - 以 `fix-` 开头的修复脚本
   - 以 `verify-` 开头的验证脚本
@@ -97,6 +104,7 @@ figma-dev-tools/
   - `mcp-standalone.mjs` - MCP 独立运行脚本
 
 ### 2. 代码规范
+
 - **禁止使用 `any` 类型**，使用 `unknown` 或具体类型替代
 - 未使用的变量/参数以下划线 `_` 开头
 - 使用 TypeScript 严格模式
@@ -106,23 +114,29 @@ figma-dev-tools/
 - 避免冗余的条件判断（如 `x > 0 && x > 20` 只需要 `x > 20`）
 
 ### 3. Lint 规则
+
 提交前必须通过 lint 和类型检查：
+
 ```bash
 npm run build     # 确保 TypeScript 编译通过
 npm test          # 确保测试通过
 ```
 
 ### 4. 国际化 (i18n)
+
 - 所有用户可见文本必须通过 i18n 系统
 - 新增文本需要同时更新 zh-CN.ts 和 en-US.ts
 - 带参数的翻译使用函数形式，参考现有 colorAlias 等示例
 
 ### 5. 版本号管理
+
 - 版本号在 package.json、src/cli/index.ts、src/index.ts 三处保持一致
 - 不要在代码中硬编码版本号，从 package.json 读取或统一常量
 
 ### 6. Git 提交规范
+
 使用 Conventional Commits：
+
 - `feat:` 新功能
 - `fix:` 修复
 - `docs:` 文档
@@ -131,21 +145,33 @@ npm test          # 确保测试通过
 - `test:` 测试
 
 ### 7. 发布流程
+
 1. 确保所有检查通过：`npm run build && npm test`
 2. 确认版本号正确
 3. 确认没有临时文件
 4. git add/commit/push
 5. npm publish --access public
 
-## MCP 工具列表
-| 工具名 | 说明 |
-|--------|------|
-| figma_get_file | 获取 Figma 文件信息 |
-| figma_get_node | 获取节点信息 |
-| figma_generate_jsx | 生成增强版 JSX（推荐） |
-| figma_generate_component | 生成 React 组件（旧版兼容） |
-| figma_lint_design | 代码还原质量预检 |
-| figma_get_structured_data | 获取框架无关结构化数据 |
-| figma_download_assets | 下载图片资源 |
-| figma_create_icon_sprite | 生成 SVG Sprite |
-| figma_get_screenshot | 获取节点截图 |
+## MCP 工具列表（19 个）
+
+| 工具名                        | 说明                                    |
+| ----------------------------- | --------------------------------------- |
+| figma_parse_url               | 解析 Figma URL 得到 fileKey/nodeId      |
+| figma_get_file                | 获取 Figma 文件信息                     |
+| figma_get_node                | 获取节点信息                            |
+| figma_get_metadata            | 获取节点元数据概览（渐进式上下文）      |
+| figma_get_design_context      | 获取节点设计上下文详情                  |
+| figma_get_structured_data     | 获取框架无关结构化数据                  |
+| figma_lint_design             | 代码还原质量预检                        |
+| figma_generate_jsx            | 生成增强版 JSX/Vue 组件（推荐）         |
+| figma_generate_component      | 生成 React 组件（旧版兼容）             |
+| figma_download_assets         | 下载图片/SVG 资源（SVGO 优化）          |
+| figma_create_icon_sprite      | 生成 SVG Sprite                         |
+| figma_get_screenshot          | 获取节点截图                            |
+| figma_sync_tokens             | 同步设计 Tokens 到项目文件              |
+| figma_dev_fallback_status     | 检测付费墙兜底服务可用性（v1.4.4 新增） |
+| figma_dev_fallback_capture    | 浏览器兜底截图（v1.4.4 新增）           |
+| figma_verify_fidelity         | 还原度像素 diff 校验（v1.4.4 新增）     |
+| figma_get_cache_status        | 缓存状态查询（v1.4.4 新增）             |
+| figma_clear_cache             | 清除缓存（v1.4.4 新增）                 |
+| figma_get_i18n_status         | i18n 状态查询（v1.4.4 新增）            |

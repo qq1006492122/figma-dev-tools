@@ -1,65 +1,57 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.4.3",
-  "description": "Figma Dev Tools MCP Server v1.4.3 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, zero `any` types for type safety, and one-click installation across 10+ editors.",
-  "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "figma-dev": "./bin/figma-dev.js",
-    "figma-dev-tools": "./bin/figma-dev.js"
-  },
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "cli": "tsx src/cli/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "setup": "node install.mjs",
-    "prepublishOnly": "npm run build"
-  },
-  "engines": {
-    "node": ">=20"
-  },
+  "version": "1.4.4",
+  "description": "Figma Dev Tools MCP Server v1.4.4 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, paywall browser fallback, visual approximation mode, fidelity pixel-diff verification, zero `any` types for type safety, and one-click installation across 8+ editors.",
   "keywords": [
-    "figma",
-    "mcp",
-    "model-context-protocol",
-    "design-to-code",
-    "design-tokens",
-    "tailwind",
-    "react",
-    "ai-editor",
-    "claude",
-    "cursor",
-    "trae",
-    "vscode",
-    "windsurf",
-    "pnpm",
-    "vue",
-    "svelte",
-    "html",
-    "zed",
-    "cline",
-    "roo-code",
-    "framework-agnostic",
-    "zero-config",
-    "yarn",
-    "bun",
-    "i18n",
     "a11y",
     "accessibility",
-    "responsive",
+    "ai-editor",
+    "bun",
+    "claude",
+    "cline",
+    "cursor",
     "design-system",
+    "design-to-code",
+    "design-tokens",
+    "fidelity-verification",
+    "figma",
     "flex-fixer",
+    "flexbox",
+    "framework-agnostic",
+    "html",
+    "i18n",
+    "mcp",
+    "model-context-protocol",
+    "pixel-diff",
+    "pixelmatch",
+    "pnpm",
+    "react",
+    "responsive",
     "responsive-design",
-    "flexbox"
+    "roo-code",
+    "svelte",
+    "tailwind",
+    "trae",
+    "vscode",
+    "vue",
+    "windsurf",
+    "yarn",
+    "zed",
+    "zero-config"
   ],
-  "author": "Youcha",
+  "homepage": "https://gitee.com/shanxi-youcha/figma-dev-tools",
+  "bugs": {
+    "url": "https://gitee.com/shanxi-youcha/figma-dev-tools/issues"
+  },
   "license": "MIT",
+  "author": "Youcha",
   "repository": {
     "type": "git",
     "url": "git+https://gitee.com/shanxi-youcha/figma-dev-tools.git"
+  },
+  "bin": {
+    "figma-dev": "./bin/figma-dev.js",
+    "figma-dev-tools": "./bin/figma-dev.js"
   },
   "files": [
     "dist",
@@ -71,12 +63,26 @@
     "mcp-config.schema.json",
     ".env.example",
     "README.md",
+    "README.en-US.md",
     "SKILL.md",
     "FIGMA-DESIGN-GUIDELINES.md",
     "mcp-standalone.mjs",
     "LICENSE",
     "gui"
   ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "cli": "tsx src/cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "setup": "node install.mjs",
+    "prepublishOnly": "npm run build"
+  },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
     "@modelcontextprotocol/sdk": "^1.6.1",
@@ -107,9 +113,12 @@
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
-  "homepage": "https://gitee.com/shanxi-youcha/figma-dev-tools",
-  "bugs": {
-    "url": "https://gitee.com/shanxi-youcha/figma-dev-tools/issues"
+  "optionalDependencies": {
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "playwright": "^1.40.0"
   },
-  "types": "dist/index.d.ts"
+  "engines": {
+    "node": ">=20"
+  }
 }

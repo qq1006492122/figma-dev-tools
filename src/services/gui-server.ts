@@ -11,9 +11,11 @@
  *   POST /api/token     - Set and validate Figma Access Token
  *   GET  /api/editors   - Detect available AI editors
  *   POST /api/editors/install - Install MCP config for specified editor
+ *   POST /api/install-global   - Globally install figma-dev-tools via npm
  *   POST /api/config/complete - Complete configuration and save settings
  */
 
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -34,13 +36,15 @@ const GUI_DIR = path.resolve(__dirname, '../../gui');
 
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
-const VERSION = '1.4.3';
+const VERSION = '1.4.4';
 
 interface EditorInfo {
   name: string;
   detected: boolean;
   installed: boolean;
   configPath?: string;
+  /** 编辑器官网下载地址，用于未安装时引导用户前往下载 */
+  website?: string;
 }
 
 interface ServerState {
@@ -296,18 +300,46 @@ interface EditorPathConfig {
   paths: string[];
   name: string;
   zedFormat?: boolean;
+  /** 编辑器官网下载地址 */
+  website?: string;
+}
+
+/**
+ * 检测系统可用的包管理器
+ * 优先级：npm > pnpm > yarn
+ * Windows 下 npm 实际为 npm.cmd，需要 shell:true 才能被 execFileSync 找到
+ * @returns 包管理器名称
+ */
+function detectPackageManager(): 'npm' | 'pnpm' | 'yarn' {
+  const managers: Array<'npm' | 'pnpm' | 'yarn'> = ['npm', 'pnpm', 'yarn'];
+  const isWindows = os.platform() === 'win32';
+  for (const pm of managers) {
+    try {
+      execFileSync(pm, ['--version'], {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 5000,
+        shell: isWindows, // Windows 下 npm/pnpm/yarn 均为 .cmd 脚本，需要 shell 模式
+      });
+      return pm;
+    } catch {
+      // 包管理器不存在，继续检测下一个
+    }
+  }
+  // 默认回退到 npm（Node.js 自带）
+  return 'npm';
 }
 
 function getEditorConfigs(): EditorPathConfig[] {
   return [
-    { name: 'Trae', paths: getTraePaths() },
-    { name: 'VS Code', paths: getVSCodePaths() },
-    { name: 'Cursor', paths: getCursorPaths() },
-    { name: 'Windsurf', paths: getWindsurfPaths() },
-    { name: 'Claude Desktop', paths: getClaudeDesktopPaths() },
-    { name: 'Zed', paths: getZedPaths(), zedFormat: true },
-    { name: 'Cline', paths: getClinePaths() },
-    { name: 'Roo Code', paths: getRooCodePaths() },
+    { name: 'Trae', paths: getTraePaths(), website: 'https://www.trae.ai/download' },
+    { name: 'VS Code', paths: getVSCodePaths(), website: 'https://code.visualstudio.com/download' },
+    { name: 'Cursor', paths: getCursorPaths(), website: 'https://www.cursor.com/downloads' },
+    { name: 'Windsurf', paths: getWindsurfPaths(), website: 'https://windsurf.com/editor/download' },
+    { name: 'Claude Desktop', paths: getClaudeDesktopPaths(), website: 'https://claude.ai/download' },
+    { name: 'Zed', paths: getZedPaths(), zedFormat: true, website: 'https://zed.dev/download' },
+    { name: 'Cline', paths: getClinePaths(), website: 'https://github.com/cline/cline' },
+    { name: 'Roo Code', paths: getRooCodePaths(), website: 'https://github.com/RooVetGit/Roo-Code' },
   ];
 }
 
@@ -589,6 +621,7 @@ export async function startGuiServer(): Promise<http.Server> {
                 detected: result.detected,
                 installed: result.installed || state.configuredEditors.has(ec.name),
                 configPath: result.configPath,
+                website: ec.website,
               };
             });
             sendJson(res, 200, { success: true, editors });
@@ -633,6 +666,109 @@ export async function startGuiServer(): Promise<http.Server> {
                 success: false,
                 error: error instanceof Error ? error.message : String(error),
               });
+            }
+            return;
+          }
+
+          // 全局安装 figma-dev-tools（通过 npm install -g）
+          // 使用 SSE (Server-Sent Events) 流式推送安装进度和日志
+          if (pathname === '/api/install-global' && req.method === 'POST') {
+            console.log('[GUI] /api/install-global request received (SSE stream)');
+
+            // 设置 SSE 响应头
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              Connection: 'keep-alive',
+              'Access-Control-Allow-Origin': '*',
+            });
+
+            /** 向前端推送一条 SSE 事件 */
+            const sendEvent = (event: { type: string; data: unknown }): void => {
+              res.write(`data: ${JSON.stringify(event)}\n\n`);
+            };
+
+            try {
+              const packageManager = detectPackageManager();
+              const packageName = 'figma-dev-tools';
+              console.log('[GUI] Installing globally via:', packageManager, packageName);
+
+              // 推送开始事件
+              sendEvent({
+                type: 'start',
+                data: { packageManager, packageName, message: `Installing via ${packageManager}...` },
+              });
+
+              const args =
+                packageManager === 'pnpm' ? ['add', '-g', packageName] : ['install', '-g', packageName];
+
+              // 使用 spawn 异步执行，实时捕获 stdout/stderr
+              const child = spawn(packageManager, args, {
+                shell: os.platform() === 'win32', // Windows 下 npm/pnpm/yarn 均为 .cmd 脚本
+                stdio: ['pipe', 'pipe', 'pipe'],
+              });
+
+              let stderrBuffer = '';
+
+              // 超时定时器（2 分钟）
+              const timeoutHandle = setTimeout(() => {
+                child.kill('SIGKILL');
+                sendEvent({ type: 'error', data: { message: 'Installation timed out (120s)' } });
+                res.end();
+              }, 120000);
+
+              // 实时推送 stdout 输出
+              child.stdout?.on('data', (chunk: Buffer) => {
+                const text = chunk.toString('utf-8');
+                console.log('[GUI] install stdout:', text.trim());
+                sendEvent({ type: 'progress', data: { message: text.trim() } });
+              });
+
+              // 实时推送 stderr 输出（npm 常把进度信息输出到 stderr）
+              child.stderr?.on('data', (chunk: Buffer) => {
+                const text = chunk.toString('utf-8');
+                stderrBuffer += text;
+                console.log('[GUI] install stderr:', text.trim());
+                sendEvent({ type: 'progress', data: { message: text.trim() } });
+              });
+
+              // 进程结束
+              child.on('close', (code: number | null) => {
+                clearTimeout(timeoutHandle);
+                if (code === 0) {
+                  console.log('[GUI] Global install succeeded');
+                  sendEvent({
+                    type: 'success',
+                    data: { message: `${packageName} installed globally via ${packageManager}` },
+                  });
+                } else {
+                  console.error('[GUI] Global install failed, exit code:', code);
+                  sendEvent({
+                    type: 'error',
+                    data: { message: `Installation failed (exit code ${code}). ${stderrBuffer.slice(-500)}` },
+                  });
+                }
+                res.end();
+              });
+
+              // 进程启动错误
+              child.on('error', (err: Error) => {
+                clearTimeout(timeoutHandle);
+                console.error('[GUI] Global install spawn error:', err);
+                sendEvent({ type: 'error', data: { message: err.message } });
+                res.end();
+              });
+
+              // 客户端断开连接时清理
+              req.on('close', () => {
+                clearTimeout(timeoutHandle);
+                child.kill('SIGKILL');
+              });
+            } catch (error) {
+              console.error('[GUI] Global install error:', error);
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              sendEvent({ type: 'error', data: { message: errorMessage } });
+              res.end();
             }
             return;
           }
