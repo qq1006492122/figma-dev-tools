@@ -107,6 +107,8 @@ const service = new BrowserFallbackService({
 
 ## 🚀 快速开始
 
+> 📚 想要一份精简、与版本同步的速成指南？见 **[QUICKSTART.md](QUICKSTART.md)**（中文）/ **[QUICKSTART.en-US.md](QUICKSTART.en-US.md)**（英文）。以下为详细说明。
+
 ### 方式零：GUI 可视化配置（小白推荐 ⭐）
 
 **无需记忆任何命令**，通过浏览器图形界面完成全部配置：

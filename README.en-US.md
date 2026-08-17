@@ -104,6 +104,8 @@ const service = new BrowserFallbackService({
 
 ## 🚀 Quick Start
 
+> 📚 Want a condensed, version-synced walkthrough? See **[QUICKSTART.md](QUICKSTART.md)** (中文) / **[QUICKSTART.en-US.md](QUICKSTART.en-US.md)** (English). The sections below cover the details.
+
 ### Option 0: GUI Visual Configuration (Beginner Recommended ⭐)
 
 **No need to memorize any commands**, complete all configuration through the browser graphical interface:
