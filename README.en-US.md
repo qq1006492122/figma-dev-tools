@@ -406,7 +406,9 @@ npx figma-dev-tools <command> [options]
 | `figma-dev mcp`              | Start MCP server (stdio)                          | -                                                                           | v1          |
 | `figma-dev tutorial`         | View tutorial docs (alias `help`, auto-opens browser) | `--no-browser`                                                           | v1.3.0      |
 | `figma-dev cache`            | **📦 Cache management** (status/clear)             | `status` / `clear -f`                                                       | v1.4.0      |
-| `figma-dev privacy`          | **🔒 Privacy statement** (data safety + .gitignore check) | -                                                                  | v1.4.0      |
+| `figma-dev privacy`          | **🔒 Privacy statement** (data safety + .gitignore check) | -                                                              | v1.4.0      |
+| `figma-dev -v` / `--ver`    | **📌 View current version**                        | -                                                                     | v1.4.6      |
+| `figma-dev --update`        | **🔄 Check and update to latest version** (auto-handles EBUSY file lock) | -                                                           | v1.4.6      |
 
 ### Common Examples
 
@@ -419,6 +421,12 @@ figma-dev gui --port 8080
 
 # Launch GUI mode via wizard command
 figma-dev wizard --gui
+
+# 📌 View current version (v1.4.6 new)
+figma-dev -v
+
+# 🔄 Check and update to latest version (v1.4.6 new, auto-handles EBUSY file lock)
+figma-dev --update
 
 # Design spec pre-check (v1.3.2 new)
 figma-dev lint "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032"

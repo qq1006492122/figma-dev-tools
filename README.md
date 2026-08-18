@@ -567,6 +567,8 @@ npx figma-dev-tools -l zh-CN <command>
 | `figma-dev tutorial`         | 查看教程文档（别名 `help`，自动打开浏览器）           | `--no-browser`                                                        | v1.3.0     |
 | `figma-dev cache`            | **📦 缓存管理**（status/clear）                       | `status` / `clear -f`                                                 | v1.4.0     |
 | `figma-dev privacy`          | **🔒 隐私声明**（查看数据安全承诺 + .gitignore 检查）  | -                                                                     | v1.4.0     |
+| `figma-dev -v` / `--ver`    | **📌 查看当前版本号**                                | -                                                                     | v1.4.6     |
+| `figma-dev --update`        | **🔄 检查并更新到最新版本**（自动处理 EBUSY 文件占用） | -                                                                     | v1.4.6     |
 
 **CLI 示例：**
 
@@ -580,6 +582,12 @@ figma-dev gui --port 3000
 # 通过向导命令启动 GUI 模式
 figma-dev wizard --gui
 figma-dev init --gui
+
+# 📌 查看当前版本号（v1.4.6 新）
+figma-dev -v
+
+# 🔄 检查并更新到最新版本（v1.4.6 新，自动处理 EBUSY 文件占用）
+figma-dev --update
 
 # 设计规范预检（v1.3.2 新）
 figma-dev lint "https://www.figma.com/design/xxx/yyy?node-id=23-11032"

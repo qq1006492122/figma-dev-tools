@@ -4,7 +4,8 @@
  * 命令行工具，用于 tokens 同步、组件生成、代码导出等
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -2008,9 +2009,73 @@ if (rawArgs.includes('--update')) {
       try {
         execSync('npm install -g figma-dev-tools', { stdio: 'pipe' });
         updateSpinner.succeed(chalk.green(i18n.t('update.success') as string));
-      } catch {
-        updateSpinner.fail(chalk.red(i18n.t('update.failed') as string));
-        console.log(chalk.gray(i18n.t('update.hint') as string));
+      } catch (execError) {
+        // 提取 npm 错误详情
+        let detail = '';
+        let stderrStr = '';
+        if (execError instanceof Error && 'stderr' in execError) {
+          const stderr = (execError as { stderr: Buffer | string }).stderr;
+          if (stderr) {
+            stderrStr = stderr.toString().trim();
+            const errorLines = stderrStr
+              .split('\n')
+              .filter((l) => l.includes('error') || l.includes('ERR') || l.includes('EBUSY'));
+            detail = errorLines.length > 0 ? errorLines.join('; ') : stderrStr.split('\n').slice(-2).join('; ');
+          }
+        }
+        if (!detail && execError instanceof Error) {
+          detail = execError.message;
+        }
+
+        // 检测 EBUSY 错误，尝试备用复制
+        const isEBUSY = stderrStr.includes('EBUSY') || stderrStr.includes('errno -4082');
+        if (isEBUSY) {
+          updateSpinner.text = chalk.yellow(i18n.t('update.ebusyDetected') as string);
+          try {
+            // 获取本地包路径（当前文件在 dist/cli/ 下）
+            const currentDir = path.dirname(fileURLToPath(import.meta.url));
+            const localPkgDir = path.resolve(currentDir, '../..');
+            // 获取全局 node_modules 路径
+            const globalPrefix = execFileSync('npm', ['root', '-g'], { encoding: 'utf-8' }).trim();
+            const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
+
+            // 复制 dist/, gui/, bin/ 目录
+            if (os.platform() === 'win32') {
+              execFileSync('robocopy', [
+                path.join(localPkgDir, 'dist'),
+                path.join(globalPkgDir, 'dist'),
+                '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
+              ], { shell: true, stdio: 'pipe' });
+              execFileSync('robocopy', [
+                path.join(localPkgDir, 'gui'),
+                path.join(globalPkgDir, 'gui'),
+                '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
+              ], { shell: true, stdio: 'pipe' });
+              execFileSync('robocopy', [
+                path.join(localPkgDir, 'bin'),
+                path.join(globalPkgDir, 'bin'),
+                '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
+              ], { shell: true, stdio: 'pipe' });
+            } else {
+              execFileSync('cp', ['-r', path.join(localPkgDir, 'dist') + '/', path.join(globalPkgDir, 'dist')], { stdio: 'pipe' });
+              execFileSync('cp', ['-r', path.join(localPkgDir, 'gui') + '/', path.join(globalPkgDir, 'gui')], { stdio: 'pipe' });
+              execFileSync('cp', ['-r', path.join(localPkgDir, 'bin') + '/', path.join(globalPkgDir, 'bin')], { stdio: 'pipe' });
+            }
+            // 复制 package.json
+            execFileSync('cp' as string, [path.join(localPkgDir, 'package.json'), path.join(globalPkgDir, 'package.json')], { shell: true, stdio: 'pipe' });
+
+            updateSpinner.succeed(chalk.green(i18n.t('update.ebusyFallbackSuccess') as string));
+          } catch (fallbackError) {
+            updateSpinner.fail(
+              chalk.red((i18n.t('update.ebusyFallbackFailed') as string)),
+            );
+          }
+        } else {
+          updateSpinner.fail(
+            chalk.red((i18n.t('update.failed') as string) + (detail ? ': ' + detail : '')),
+          );
+          console.log(chalk.gray(i18n.t('update.hint') as string));
+        }
       }
     } catch (error) {
       const spinner2 = ora();
