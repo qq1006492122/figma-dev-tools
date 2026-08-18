@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.9
+# 🎨 Figma Dev Tools v1.4.10
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -71,6 +71,7 @@ const service = new BrowserFallbackService({
 
 | 版本    | 主题                    | 核心内容                                                                                                   |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.10 | 版本号统一 + figd_ Token 认证修复 | 修复 figd_ 类型 Token 认证（X-Figma-Token 头），CLI/GUI 版本号统一从 package.json 读取，所有文档版本号同步更新 |
 | v1.4.9  | figd_ Token 认证修复       | 修复 figd_ 类型 Token 必须使用 X-Figma-Token 请求头而非 Authorization 的兼容性问题，Token 验证全面通过 |
 | v1.4.8  | --update EBUSY 兼容 + 文档   | --update 自动检测 EBUSY 并 robocopy 回退、CLI 文档补全（-v/--ver/--update）、修复重复图标、错误详情展示 |
 | v1.4.7  | Token 验证优化 + i18n   | Token 验证失败显示具体原因（HTTP 401/403/429）、GUI 错误详情展示、CLI 错误捕获增强、错误消息全面国际化       |
@@ -585,10 +586,10 @@ figma-dev gui --port 3000
 figma-dev wizard --gui
 figma-dev init --gui
 
-# 📌 查看当前版本号（v1.4.8 新）
+# 📌 查看当前版本号（v1.4.8 新增）
 figma-dev -v
 
-# 🔄 检查并更新到最新版本（v1.4.8 新，自动处理 EBUSY 文件占用）
+# 🔄 检查并更新到最新版本（v1.4.8 新增，自动处理 EBUSY 文件占用）
 figma-dev --update
 
 # 设计规范预检（v1.3.2 新）
@@ -761,7 +762,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.8                            │
+│                      figma-dev-tools MCP Server v1.4.10                           │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │

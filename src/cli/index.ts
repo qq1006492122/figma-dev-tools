@@ -50,11 +50,21 @@ const i18n = initI18nSync();
 
 const program = new Command();
 
+/** 从 package.json 读取版本号（版本号唯一来源） */
+const __cliDirname = path.dirname(fileURLToPath(import.meta.url));
+let PKG_VERSION = 'unknown';
+try {
+  const pkg = fs.readJsonSync(path.resolve(__cliDirname, '../../package.json'));
+  PKG_VERSION = pkg.version || 'unknown';
+} catch {
+  // 默认使用 unknown
+}
+
 // 版本和描述
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.4.8');
+  .version(PKG_VERSION);
 
 // 全局选项
 program

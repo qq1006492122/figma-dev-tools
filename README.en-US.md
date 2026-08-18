@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.9
+# 🎨 Figma Dev Tools v1.4.10
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.10 | Version Unification + figd_ Token Auth Fix | Fix figd_ token auth (X-Figma-Token header), CLI/GUI version read from package.json, sync all docs version numbers |
 | v1.4.9  | figd_ Token Auth Fix       | Fix figd_ token compatibility: must use X-Figma-Token header instead of Authorization header, token validation fully working |
 | v1.4.8  | --update EBUSY + Docs           | --update auto-detects EBUSY, robocopy fallback, CLI docs (-v/--ver/--update), fix double icon, error detail display |
 | v1.4.7  | Token Validation + i18n        | Token validation shows specific error reasons (HTTP 401/403/429), GUI error detail display, CLI error capture improvements, full i18n for error messages |
@@ -424,10 +425,10 @@ figma-dev gui --port 8080
 # Launch GUI mode via wizard command
 figma-dev wizard --gui
 
-# 📌 View current version (v1.4.8 new)
+# 📌 View current version (new in v1.4.8)
 figma-dev -v
 
-# 🔄 Check and update to latest version (v1.4.8 new, auto-handles EBUSY file lock)
+# 🔄 Check and update to latest version (new in v1.4.8, auto-handles EBUSY file lock)
 figma-dev --update
 
 # Design spec pre-check (v1.3.2 new)
