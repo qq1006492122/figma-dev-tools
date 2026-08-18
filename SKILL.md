@@ -1,13 +1,13 @@
 ---
 name: 'figma-dev-tools'
 description:
-  'Figma 设计到代码增强工具集 v1.4.4 -
+  'Figma 设计到代码增强工具集 v1.4.6 -
   19个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、零any类型确保类型安全、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div
   soup、上下文爆炸、hex写死、资源路径处理、深层嵌套截断、层级混乱等问题。支持Trae/VS
   Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。'
 ---
 
-# Figma Dev Tools v1.4.4 - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.4.6 - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 

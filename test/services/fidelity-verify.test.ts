@@ -18,6 +18,10 @@ import {
   getFidelityVerifyService,
   resetFidelityVerifyService,
 } from '../../src/services/fidelity-verify.js';
+import { areModulesResolvable } from '../helpers/optional-deps.js';
+
+/** 还原度校验所需的可选依赖 */
+const FIDELITY_DEPS = ['pixelmatch', 'pngjs'];
 
 describe('FidelityVerifyService', () => {
   let service: FidelityVerifyService;
@@ -73,16 +77,21 @@ describe('FidelityVerifyService', () => {
   });
 
   describe('checkDependencies 缓存策略', () => {
-    it('不可用结果不应被缓存（允许安装后重试）', async () => {
-      // 测试环境未安装 pixelmatch/pngjs
+    it('结果应与依赖安装状态一致（不可用不缓存，可用则缓存）', async () => {
+      const installed = await areModulesResolvable(FIDELITY_DEPS);
       const result1 = await service.checkDependencies();
-      expect(result1.available).toBe(false);
+      expect(result1.available).toBe(installed);
 
-      // 再次检查：不应命中缓存，应重新尝试
-      const result2 = await service.checkDependencies();
-      expect(result2.available).toBe(false);
-
-      // 两次结果都应是独立的（未缓存 false）
+      if (installed) {
+        // 可用结果会被缓存：第二次应命中缓存（同一引用）
+        const result2 = await service.checkDependencies();
+        expect(result2).toBe(result1);
+      } else {
+        // 未安装：不可用结果不缓存，每次重新尝试
+        const result2 = await service.checkDependencies();
+        expect(result2.available).toBe(false);
+        expect(result1).not.toBe(result2);
+      }
     });
 
     it('不可用结果应包含缺失依赖列表和安装提示', async () => {
@@ -113,29 +122,49 @@ describe('FidelityVerifyService', () => {
   });
 
   describe('verifyFidelity 前置校验', () => {
-    it('依赖缺失时应抛出错误', async () => {
-      await expect(
-        service.verifyFidelity('/path/to/figma.png', '<html></html>', 'html-string'),
-      ).rejects.toThrow(/依赖缺失|pixelmatch|pngjs/i);
+    it('依赖缺失时应抛出依赖错误；已安装时应因截图文件不存在而失败', async () => {
+      const installed = await areModulesResolvable(FIDELITY_DEPS);
+      const promise = service.verifyFidelity(
+        '/path/to/figma.png',
+        '<html></html>',
+        'html-string',
+      );
+      if (!installed) {
+        await expect(promise).rejects.toThrow(/依赖缺失|pixelmatch|pngjs/i);
+      } else {
+        // 依赖已安装：流程继续到读取截图，因文件不存在而失败
+        await expect(promise).rejects.toThrow(/截图|ENOENT/i);
+      }
     });
 
-    it('空 figmaScreenshot 参数应能进入流程（但会因依赖缺失而失败）', async () => {
+    it('空 figmaScreenshot 参数应能进入流程（缺失依赖或读取失败）', async () => {
       // 这个测试验证参数传递正确，依赖检查在前
-      await expect(
-        service.verifyFidelity('', '<html></html>', 'html-string'),
-      ).rejects.toThrow(/依赖缺失/i);
+      const installed = await areModulesResolvable(FIDELITY_DEPS);
+      const promise = service.verifyFidelity('', '<html></html>', 'html-string');
+      if (!installed) {
+        await expect(promise).rejects.toThrow(/依赖缺失/i);
+      } else {
+        // 依赖已安装：读取空路径截图必然失败
+        await expect(promise).rejects.toThrow(/截图|ENOENT/i);
+      }
     });
   });
 
   describe('依赖检查顺序（修复逻辑黑洞 #7）', () => {
     it('Playwright 缺失时应立即抛错，不应等待 pixelmatch/pngjs 检查后才报错', async () => {
-      // 即使 pixelmatch/pngjs 可用，Playwright 缺失也应快速失败
-      // 当前测试环境未安装 playwright，应抛出 Playwright 相关错误
-      // 注意：测试环境 pixelmatch/pngjs 也未安装，会先报依赖缺失
-      // 这个测试验证：依赖检查顺序正确，错误信息明确
-      await expect(
-        service.verifyFidelity('/path/to/figma.png', '<html></html>', 'html-string'),
-      ).rejects.toThrow(/依赖缺失|Playwright/i);
+      // 无论依赖安装状态如何，错误信息都应明确指向失败原因
+      const installed = await areModulesResolvable(FIDELITY_DEPS);
+      const promise = service.verifyFidelity(
+        '/path/to/figma.png',
+        '<html></html>',
+        'html-string',
+      );
+      if (!installed) {
+        await expect(promise).rejects.toThrow(/依赖缺失|Playwright|pixelmatch|pngjs/i);
+      } else {
+        // 依赖已安装：流程继续到读取截图，因文件不存在而失败
+        await expect(promise).rejects.toThrow(/截图|ENOENT/i);
+      }
     });
   });
 

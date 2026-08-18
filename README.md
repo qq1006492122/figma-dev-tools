@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.4
+# 🎨 Figma Dev Tools v1.4.6
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -750,7 +750,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.4                            │
+│                      figma-dev-tools MCP Server v1.4.6                            │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │

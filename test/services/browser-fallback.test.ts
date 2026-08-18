@@ -19,6 +19,7 @@ import {
   getBrowserFallbackService,
   resetBrowserFallbackService,
 } from '../../src/services/browser-fallback.js';
+import { isModuleResolvable } from '../helpers/optional-deps.js';
 
 describe('BrowserFallbackService', () => {
   let service: BrowserFallbackService;
@@ -88,18 +89,21 @@ describe('BrowserFallbackService', () => {
   });
 
   describe('checkAvailability 缓存策略', () => {
-    it('不可用结果不应被缓存（允许用户安装后重试）', async () => {
-      // 由于测试环境未安装 playwright，应返回 available=false
+    it('结果应与 playwright 安装状态一致（不可用不缓存，可用则缓存）', async () => {
+      const installed = await isModuleResolvable('playwright');
       const result1 = await service.checkAvailability();
-      expect(result1.available).toBe(false);
+      expect(result1.available).toBe(installed);
 
-      // 再次检查：不应命中缓存，应重新尝试
-      const result2 = await service.checkAvailability();
-      expect(result2.available).toBe(false);
-
-      // 两次结果都应是独立的对象（未缓存）
-      // 验证方式：如果缓存了，reason 会是同一个对象引用
-      // 这里只验证逻辑正确性
+      if (installed) {
+        // 可用结果会被缓存：第二次应命中缓存（同一引用）
+        const result2 = await service.checkAvailability();
+        expect(result2).toBe(result1);
+      } else {
+        // 未安装：不可用结果不缓存，每次重新尝试
+        const result2 = await service.checkAvailability();
+        expect(result2.available).toBe(false);
+        expect(result1).not.toBe(result2);
+      }
     });
 
     it('不可用结果应包含安装提示', async () => {
@@ -188,25 +192,31 @@ describe('BrowserFallbackService', () => {
   });
 
   describe('依赖检查与参数校验顺序（修复逻辑黑洞 #1）', () => {
-    it('checkAvailability 不可用结果应可重复获取（不缓存）', async () => {
-      // 验证：连续多次调用都返回独立的不可用结果对象
+    it('checkAvailability 结果应可重复获取（不可用不缓存，可用缓存同引用）', async () => {
+      const installed = await isModuleResolvable('playwright');
       const result1 = await service.checkAvailability();
       const result2 = await service.checkAvailability();
-      expect(result1.available).toBe(false);
-      expect(result2.available).toBe(false);
-      // 不可用结果不缓存，故两个对象不应是同一引用
-      expect(result1).not.toBe(result2);
+      expect(result1.available).toBe(installed);
+      expect(result2.available).toBe(installed);
+      if (installed) {
+        // 可用结果缓存：两个对象应是同一引用
+        expect(result2).toBe(result1);
+      } else {
+        // 不可用结果不缓存，故两个对象不应是同一引用
+        expect(result1).not.toBe(result2);
+      }
     });
 
     it('可用性检查失败后再次调用应重新尝试（不命中旧缓存）', async () => {
+      // 可用性仅取决于 playwright 包能否导入，与 browser 类型配置无关
+      const installed = await isModuleResolvable('playwright');
       // 模拟：第一次检查后更新 browser 配置，缓存应被清除
       await service.checkAvailability();
       service.updateOptions({ browser: 'firefox' });
       // 再次检查应重新尝试（不命中旧缓存）
       const result = await service.checkAvailability();
       expect(result).toBeDefined();
-      // firefox 仍未安装，应返回 false
-      expect(result.available).toBe(false);
+      expect(result.available).toBe(installed);
     });
   });
 

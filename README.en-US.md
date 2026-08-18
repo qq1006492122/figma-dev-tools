@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.4
+# 🎨 Figma Dev Tools v1.4.6
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
