@@ -2,7 +2,7 @@
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
-**[English](./README.en-US.md)** | **中文**
+**[English](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/README.en-US.md)** | **中文**
 
 **打通 Figma 设计与前端研发的完整工具链**，支持 🖥️
 GUI 可视化配置向导、设计 Tokens 智能提取、高保真组件生成（React/Vue/Svelte/HTML 等）、资源自动下载、跨编辑器 MCP 集成。专为 AI

@@ -2,7 +2,7 @@
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
-**English** | **[中文](./README.md)**
+**English** | **[中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/README.md)**
 
 A **complete toolchain bridging Figma design and frontend development**, supporting 🖥️ GUI visual configuration wizard, intelligent design token extraction, high-fidelity component generation (React/Vue/Svelte/HTML, etc.), automatic asset downloading, and cross-editor MCP integration. Optimized for AI Agents, solving core pain points like div soup, context explosion, hardcoded hex colors, asset path handling, Flex layout deformation, accessibility gaps, responsive adaptation, and **paywall fallback**.
 

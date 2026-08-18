@@ -71,6 +71,13 @@ const I18N = {
       manualHint: '你可以稍后手动配置其他编辑器',
       download: '去官网下载',
       allDone: '所有检测到的编辑器已配置完成',
+      detectionMethods: {
+        process: '进程运行中',
+        executable: '可执行文件',
+        'desktop-entry': '系统应用',
+        registry: '注册表',
+        'config-dir': '配置目录',
+      },
     },
     framework: {
       title: '框架偏好设置',
@@ -188,6 +195,13 @@ const I18N = {
       manualHint: 'You can manually configure other editors later',
       download: 'Download',
       allDone: 'All detected editors configured',
+      detectionMethods: {
+        process: 'Running',
+        executable: 'Executable',
+        'desktop-entry': 'System app',
+        registry: 'Registry',
+        'config-dir': 'Config dir',
+      },
     },
     framework: {
       title: 'Framework Preferences',
@@ -693,9 +707,21 @@ class App {
 
   renderEditorCard(editor) {
     const color = EDITOR_COLORS[editor.name] || '#6b7280';
-    const isInstalled = this.state.installedEditors.has(editor.name);
+    const isInstalled = this.state.installedEditors.has(editor.id);
     const isInstalling = editor.installing;
     const initials = editor.name.substring(0, 2).toUpperCase();
+
+    // 检测方式标签：向用户说明"已装/未装"是基于何种证据（参考 CC Switch 的检测来源提示）
+    let methodTag = '';
+    if (editor.detected && editor.detectionMethod && editor.detectionMethod !== 'none') {
+      const methodLabel = this.t('editors.detectionMethods.' + editor.detectionMethod);
+      methodTag =
+        '<span class="detection-method-tag" title="' +
+        editor.detectionMethod +
+        '">' +
+        methodLabel +
+        '</span>';
+    }
 
     let statusBadge = '';
     let buttonHtml = '';
@@ -717,7 +743,7 @@ class App {
         statusBadge = '<span class="status-badge pending">' + this.t('editors.install') + '</span>';
         buttonHtml =
           '<button class="btn-install" data-editor="' +
-          editor.name +
+          editor.id +
           '" data-install="true">' +
           this.t('editors.install') +
           '</button>';
@@ -751,6 +777,7 @@ class App {
       editor.name +
       '</div>' +
       statusBadge +
+      methodTag +
       '</div></div>' +
       buttonHtml +
       '</div>'
@@ -765,8 +792,8 @@ class App {
     }
   }
 
-  async installEditor(editorName) {
-    const editor = this.state.editors.find((e) => e.name === editorName);
+  async installEditor(editorId) {
+    const editor = this.state.editors.find((e) => e.id === editorId);
     if (!editor) return;
 
     editor.installing = true;
@@ -774,17 +801,17 @@ class App {
 
     const data = await this.api('/api/editors/install', {
       method: 'POST',
-      body: JSON.stringify({ editor: editorName }),
+      body: JSON.stringify({ editor: editorId }),
     });
 
     editor.installing = false;
 
     if (data.success) {
-      this.state.installedEditors.add(editorName);
+      this.state.installedEditors.add(editorId);
       editor.installed = true;
-      this.showToast(editorName + ' ' + this.t('editors.installSuccess'), 'success');
+      this.showToast(editor.name + ' ' + this.t('editors.installSuccess'), 'success');
     } else {
-      this.showToast(editorName + ' ' + this.t('editors.installFailed'), 'error');
+      this.showToast(editor.name + ' ' + this.t('editors.installFailed'), 'error');
     }
 
     this.renderEditorsList();
@@ -1121,8 +1148,8 @@ class App {
   bindEditorEvents() {
     document.querySelectorAll('[data-install="true"]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const editorName = btn.dataset.editor;
-        if (editorName) this.installEditor(editorName);
+        const editorId = btn.dataset.editor;
+        if (editorId) this.installEditor(editorId);
       });
     });
   }

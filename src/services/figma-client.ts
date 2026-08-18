@@ -2,7 +2,7 @@
  * Figma REST API 客户端
  *
  * 封装 Figma REST API 的所有调用，统一处理：
- * - HTTP 请求认证（X-Figma-Token 头部）
+ * - HTTP 请求认证（Authorization: Bearer + X-Figma-Token 双保险）
  * - 错误状态码映射为友好中文消息
  * - 响应数据类型转换
  * - 节点树遍历工具方法
@@ -446,8 +446,10 @@ export class FigmaClient {
     this._tokenIndex = nextIndex;
     const nextToken = this._tokens[nextIndex]!;
     this._accessToken = nextToken;
+    this._client.defaults.headers.common['Authorization'] = `Bearer ${nextToken}`;
     this._client.defaults.headers.common['X-Figma-Token'] = nextToken;
     if (requestConfig) {
+      requestConfig.headers.set('Authorization', `Bearer ${nextToken}`);
       requestConfig.headers.set('X-Figma-Token', nextToken);
     }
     return true;
@@ -718,10 +720,13 @@ export class FigmaClient {
     const httpsAgent = proxyConfig ? this._createProxyAgent(proxyConfig) : undefined;
 
     // Axios 实例配置
+    // Figma API 要求使用 Authorization: Bearer 格式的认证头
+    // 同时保留 X-Figma-Token 作为向后兼容的备选
     const axiosConfig: AxiosRequestConfig = {
       baseURL,
       timeout: config.timeout || DEFAULT_TIMEOUT,
       headers: {
+        'Authorization': `Bearer ${this._accessToken}`,
         'X-Figma-Token': this._accessToken,
         'Content-Type': 'application/json',
       },
@@ -867,14 +872,46 @@ export class FigmaClient {
    * 通过调用 `/v1/me` 接口验证 Token 有效性。
    * 该接口返回当前用户信息，Token 无效时返回 401。
    *
-   * @returns Token 有效返回用户信息，无效返回 null
+   * @returns Token 有效返回用户信息，无效或错误时返回 null
+   * @throws {Error} 仅在非认证类错误（如网络不通、DNS 失败）时抛出
    */
   async validateToken(): Promise<FigmaMeResponse | null> {
     try {
       const response = await this._client.get<FigmaMeResponse>('/v1/me');
       return response.data;
-    } catch {
-      // 任何错误（401、网络错误等）都视为 Token 无效；具体错误会在业务请求中展示。
+    } catch (error) {
+      const axiosError = error as AxiosError<FigmaApiErrorResponse>;
+
+      // 如果是 HTTP 错误响应（4xx/5xx），返回 null 表示 Token 无效
+      if (axiosError.response) {
+        const status = axiosError.response.status;
+        const message = axiosError.response.data?.message || axiosError.message;
+
+        // 详细日志：帮助诊断问题
+        console.warn(`[FigmaClient] Token validation failed (HTTP ${status}): ${message}`);
+
+        // 401/403 属于认证问题，返回 null
+        if (status === 401 || status === 403) {
+          return null;
+        }
+
+        // 其他 HTTP 错误（如 429 Rate Limit、5xx 服务器错误）也返回 null
+        // 但这些错误会在请求拦截器中被进一步处理
+        return null;
+      }
+
+      // 无响应错误（网络问题、DNS 失败、超时等）
+      const errorCode = axiosError.code;
+      const errorMessage = axiosError.message;
+      console.warn(`[FigmaClient] Token validation network error (code: ${errorCode}): ${errorMessage}`);
+
+      // 网络类错误：ECONNABORTED(超时)、ETIMEDOUT(连接超时)、ENOTFOUND(DNS 失败)
+      // 这些错误应该抛出，让调用方知道是网络问题而非 Token 问题
+      if (['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNRESET', 'EPIPE', 'EHOSTUNREACH'].includes(errorCode as string)) {
+        throw new Error(`网络连接失败: ${errorMessage}。请检查网络连接或代理设置`);
+      }
+
+      // 其他未知错误
       return null;
     }
   }

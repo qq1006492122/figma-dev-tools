@@ -27,6 +27,12 @@ import open from 'open';
 
 import { initI18nSync } from '../i18n/index.js';
 import type { Language } from '../i18n/index.js';
+import {
+  detectAllEditors,
+  getEditorDefinitions,
+  resolveConfigPath,
+  type DetectionMethod,
+} from './editor-detector.js';
 import { createFigmaClient } from './figma-client.js';
 import { createTokenStore } from './token-store.js';
 
@@ -36,15 +42,24 @@ const GUI_DIR = path.resolve(__dirname, '../../gui');
 
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
-const VERSION = '1.4.4';
+const VERSION = '1.4.6';
 
 interface EditorInfo {
+  id: string;
   name: string;
   detected: boolean;
   installed: boolean;
   configPath?: string;
   /** 编辑器官网下载地址，用于未安装时引导用户前往下载 */
   website?: string;
+  /** 命中的检测方式（process / executable / desktop-entry / registry / config-dir） */
+  detectionMethod: DetectionMethod | 'none';
+  /** 所有命中的检测方式（用于详细展示） */
+  matchedMethods: DetectionMethod[];
+  /** 命中的可执行文件绝对路径（若有） */
+  executablePath?: string;
+  /** 可信度评分 0-100 */
+  confidence: number;
 }
 
 interface ServerState {
@@ -53,255 +68,6 @@ interface ServerState {
   configuredEditors: Set<string>;
   framework: string;
   outputDir: string;
-}
-
-function getHomeDir(): string {
-  return os.homedir();
-}
-
-function getAppDataDir(): string {
-  const platform = os.platform();
-  if (platform === 'win32') return process.env.APPDATA || path.join(getHomeDir(), 'AppData', 'Roaming');
-  if (platform === 'darwin') return path.join(getHomeDir(), 'Library', 'Application Support');
-  return path.join(getHomeDir(), '.config');
-}
-
-function getVSCodePaths(): string[] {
-  const platform = os.platform();
-  const home = getHomeDir();
-  const appData = getAppDataDir();
-  if (platform === 'win32') {
-    return [path.join(appData, 'Code', 'User', 'mcp.json'), path.join(appData, 'Code - Insiders', 'User', 'mcp.json')];
-  }
-  if (platform === 'darwin') {
-    return [
-      path.join(home, 'Library', 'Application Support', 'Code', 'User', 'mcp.json'),
-      path.join(home, 'Library', 'Application Support', 'Code - Insiders', 'User', 'mcp.json'),
-    ];
-  }
-  return [
-    path.join(home, '.config', 'Code', 'User', 'mcp.json'),
-    path.join(home, '.config', 'Code - Insiders', 'User', 'mcp.json'),
-  ];
-}
-
-function getCursorPaths(): string[] {
-  const platform = os.platform();
-  const home = getHomeDir();
-  const appData = getAppDataDir();
-  if (platform === 'win32') return [path.join(appData, 'Cursor', 'User', 'mcp.json')];
-  if (platform === 'darwin') return [path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'mcp.json')];
-  return [path.join(home, '.config', 'Cursor', 'User', 'mcp.json')];
-}
-
-function getWindsurfPaths(): string[] {
-  const platform = os.platform();
-  const home = getHomeDir();
-  const appData = getAppDataDir();
-  if (platform === 'win32') return [path.join(appData, 'Windsurf', 'User', 'mcp.json')];
-  if (platform === 'darwin') return [path.join(home, 'Library', 'Application Support', 'Windsurf', 'User', 'mcp.json')];
-  return [path.join(home, '.config', 'Windsurf', 'User', 'mcp.json')];
-}
-
-function getTraePaths(): string[] {
-  const platform = os.platform();
-  const home = getHomeDir();
-  const appData = getAppDataDir();
-  if (platform === 'win32') {
-    return [
-      path.join(appData, 'TRAE', 'User', 'mcp.json'),
-      path.join(appData, 'TRAE SOLO CN', 'User', 'mcp.json'),
-      path.join(appData, 'TRAE SOLO', 'User', 'mcp.json'),
-      path.join(appData, 'Trae CN', 'User', 'mcp.json'),
-    ];
-  }
-  if (platform === 'darwin') {
-    return [
-      path.join(home, 'Library', 'Application Support', 'TRAE', 'User', 'mcp.json'),
-      path.join(home, 'Library', 'Application Support', 'TRAE SOLO CN', 'User', 'mcp.json'),
-      path.join(home, 'Library', 'Application Support', 'TRAE SOLO', 'User', 'mcp.json'),
-      path.join(home, 'Library', 'Application Support', 'Trae CN', 'User', 'mcp.json'),
-    ];
-  }
-  return [
-    path.join(home, '.config', 'TRAE', 'User', 'mcp.json'),
-    path.join(home, '.config', 'TRAE SOLO CN', 'User', 'mcp.json'),
-    path.join(home, '.config', 'TRAE SOLO', 'User', 'mcp.json'),
-    path.join(home, '.config', 'Trae CN', 'User', 'mcp.json'),
-  ];
-}
-
-function getClaudeDesktopPaths(): string[] {
-  const platform = os.platform();
-  const home = getHomeDir();
-  if (platform === 'win32') return [path.join(getAppDataDir(), 'Claude', 'claude_desktop_config.json')];
-  if (platform === 'darwin')
-    return [path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')];
-  return [path.join(home, '.config', 'Claude', 'claude_desktop_config.json')];
-}
-
-function getZedPaths(): string[] {
-  return [path.join(getHomeDir(), '.zed', 'settings.json')];
-}
-
-function getClinePaths(): string[] {
-  const platform = os.platform();
-  const home = getHomeDir();
-  const appData = getAppDataDir();
-  if (platform === 'win32') {
-    return [
-      path.join(
-        appData,
-        'Code',
-        'User',
-        'globalStorage',
-        'saoudrizwan.claude-dev',
-        'settings',
-        'cline_mcp_settings.json',
-      ),
-      path.join(
-        appData,
-        'Cursor',
-        'User',
-        'globalStorage',
-        'saoudrizwan.claude-dev',
-        'settings',
-        'cline_mcp_settings.json',
-      ),
-    ];
-  }
-  if (platform === 'darwin') {
-    return [
-      path.join(
-        home,
-        'Library',
-        'Application Support',
-        'Code',
-        'User',
-        'globalStorage',
-        'saoudrizwan.claude-dev',
-        'settings',
-        'cline_mcp_settings.json',
-      ),
-      path.join(
-        home,
-        'Library',
-        'Application Support',
-        'Cursor',
-        'User',
-        'globalStorage',
-        'saoudrizwan.claude-dev',
-        'settings',
-        'cline_mcp_settings.json',
-      ),
-    ];
-  }
-  return [
-    path.join(
-      home,
-      '.config',
-      'Code',
-      'User',
-      'globalStorage',
-      'saoudrizwan.claude-dev',
-      'settings',
-      'cline_mcp_settings.json',
-    ),
-    path.join(
-      home,
-      '.config',
-      'Cursor',
-      'User',
-      'globalStorage',
-      'saoudrizwan.claude-dev',
-      'settings',
-      'cline_mcp_settings.json',
-    ),
-  ];
-}
-
-function getRooCodePaths(): string[] {
-  const platform = os.platform();
-  const home = getHomeDir();
-  const appData = getAppDataDir();
-  if (platform === 'win32') {
-    return [
-      path.join(
-        appData,
-        'Code',
-        'User',
-        'globalStorage',
-        'rooveterinaryinc.roo-cline',
-        'settings',
-        'mcp_settings.json',
-      ),
-      path.join(
-        appData,
-        'Cursor',
-        'User',
-        'globalStorage',
-        'rooveterinaryinc.roo-cline',
-        'settings',
-        'mcp_settings.json',
-      ),
-    ];
-  }
-  if (platform === 'darwin') {
-    return [
-      path.join(
-        home,
-        'Library',
-        'Application Support',
-        'Code',
-        'User',
-        'globalStorage',
-        'rooveterinaryinc.roo-cline',
-        'settings',
-        'mcp_settings.json',
-      ),
-      path.join(
-        home,
-        'Library',
-        'Application Support',
-        'Cursor',
-        'User',
-        'globalStorage',
-        'rooveterinaryinc.roo-cline',
-        'settings',
-        'mcp_settings.json',
-      ),
-    ];
-  }
-  return [
-    path.join(
-      home,
-      '.config',
-      'Code',
-      'User',
-      'globalStorage',
-      'rooveterinaryinc.roo-cline',
-      'settings',
-      'mcp_settings.json',
-    ),
-    path.join(
-      home,
-      '.config',
-      'Cursor',
-      'User',
-      'globalStorage',
-      'rooveterinaryinc.roo-cline',
-      'settings',
-      'mcp_settings.json',
-    ),
-  ];
-}
-
-interface EditorPathConfig {
-  paths: string[];
-  name: string;
-  zedFormat?: boolean;
-  /** 编辑器官网下载地址 */
-  website?: string;
 }
 
 /**
@@ -330,17 +96,55 @@ function detectPackageManager(): 'npm' | 'pnpm' | 'yarn' {
   return 'npm';
 }
 
-function getEditorConfigs(): EditorPathConfig[] {
-  return [
-    { name: 'Trae', paths: getTraePaths(), website: 'https://www.trae.ai/download' },
-    { name: 'VS Code', paths: getVSCodePaths(), website: 'https://code.visualstudio.com/download' },
-    { name: 'Cursor', paths: getCursorPaths(), website: 'https://www.cursor.com/downloads' },
-    { name: 'Windsurf', paths: getWindsurfPaths(), website: 'https://windsurf.com/editor/download' },
-    { name: 'Claude Desktop', paths: getClaudeDesktopPaths(), website: 'https://claude.ai/download' },
-    { name: 'Zed', paths: getZedPaths(), zedFormat: true, website: 'https://zed.dev/download' },
-    { name: 'Cline', paths: getClinePaths(), website: 'https://github.com/cline/cline' },
-    { name: 'Roo Code', paths: getRooCodePaths(), website: 'https://github.com/RooVetGit/Roo-Code' },
-  ];
+/**
+ * 检测所有编辑器，返回排序后的列表（已安装优先）
+ */
+function detectAllEditorsWithInfo(): EditorInfo[] {
+  return detectAllEditors().map(({ definition, detection }) => {
+    const info: EditorInfo = {
+      id: definition.id,
+      name: definition.name,
+      detected: detection.detected,
+      installed: detection.installed,
+      configPath: detection.configPath,
+      website: definition.website,
+      detectionMethod: detection.method,
+      matchedMethods: detection.matchedMethods,
+      executablePath: detection.executablePath,
+      confidence: detection.confidence,
+    };
+    return info;
+  });
+}
+
+/**
+ * 安装 MCP 配置到指定编辑器
+ * 使用 editor-detector 提供的多维数据
+ */
+function installForEditorById(editorId: string): { success: boolean; configPath?: string; error?: string } {
+  const def = getEditorDefinitions().find((d) => d.id === editorId);
+  if (!def) return { success: false, error: `Editor '${editorId}' not found` };
+
+  const serverEntry = getMcpServerEntry();
+  const configPath = resolveConfigPath(def);
+  if (!configPath) return { success: false, error: 'No config path available for this editor' };
+
+  try {
+    const existing = readJsonSafe(configPath) || {};
+    const serversKey = def.zedFormat ? 'mcp_servers' : 'mcpServers';
+    const existingRecord = existing as Record<string, unknown>;
+    if (!existingRecord[serversKey]) {
+      existingRecord[serversKey] = {};
+    }
+    (existingRecord[serversKey] as Record<string, unknown>)['figma-dev-tools'] = serverEntry;
+    writeJson(configPath, existing as Record<string, unknown>);
+    return { success: true, configPath };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 function readJsonSafe(filePath: string): Record<string, unknown> | null {
@@ -365,59 +169,6 @@ function getMcpServerEntry(): { command: string; args: string[] } {
     command: process.execPath,
     args: [binScript, 'mcp'],
   };
-}
-
-function hasMcpConfig(config: Record<string, unknown>, zedFormat: boolean): boolean {
-  const servers = zedFormat
-    ? (config.mcp_servers as Record<string, unknown> | undefined)
-    : (config.mcpServers as Record<string, unknown> | undefined);
-  return !!(servers && servers['figma-dev-tools']);
-}
-
-function mergeMcpConfig(
-  config: Record<string, unknown>,
-  serverEntry: { command: string; args: string[] },
-  zedFormat: boolean,
-): Record<string, unknown> {
-  if (zedFormat) {
-    if (!config.mcp_servers) config.mcp_servers = {};
-    (config.mcp_servers as Record<string, unknown>)['figma-dev-tools'] = serverEntry;
-  } else {
-    if (!config.mcpServers) config.mcpServers = {};
-    (config.mcpServers as Record<string, unknown>)['figma-dev-tools'] = serverEntry;
-  }
-  return config;
-}
-
-function detectEditor(config: EditorPathConfig): { detected: boolean; installed: boolean; configPath?: string } {
-  for (const p of config.paths) {
-    const dir = path.dirname(p);
-    const parentDir = path.dirname(dir);
-    const dirExists = fs.existsSync(dir) || fs.existsSync(parentDir);
-    if (dirExists) {
-      const json = readJsonSafe(p);
-      const installed = json ? hasMcpConfig(json, config.zedFormat ?? false) : false;
-      return { detected: true, installed, configPath: p };
-    }
-  }
-  return { detected: false, installed: false };
-}
-
-function installForEditor(config: EditorPathConfig): boolean {
-  const serverEntry = getMcpServerEntry();
-  let installed = false;
-
-  for (const p of config.paths) {
-    const dir = path.dirname(p);
-    if (fs.existsSync(dir) || fs.existsSync(path.dirname(dir))) {
-      const existing = readJsonSafe(p) || {};
-      mergeMcpConfig(existing, serverEntry, config.zedFormat ?? false);
-      writeJson(p, existing);
-      installed = true;
-    }
-  }
-
-  return installed;
 }
 
 function getMimeType(filePath: string): string {
@@ -613,17 +364,13 @@ export async function startGuiServer(): Promise<http.Server> {
 
           if (pathname === '/api/editors') {
             console.log('[GUI] /api/editors request received');
-            const editorConfigs = getEditorConfigs();
-            const editors: EditorInfo[] = editorConfigs.map((ec) => {
-              const result = detectEditor(ec);
-              return {
-                name: ec.name,
-                detected: result.detected,
-                installed: result.installed || state.configuredEditors.has(ec.name),
-                configPath: result.configPath,
-                website: ec.website,
-              };
-            });
+            const editors = detectAllEditorsWithInfo();
+            // 合并运行时配置状态（用户在本会话中已安装的编辑器）
+            for (const editor of editors) {
+              if (state.configuredEditors.has(editor.id)) {
+                editor.installed = true;
+              }
+            }
             sendJson(res, 200, { success: true, editors });
             return;
           }
@@ -632,32 +379,26 @@ export async function startGuiServer(): Promise<http.Server> {
             console.log('[GUI] /api/editors/install request received');
             const body = await readBody(req);
             const data = JSON.parse(body) as { editor?: string };
-            const editorName = data.editor;
+            const editorId = data.editor;
 
-            if (!editorName) {
-              sendJson(res, 400, { success: false, error: 'Editor name required' });
-              return;
-            }
-
-            const editorConfig = getEditorConfigs().find((e) => e.name === editorName);
-            if (!editorConfig) {
-              sendJson(res, 404, { success: false, error: `Editor '${editorName}' not found` });
+            if (!editorId) {
+              sendJson(res, 400, { success: false, error: 'Editor id required' });
               return;
             }
 
             try {
-              console.log('[GUI] Installing for editor:', editorName);
-              const success = installForEditor(editorConfig);
-              if (success) {
-                state.configuredEditors.add(editorName);
-                console.log('[GUI] Editor installed successfully:', editorName);
-                sendJson(res, 200, { success: true, editor: editorName });
+              console.log('[GUI] Installing for editor:', editorId);
+              const result = installForEditorById(editorId);
+              if (result.success) {
+                state.configuredEditors.add(editorId);
+                console.log('[GUI] Editor installed successfully:', editorId);
+                sendJson(res, 200, { success: true, editor: editorId, configPath: result.configPath });
               } else {
-                console.log('[GUI] Editor config directory not found:', editorName);
+                console.log('[GUI] Editor config directory not found:', editorId, result.error);
                 sendJson(res, 200, {
                   success: false,
-                  error: 'Editor config directory not found',
-                  editor: editorName,
+                  error: result.error || 'Editor config directory not found',
+                  editor: editorId,
                 });
               }
             } catch (error) {
