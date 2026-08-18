@@ -14,6 +14,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { getI18n } from '../i18n/index.js';
+
 // ============ 类型定义 ============
 
 /**
@@ -392,8 +394,10 @@ class TokenStoreImpl implements TokenStore {
     // 保存时先验证 Token 有效性
     const validation = await this.validateTokenWithApi(token);
     if (!validation.valid) {
+      const i18n = getI18n();
+      const labels = i18n.t('errors.labels') as Record<string, unknown>;
       throw new Error(
-        `Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`,
+        (labels.tokenInvalid as (error: string) => string)(validation.error || (labels.tokenInvalidDefault as string)),
       );
     }
 
@@ -548,8 +552,10 @@ class TokenStoreImpl implements TokenStore {
     // 保存时先验证 Token 有效性
     const validation = await this.validateTokenWithApi(token);
     if (!validation.valid) {
+      const i18n = getI18n();
+      const labels = i18n.t('errors.labels') as Record<string, unknown>;
       throw new Error(
-        `Token 无效：${validation.error || '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限'}`,
+        (labels.tokenInvalid as (error: string) => string)(validation.error || (labels.tokenInvalidDefault as string)),
       );
     }
 
@@ -801,17 +807,19 @@ class TokenStoreImpl implements TokenStore {
         };
       }
 
+      const i18n = getI18n();
+      const labels = i18n.t('errors.labels') as Record<string, unknown>;
       return {
         valid: false,
         status: 'invalid',
-        error: 'Token 验证失败，请检查 Token 是否正确',
+        error: labels.tokenValidateFailedGeneric as string,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return {
         valid: false,
         status: 'invalid',
-        error: `Token 验证失败：${errorMessage}`,
+        error: errorMessage,
       };
     }
   }

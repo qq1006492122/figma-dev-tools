@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.6
+# 🎨 Figma Dev Tools v1.4.7
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.7  | Token Validation + i18n        | Token validation shows specific error reasons (HTTP 401/403/429), GUI error detail display, CLI error capture improvements, full i18n for error messages |
 | v1.4.4  | Paywall Fallback + Performance | Browser fallback screenshot, visual approximation mode, fidelity scoring, performance optimization (pool/cache/tiered timeout) |
 | v1.4.3  | Stability & Security Hardening  | GUI request body guard, circular reference detection, recursion depth protection, cache consistency         |
 | v1.4.1  | Code Quality Optimization      | Zero any types, oxlint zero warnings, code style unification                                               |

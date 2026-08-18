@@ -4,7 +4,9 @@
  * 命令行工具，用于 tokens 同步、组件生成、代码导出等
  */
 
+import { execSync } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { input, password, select, confirm } from '@inquirer/prompts';
 import boxen from 'boxen';
@@ -51,14 +53,16 @@ const program = new Command();
 program
   .name('figma-dev')
   .description(i18n.t('cli.description') as string)
-  .version('1.4.6');
+  .version('1.4.7');
 
 // 全局选项
 program
   .option('-t, --token <token>', i18n.t('cli.options.token') as string)
   .option('-o, --output <dir>', i18n.t('cli.options.output') as string, './src/styles/figma')
   .option('--no-backup', i18n.t('cli.options.noBackup') as string)
-  .option('-l, --lang <lang>', i18n.t('cli.options.lang') as string);
+  .option('-l, --lang <lang>', i18n.t('cli.options.lang') as string)
+  .option('-v, --ver', i18n.t('cli.options.ver') as string)
+  .option('--update', i18n.t('cli.options.update') as string);
 
 /**
  * 获取 Figma 客户端
@@ -1665,8 +1669,14 @@ program
           spinner.fail(chalk.red(i18n.t('cli.commands.token.validateFailed') as string));
           process.exit(1);
         }
-      } catch {
-        spinner.fail(chalk.red(i18n.t('cli.commands.wizard.tokenValidateError') as string));
+      } catch (error) {
+        spinner.fail(
+          chalk.red(
+            (i18n.t('cli.commands.wizard.tokenValidateError') as string) +
+              ': ' +
+              (error instanceof Error ? error.message : String(error)),
+          ),
+        );
         process.exit(1);
       }
     }
@@ -1955,5 +1965,61 @@ program
     }
   });
 
-// 解析命令行参数
-program.parse();
+// ============= 全局选项: -v / --ver =============
+
+const rawArgs = process.argv.slice(2);
+if (rawArgs.includes('-v') || rawArgs.includes('--ver')) {
+  console.log(chalk.cyan(`figma-dev v${program.version()}`));
+  console.log(chalk.gray(i18n.t('cli.description') as string));
+  process.exit(0);
+}
+
+// ============= 全局选项: --update =============
+
+if (rawArgs.includes('--update')) {
+  // 使用 IIFE 处理异步更新逻辑，外层用 process.exit 终止
+  void (async () => {
+    const spinner = ora(chalk.blue(i18n.t('update.checking') as string)).start();
+    try {
+      const pkgJson = await fs.readJson(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../package.json'),
+      );
+      const currentVersion = pkgJson.version as string;
+
+      const response = await fetch('https://registry.npmjs.org/figma-dev-tools/latest');
+      if (!response.ok) {
+        spinner.fail(chalk.red(i18n.t('update.notFound') as string));
+        process.exit(1);
+      }
+      const data = (await response.json()) as { version: string };
+      const latestVersion = data.version;
+
+      spinner.stop();
+      console.log(chalk.gray(i18n.t('update.currentVersion', currentVersion) as string));
+      console.log(chalk.gray(i18n.t('update.latestVersion', latestVersion) as string));
+
+      if (currentVersion === latestVersion) {
+        console.log(`\n${chalk.green(i18n.t('update.alreadyLatest') as string)}`);
+        process.exit(0);
+      }
+
+      console.log(`\n${chalk.yellow(i18n.t('update.updateAvailable', currentVersion, latestVersion) as string)}`);
+      const updateSpinner = ora(chalk.blue(i18n.t('update.updating') as string)).start();
+      try {
+        execSync('npm install -g figma-dev-tools', { stdio: 'pipe' });
+        updateSpinner.succeed(chalk.green(i18n.t('update.success') as string));
+      } catch {
+        updateSpinner.fail(chalk.red(i18n.t('update.failed') as string));
+        console.log(chalk.gray(i18n.t('update.hint') as string));
+      }
+    } catch (error) {
+      const spinner2 = ora();
+      spinner2.fail(chalk.red(i18n.t('update.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error)));
+      console.log(chalk.gray(i18n.t('update.hint') as string));
+    }
+    process.exit(0);
+  })();
+} else {
+  // 解析命令行参数
+  program.parse();
+}

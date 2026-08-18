@@ -66,6 +66,8 @@ export const zhCN = {
       output: '输出目录',
       noBackup: '不创建备份文件',
       lang: '显示语言 (zh-CN/en-US)',
+      ver: '显示版本号',
+      update: '检查并更新到最新版本',
     },
 
     completion: {
@@ -507,6 +509,18 @@ export const zhCN = {
         // v1.4.4 还原度校验相关提示
         fidelityDepsInstallHint:
           '运行 npm install pixelmatch pngjs 安装备用依赖，并确保已安装 Playwright（npm install playwright && npx playwright install chromium）',
+        // Token 验证错误消息
+        tokenValidateFailed401: (msg: string) =>
+          `Token 验证失败 (HTTP 401): ${msg}。请检查 Token 是否正确、是否已过期`,
+        tokenValidateFailed403: (msg: string) =>
+          `Token 验证失败 (HTTP 403): ${msg}。Token 缺少必要权限，请确保已勾选 "File content" 权限`,
+        tokenValidateFailed429: 'Token 验证失败 (HTTP 429): 请求过于频繁，请稍后重试',
+        tokenValidateFailedHttp: (status: number, msg: string) => `Token 验证失败 (HTTP ${status}): ${msg}`,
+        tokenValidateFailedNetwork: (msg: string) => `网络连接失败: ${msg}。请检查网络连接或代理设置`,
+        tokenValidateFailed: (msg: string) => `Token 验证失败: ${msg}`,
+        tokenInvalid: (error: string) => `Token 无效：${error}`,
+        tokenInvalidDefault: '请检查 Token 是否正确，确保勾选了 File content (Read only) 权限',
+        tokenValidateFailedGeneric: 'Token 验证失败，请检查 Token 是否正确',
       },
       // HTTP 状态码细分失败原因（供 _classifyHttpFailure 使用）
       httpFailures: {
@@ -656,6 +670,20 @@ export const zhCN = {
     pressCtrlC: '按 Ctrl+C 停止服务器',
     cmdDescription: '启动 GUI 可视化配置面板',
     guiOption: '启动 GUI 配置向导（浏览器界面）',
+  },
+
+  update: {
+    checking: '正在检查最新版本...',
+    currentVersion: (v: string) => `当前版本: v${v}`,
+    latestVersion: (v: string) => `最新版本: v${v}`,
+    alreadyLatest: '✅ 已是最新版本',
+    updateAvailable: (current: string, latest: string) =>
+      `📦 发现新版本 v${latest}（当前: v${current}），正在更新...`,
+    updating: '正在更新到最新版本...',
+    success: '✅ 更新成功！请重新启动终端或编辑器使更新生效',
+    failed: '❌ 更新失败',
+    notFound: '无法获取最新版本信息，请检查网络连接',
+    hint: '💡 也可以手动执行: npm install -g figma-dev-tools',
   },
 } as const;
 

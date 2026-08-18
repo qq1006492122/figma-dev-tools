@@ -2,8 +2,8 @@ const I18N = {
   'zh-CN': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: '配置向导 v1.4.6',
-      footer: 'Figma Dev Tools v1.4.6 — 在 AI 编辑器中直接调用 MCP 工具',
+      subtitle: '配置向导 v1.4.7',
+      footer: 'Figma Dev Tools v1.4.7 — 在 AI 编辑器中直接调用 MCP 工具',
     },
     steps: {
       welcome: '欢迎',
@@ -124,8 +124,8 @@ const I18N = {
   'en-US': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: 'Setup Wizard v1.4.6',
-      footer: 'Figma Dev Tools v1.4.6 — Use MCP tools directly in AI editors',
+      subtitle: 'Setup Wizard v1.4.7',
+      footer: 'Figma Dev Tools v1.4.7 — Use MCP tools directly in AI editors',
     },
     steps: {
       welcome: 'Welcome',
@@ -1035,9 +1035,10 @@ class App {
       this.renderFooter();
     } else {
       input?.classList.add('error');
+      const errorMsg = data.error || this.t('token.validateFailed');
       if (statusEl)
         statusEl.innerHTML = '<span class="status-badge error">✗ ' + this.t('token.validateFailed') + '</span>';
-      this.showToast(this.t('token.validateFailed'), 'error');
+      this.showToast(errorMsg, 'error');
       if (btn) {
         btn.disabled = false;
         btn.textContent = this.t('token.validateBtn');
@@ -1116,11 +1117,37 @@ class App {
       validateBtn?.addEventListener('click', () => this.validateToken());
 
       const useExistingBtn = document.getElementById('btn-use-existing');
-      useExistingBtn?.addEventListener('click', () => {
-        this.state.tokenValidated = true;
-        this.state.token = '__existing__';
-        this.renderFooter();
-        setTimeout(() => this.nextStep(), 300);
+      useExistingBtn?.addEventListener('click', async () => {
+        // 先禁用按钮并显示加载状态
+        useExistingBtn.disabled = true;
+        useExistingBtn.innerHTML = '<span class="spinner"></span> ' + this.t('token.validating');
+        try {
+          // 调用后端 API 验证已存储的 Token
+          const data = await this.api('/api/token/validate-existing', { method: 'POST' });
+          if (data.success && data.valid) {
+            this.state.tokenValidated = true;
+            this.state.token = '__existing__';
+            this.renderFooter();
+            this.showToast(this.t('token.validateSuccess'), 'success');
+            setTimeout(() => this.nextStep(), 300);
+          } else {
+            useExistingBtn.disabled = false;
+            useExistingBtn.textContent = this.t('token.useExisting');
+            const errorMsg = data.error || (this.lang === 'zh-CN'
+              ? '已存储的 Token 无效，请重新输入'
+              : 'Stored token is invalid, please enter a new one');
+            this.showToast(errorMsg, 'error');
+          }
+        } catch (err) {
+          useExistingBtn.disabled = false;
+          useExistingBtn.textContent = this.t('token.useExisting');
+          this.showToast(
+            this.lang === 'zh-CN'
+              ? '验证失败: ' + (err.message || '网络错误')
+              : 'Validation failed: ' + (err.message || 'Network error'),
+            'error',
+          );
+        }
       });
 
       const replaceBtn = document.getElementById('btn-replace-token');

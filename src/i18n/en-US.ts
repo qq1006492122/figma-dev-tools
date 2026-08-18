@@ -66,6 +66,8 @@ export const enUS = {
       output: 'Output directory',
       noBackup: 'Do not create backup files',
       lang: 'Display language (zh-CN/en-US)',
+      ver: 'Show version number',
+      update: 'Check and update to the latest version',
     },
 
     completion: {
@@ -516,6 +518,18 @@ export const enUS = {
         // v1.4.4 fidelity verification prompts
         fidelityDepsInstallHint:
           'Run npm install pixelmatch pngjs to install dependencies, and ensure Playwright is installed (npm install playwright && npx playwright install chromium)',
+        // Token validation error messages
+        tokenValidateFailed401: (msg: string) =>
+          `Token validation failed (HTTP 401): ${msg}. Please check if the Token is correct or has expired`,
+        tokenValidateFailed403: (msg: string) =>
+          `Token validation failed (HTTP 403): ${msg}. Token lacks required permissions, please ensure "File content" scope is selected`,
+        tokenValidateFailed429: 'Token validation failed (HTTP 429): Too many requests, please retry later',
+        tokenValidateFailedHttp: (status: number, msg: string) => `Token validation failed (HTTP ${status}): ${msg}`,
+        tokenValidateFailedNetwork: (msg: string) => `Network connection failed: ${msg}. Please check your network connection or proxy settings`,
+        tokenValidateFailed: (msg: string) => `Token validation failed: ${msg}`,
+        tokenInvalid: (error: string) => `Invalid token: ${error}`,
+        tokenInvalidDefault: 'Please check if the Token is correct and ensure "File content (Read only)" scope is selected',
+        tokenValidateFailedGeneric: 'Token validation failed, please check if the Token is correct',
       },
       // HTTP status code subclassification failures (used by _classifyHttpFailure)
       httpFailures: {
@@ -669,6 +683,20 @@ export const enUS = {
     pressCtrlC: 'Press Ctrl+C to stop the server',
     cmdDescription: 'Launch GUI visual configuration panel',
     guiOption: 'Launch GUI setup wizard (browser interface)',
+  },
+
+  update: {
+    checking: 'Checking for latest version...',
+    currentVersion: (v: string) => `Current version: v${v}`,
+    latestVersion: (v: string) => `Latest version: v${v}`,
+    alreadyLatest: '✅ Already up to date',
+    updateAvailable: (current: string, latest: string) =>
+      `📦 New version v${latest} available (current: v${current}), updating...`,
+    updating: 'Updating to the latest version...',
+    success: '✅ Update successful! Please restart your terminal or editor to apply changes',
+    failed: '❌ Update failed',
+    notFound: 'Unable to fetch latest version info. Please check your network connection.',
+    hint: '💡 You can also manually run: npm install -g figma-dev-tools',
   },
 } as const;
 

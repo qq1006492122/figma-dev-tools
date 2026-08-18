@@ -42,7 +42,7 @@ const GUI_DIR = path.resolve(__dirname, '../../gui');
 
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
-const VERSION = '1.4.6';
+const VERSION = '1.4.7';
 
 interface EditorInfo {
   id: string;
@@ -362,6 +362,36 @@ export async function startGuiServer(): Promise<http.Server> {
             return;
           }
 
+          // 验证已存储的 Token（"使用现有 Token" 按钮）
+          if (pathname === '/api/token/validate-existing' && req.method === 'POST') {
+            console.log('[GUI] /api/token/validate-existing request received');
+            try {
+              const storedToken = await tokenStore.getToken();
+              if (!storedToken) {
+                console.log('[GUI] No existing token found in storage');
+                sendJson(res, 200, { success: false, valid: false, error: 'No stored token found' });
+                return;
+              }
+              console.log('[GUI] Validating stored token with Figma API...');
+              const client = createFigmaClient({ accessToken: storedToken });
+              const isValid = await client.validateToken();
+              console.log('[GUI] Stored token validation result:', isValid);
+              if (isValid) {
+                sendJson(res, 200, { success: true, valid: true });
+              } else {
+                sendJson(res, 200, { success: false, valid: false, error: 'Stored token is invalid' });
+              }
+            } catch (error) {
+              console.error('[GUI] Validate existing token error:', error);
+              sendJson(res, 200, {
+                success: false,
+                valid: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            return;
+          }
+
           if (pathname === '/api/editors') {
             console.log('[GUI] /api/editors request received');
             const editors = detectAllEditorsWithInfo();
@@ -474,7 +504,7 @@ export async function startGuiServer(): Promise<http.Server> {
               });
 
               // 进程结束
-              child.on('close', (code: number | null) => {
+              child.on('close', async (code: number | null) => {
                 clearTimeout(timeoutHandle);
                 if (code === 0) {
                   console.log('[GUI] Global install succeeded');
@@ -484,10 +514,62 @@ export async function startGuiServer(): Promise<http.Server> {
                   });
                 } else {
                   console.error('[GUI] Global install failed, exit code:', code);
-                  sendEvent({
-                    type: 'error',
-                    data: { message: `Installation failed (exit code ${code}). ${stderrBuffer.slice(-500)}` },
-                  });
+                  // 检测是否因 EBUSY 失败（MCP 进程占用文件）
+                  const isEBUSY = stderrBuffer.includes('EBUSY') || stderrBuffer.includes('errno -4082');
+                  if (isEBUSY) {
+                    console.log('[GUI] Detected EBUSY error, trying fallback copy...');
+                    sendEvent({ type: 'progress', data: { message: 'Detected file lock, trying fallback copy...' } });
+                    try {
+                      // 获取当前包路径（gui-server.ts 在 dist/services/ 下）
+                      const currentDir = path.dirname(fileURLToPath(import.meta.url));
+                      const localPkgDir = path.resolve(currentDir, '../..');
+                      // 尝试在全局 node_modules 找到 figma-dev-tools 路径
+                      const globalPrefix = execFileSync(packageManager, ['root', '-g'], { encoding: 'utf-8' }).trim();
+                      const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
+
+                      if (os.platform() === 'win32') {
+                        // Windows 下使用 robocopy
+                        execFileSync('robocopy', [
+                          path.join(localPkgDir, 'dist'),
+                          path.join(globalPkgDir, 'dist'),
+                          '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
+                        ], { shell: true, stdio: 'pipe' });
+                        execFileSync('robocopy', [
+                          path.join(localPkgDir, 'gui'),
+                          path.join(globalPkgDir, 'gui'),
+                          '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
+                        ], { shell: true, stdio: 'pipe' });
+                        execFileSync('robocopy', [
+                          path.join(localPkgDir, 'bin'),
+                          path.join(globalPkgDir, 'bin'),
+                          '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
+                        ], { shell: true, stdio: 'pipe' });
+                      } else {
+                        // Unix 使用 cp -r
+                        execFileSync('cp', ['-r', path.join(localPkgDir, 'dist') + '/', path.join(globalPkgDir, 'dist')], { stdio: 'pipe' });
+                        execFileSync('cp', ['-r', path.join(localPkgDir, 'gui') + '/', path.join(globalPkgDir, 'gui')], { stdio: 'pipe' });
+                        execFileSync('cp', ['-r', path.join(localPkgDir, 'bin') + '/', path.join(globalPkgDir, 'bin')], { stdio: 'pipe' });
+                      }
+                      // 复制 package.json
+                      execFileSync('cp' as string, [path.join(localPkgDir, 'package.json'), path.join(globalPkgDir, 'package.json')], { shell: true, stdio: 'pipe' });
+
+                      console.log('[GUI] Fallback copy succeeded');
+                      sendEvent({ type: 'success', data: { message: `${packageName} updated via fallback copy (EBUSY bypass)` } });
+                    } catch (fallbackError) {
+                      console.error('[GUI] Fallback copy also failed:', fallbackError);
+                      sendEvent({
+                        type: 'error',
+                        data: {
+                          message: `Installation failed (EBUSY). Please close the editor (Trae/Cursor/VS Code) and try again, or run manually: npm install -g figma-dev-tools`,
+                        },
+                      });
+                    }
+                  } else {
+                    sendEvent({
+                      type: 'error',
+                      data: { message: `Installation failed (exit code ${code}). ${stderrBuffer.slice(-500)}` },
+                    });
+                  }
                 }
                 res.end();
               });

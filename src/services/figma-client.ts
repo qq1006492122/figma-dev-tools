@@ -870,10 +870,10 @@ export class FigmaClient {
    * 验证 Access Token 是否有效，并返回用户信息
    *
    * 通过调用 `/v1/me` 接口验证 Token 有效性。
-   * 该接口返回当前用户信息，Token 无效时返回 401。
+   * Token 有效时返回用户信息，无效时抛出详细错误（含 HTTP 状态码和原因）。
    *
-   * @returns Token 有效返回用户信息，无效或错误时返回 null
-   * @throws {Error} 仅在非认证类错误（如网络不通、DNS 失败）时抛出
+   * @returns Token 有效返回用户信息
+   * @throws {Error} Token 无效或网络错误时抛出，包含 HTTP 状态码和具体原因
    */
   async validateToken(): Promise<FigmaMeResponse | null> {
     try {
@@ -881,23 +881,32 @@ export class FigmaClient {
       return response.data;
     } catch (error) {
       const axiosError = error as AxiosError<FigmaApiErrorResponse>;
+      const i18n = getI18n();
+      const labels = i18n.t('errors.labels') as Record<string, unknown>;
 
-      // 如果是 HTTP 错误响应（4xx/5xx），返回 null 表示 Token 无效
+      // 如果是 HTTP 错误响应（4xx/5xx）
       if (axiosError.response) {
         const status = axiosError.response.status;
-        const message = axiosError.response.data?.message || axiosError.message;
+        const apiMessage = axiosError.response.data?.message || axiosError.message;
 
         // 详细日志：帮助诊断问题
-        console.warn(`[FigmaClient] Token validation failed (HTTP ${status}): ${message}`);
+        console.warn(`[FigmaClient] Token validation failed (HTTP ${status}): ${apiMessage}`);
 
-        // 401/403 属于认证问题，返回 null
-        if (status === 401 || status === 403) {
-          return null;
+        // 401/403 属于认证问题，抛出详细错误信息
+        if (status === 401) {
+          throw new Error((labels.tokenValidateFailed401 as (msg: string) => string)(apiMessage));
+        }
+        if (status === 403) {
+          throw new Error((labels.tokenValidateFailed403 as (msg: string) => string)(apiMessage));
         }
 
-        // 其他 HTTP 错误（如 429 Rate Limit、5xx 服务器错误）也返回 null
-        // 但这些错误会在请求拦截器中被进一步处理
-        return null;
+        // 429 Rate Limit - 请求过于频繁
+        if (status === 429) {
+          throw new Error(labels.tokenValidateFailed429 as string);
+        }
+
+        // 其他 HTTP 错误（如 5xx 服务器错误）
+        throw new Error((labels.tokenValidateFailedHttp as (status: number, msg: string) => string)(status, apiMessage));
       }
 
       // 无响应错误（网络问题、DNS 失败、超时等）
@@ -905,14 +914,13 @@ export class FigmaClient {
       const errorMessage = axiosError.message;
       console.warn(`[FigmaClient] Token validation network error (code: ${errorCode}): ${errorMessage}`);
 
-      // 网络类错误：ECONNABORTED(超时)、ETIMEDOUT(连接超时)、ENOTFOUND(DNS 失败)
-      // 这些错误应该抛出，让调用方知道是网络问题而非 Token 问题
+      // 网络类错误
       if (['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNRESET', 'EPIPE', 'EHOSTUNREACH'].includes(errorCode as string)) {
-        throw new Error(`网络连接失败: ${errorMessage}。请检查网络连接或代理设置`);
+        throw new Error((labels.tokenValidateFailedNetwork as (msg: string) => string)(errorMessage));
       }
 
       // 其他未知错误
-      return null;
+      throw new Error((labels.tokenValidateFailed as (msg: string) => string)(errorMessage));
     }
   }
 
