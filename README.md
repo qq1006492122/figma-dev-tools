@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.7
+# 🎨 Figma Dev Tools v1.4.8
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -71,6 +71,7 @@ const service = new BrowserFallbackService({
 
 | 版本    | 主题                    | 核心内容                                                                                                   |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.8  | --update EBUSY 兼容 + 文档   | --update 自动检测 EBUSY 并 robocopy 回退、CLI 文档补全（-v/--ver/--update）、修复重复图标、错误详情展示 |
 | v1.4.7  | Token 验证优化 + i18n   | Token 验证失败显示具体原因（HTTP 401/403/429）、GUI 错误详情展示、CLI 错误捕获增强、错误消息全面国际化       |
 | v1.4.4  | 付费墙兜底 + 性能优化   | 浏览器兜底截图、视觉近似模式、还原度评分、性能优化（实例池/缓存/分级超时）                                 |
 | v1.4.3  | 稳定性与安全加固        | GUI 请求体防护、循环引用检测、递归深度保护、缓存一致性                                                      |
@@ -567,8 +568,8 @@ npx figma-dev-tools -l zh-CN <command>
 | `figma-dev tutorial`         | 查看教程文档（别名 `help`，自动打开浏览器）           | `--no-browser`                                                        | v1.3.0     |
 | `figma-dev cache`            | **📦 缓存管理**（status/clear）                       | `status` / `clear -f`                                                 | v1.4.0     |
 | `figma-dev privacy`          | **🔒 隐私声明**（查看数据安全承诺 + .gitignore 检查）  | -                                                                     | v1.4.0     |
-| `figma-dev -v` / `--ver`    | **📌 查看当前版本号**                                | -                                                                     | v1.4.6     |
-| `figma-dev --update`        | **🔄 检查并更新到最新版本**（自动处理 EBUSY 文件占用） | -                                                                     | v1.4.6     |
+| `figma-dev -v` / `--ver`    | **📌 查看当前版本号**                                | -                                                                     | **v1.4.8** |
+| `figma-dev --update`        | **🔄 检查并更新到最新版本**（自动处理 EBUSY 文件占用） | -                                                                     | **v1.4.8** |
 
 **CLI 示例：**
 
@@ -583,10 +584,10 @@ figma-dev gui --port 3000
 figma-dev wizard --gui
 figma-dev init --gui
 
-# 📌 查看当前版本号（v1.4.6 新）
+# 📌 查看当前版本号（v1.4.8 新）
 figma-dev -v
 
-# 🔄 检查并更新到最新版本（v1.4.6 新，自动处理 EBUSY 文件占用）
+# 🔄 检查并更新到最新版本（v1.4.8 新，自动处理 EBUSY 文件占用）
 figma-dev --update
 
 # 设计规范预检（v1.3.2 新）
@@ -759,7 +760,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.7                            │
+│                      figma-dev-tools MCP Server v1.4.8                            │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │

@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.7
+# 🎨 Figma Dev Tools v1.4.8
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.8  | --update EBUSY + Docs           | --update auto-detects EBUSY, robocopy fallback, CLI docs (-v/--ver/--update), fix double icon, error detail display |
 | v1.4.7  | Token Validation + i18n        | Token validation shows specific error reasons (HTTP 401/403/429), GUI error detail display, CLI error capture improvements, full i18n for error messages |
 | v1.4.4  | Paywall Fallback + Performance | Browser fallback screenshot, visual approximation mode, fidelity scoring, performance optimization (pool/cache/tiered timeout) |
 | v1.4.3  | Stability & Security Hardening  | GUI request body guard, circular reference detection, recursion depth protection, cache consistency         |
@@ -407,8 +408,8 @@ npx figma-dev-tools <command> [options]
 | `figma-dev tutorial`         | View tutorial docs (alias `help`, auto-opens browser) | `--no-browser`                                                           | v1.3.0      |
 | `figma-dev cache`            | **📦 Cache management** (status/clear)             | `status` / `clear -f`                                                       | v1.4.0      |
 | `figma-dev privacy`          | **🔒 Privacy statement** (data safety + .gitignore check) | -                                                              | v1.4.0      |
-| `figma-dev -v` / `--ver`    | **📌 View current version**                        | -                                                                     | v1.4.6      |
-| `figma-dev --update`        | **🔄 Check and update to latest version** (auto-handles EBUSY file lock) | -                                                           | v1.4.6      |
+| `figma-dev -v` / `--ver`    | **📌 View current version**                        | -                                                                     | **v1.4.8** |
+| `figma-dev --update`        | **🔄 Check and update to latest version** (auto-handles EBUSY file lock) | -                                                           | **v1.4.8** |
 
 ### Common Examples
 
@@ -422,10 +423,10 @@ figma-dev gui --port 8080
 # Launch GUI mode via wizard command
 figma-dev wizard --gui
 
-# 📌 View current version (v1.4.6 new)
+# 📌 View current version (v1.4.8 new)
 figma-dev -v
 
-# 🔄 Check and update to latest version (v1.4.6 new, auto-handles EBUSY file lock)
+# 🔄 Check and update to latest version (v1.4.8 new, auto-handles EBUSY file lock)
 figma-dev --update
 
 # Design spec pre-check (v1.3.2 new)
