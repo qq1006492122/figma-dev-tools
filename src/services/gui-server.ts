@@ -40,9 +40,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const GUI_DIR = path.resolve(__dirname, '../../gui');
 
+/** package.json 路径（作为版本号唯一来源） */
+const PKG_JSON_PATH = path.resolve(__dirname, '../../package.json');
+
+/** 从 package.json 读取版本号 */
+function readVersion(): string {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(PKG_JSON_PATH, 'utf-8'));
+    return pkg.version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+const VERSION = readVersion();
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
-const VERSION = '1.4.8';
 
 interface EditorInfo {
   id: string;

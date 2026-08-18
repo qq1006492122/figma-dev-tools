@@ -446,11 +446,27 @@ export class FigmaClient {
     this._tokenIndex = nextIndex;
     const nextToken = this._tokens[nextIndex]!;
     this._accessToken = nextToken;
-    this._client.defaults.headers.common['Authorization'] = `Bearer ${nextToken}`;
-    this._client.defaults.headers.common['X-Figma-Token'] = nextToken;
+
+    // 清除旧的认证头
+    delete this._client.defaults.headers.common['Authorization'];
+    delete this._client.defaults.headers.common['X-Figma-Token'];
+    // 根据 Token 类型设置正确的认证头
+    if (nextToken.startsWith('figd_')) {
+      delete this._client.defaults.headers.common['Authorization'];
+      this._client.defaults.headers.common['X-Figma-Token'] = nextToken;
+    } else {
+      this._client.defaults.headers.common['Authorization'] = `Bearer ${nextToken}`;
+      this._client.defaults.headers.common['X-Figma-Token'] = nextToken;
+    }
     if (requestConfig) {
-      requestConfig.headers.set('Authorization', `Bearer ${nextToken}`);
-      requestConfig.headers.set('X-Figma-Token', nextToken);
+      requestConfig.headers.delete('Authorization');
+      requestConfig.headers.delete('X-Figma-Token');
+      if (nextToken.startsWith('figd_')) {
+        requestConfig.headers.set('X-Figma-Token', nextToken);
+      } else {
+        requestConfig.headers.set('Authorization', `Bearer ${nextToken}`);
+        requestConfig.headers.set('X-Figma-Token', nextToken);
+      }
     }
     return true;
   }
@@ -720,16 +736,22 @@ export class FigmaClient {
     const httpsAgent = proxyConfig ? this._createProxyAgent(proxyConfig) : undefined;
 
     // Axios 实例配置
-    // Figma API 要求使用 Authorization: Bearer 格式的认证头
-    // 同时保留 X-Figma-Token 作为向后兼容的备选
+    // Figma API 认证：
+    // - figd_ 类型 Token（新 Token 格式）必须使用 X-Figma-Token 请求头，不能使用 Authorization
+    // - 其他类型 Token（旧格式）使用 Authorization: Bearer 请求头
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this._accessToken.startsWith('figd_')) {
+      headers['X-Figma-Token'] = this._accessToken;
+    } else {
+      headers['Authorization'] = `Bearer ${this._accessToken}`;
+      headers['X-Figma-Token'] = this._accessToken;
+    }
     const axiosConfig: AxiosRequestConfig = {
       baseURL,
       timeout: config.timeout || DEFAULT_TIMEOUT,
-      headers: {
-        'Authorization': `Bearer ${this._accessToken}`,
-        'X-Figma-Token': this._accessToken,
-        'Content-Type': 'application/json',
-      },
+      headers,
       httpsAgent,
       proxy: false, // 使用 agent 而非 axios 内置 proxy
     };

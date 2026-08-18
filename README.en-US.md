@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.8
+# 🎨 Figma Dev Tools v1.4.9
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.9  | figd_ Token Auth Fix       | Fix figd_ token compatibility: must use X-Figma-Token header instead of Authorization header, token validation fully working |
 | v1.4.8  | --update EBUSY + Docs           | --update auto-detects EBUSY, robocopy fallback, CLI docs (-v/--ver/--update), fix double icon, error detail display |
 | v1.4.7  | Token Validation + i18n        | Token validation shows specific error reasons (HTTP 401/403/429), GUI error detail display, CLI error capture improvements, full i18n for error messages |
 | v1.4.4  | Paywall Fallback + Performance | Browser fallback screenshot, visual approximation mode, fidelity scoring, performance optimization (pool/cache/tiered timeout) |
