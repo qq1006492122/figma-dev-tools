@@ -4,7 +4,7 @@
  * 命令行工具，用于 tokens 同步、组件生成、代码导出等
  */
 
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2081,38 +2081,92 @@ if (rawArgs.includes('--update')) {
         if (isEBUSY) {
           updateSpinner.text = chalk.yellow(i18n.t('update.ebusyDetected') as string);
           try {
-            // 获取本地包路径（当前文件在 dist/cli/ 下）
-            const currentDir = path.dirname(fileURLToPath(import.meta.url));
-            const localPkgDir = path.resolve(currentDir, '../..');
-            // 获取全局 node_modules 路径
+            /**
+             * robocopy 在 Windows 下的退出码约定：
+             *   0 = 无文件复制，无错误
+             *   1 = 文件成功复制
+             *   2 = 目标有多余文件（/MIR 会删除，也正常）
+             *   >=8 = 真错误
+             * 因此退出码 <8 视为成功。
+             */
+            const runRobocopy = (srcDir: string, dstDir: string): void => {
+              const res = spawnSync(
+                'robocopy',
+                [srcDir, dstDir, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/R:2', '/W:1'],
+                { shell: true, stdio: 'pipe' },
+              );
+              const rc = res.status ?? -1;
+              if (rc >= 8) {
+                const err = new Error(`robocopy failed (exit ${rc})`);
+                (err as Error & { stderr?: string }).stderr = (res.stderr ?? '').toString();
+                throw err;
+              }
+            };
+
+            // 优先从 npm registry 拉取最新版 tgz，避免"从旧版本地目录复制"导致升级不完整
             const globalPrefix = execFileSync('npm', ['root', '-g'], { encoding: 'utf-8' }).trim();
             const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
+            void fs.ensureDirSync(globalPkgDir);
 
-            // 复制 dist/, gui/, bin/ 目录
-            if (os.platform() === 'win32') {
-              execFileSync('robocopy', [
-                path.join(localPkgDir, 'dist'),
-                path.join(globalPkgDir, 'dist'),
-                '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
-              ], { shell: true, stdio: 'pipe' });
-              execFileSync('robocopy', [
-                path.join(localPkgDir, 'gui'),
-                path.join(globalPkgDir, 'gui'),
-                '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
-              ], { shell: true, stdio: 'pipe' });
-              execFileSync('robocopy', [
-                path.join(localPkgDir, 'bin'),
-                path.join(globalPkgDir, 'bin'),
-                '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
-              ], { shell: true, stdio: 'pipe' });
-            } else {
-              execFileSync('cp', ['-r', path.join(localPkgDir, 'dist') + '/', path.join(globalPkgDir, 'dist')], { stdio: 'pipe' });
-              execFileSync('cp', ['-r', path.join(localPkgDir, 'gui') + '/', path.join(globalPkgDir, 'gui')], { stdio: 'pipe' });
-              execFileSync('cp', ['-r', path.join(localPkgDir, 'bin') + '/', path.join(globalPkgDir, 'bin')], { stdio: 'pipe' });
+            let srcPkgDir: string;
+            let tempCleanup: (() => void) | null = null;
+            try {
+              const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-dev-tools-upgrade-'));
+              tempCleanup = () => {
+                try { fs.removeSync(tmpRoot); } catch { /* ignore */ }
+              };
+              execFileSync('npm', ['pack', `figma-dev-tools@${latestVersion}`, '--pack-destination', tmpRoot], {
+                cwd: tmpRoot,
+                stdio: 'pipe',
+                shell: true,
+              });
+              const tgzList = fs.readdirSync(tmpRoot).filter((f) => f.endsWith('.tgz'));
+              if (tgzList.length === 0) {
+                throw new Error('npm pack produced no tgz');
+              }
+              const tgzPath = path.join(tmpRoot, tgzList[0] as string);
+              // 跨平台解 tgz：优先 tar，Node 22+ 内置支持
+              try {
+                execFileSync('tar', ['-xzf', tgzPath, '-C', tmpRoot], { stdio: 'pipe', shell: true });
+              } catch (tarErr) {
+                // 兜底：node -e 用 zlib + tar（fs-extra 不内置 tar，这里最小依赖用原生 zlib）
+                const untarScript = [
+                  "const fs=require('fs');const zlib=require('zlib');const tar=require('tar');",
+                  `tar.x({file:${JSON.stringify(tgzPath)},cwd:${JSON.stringify(tmpRoot)},sync:true});`,
+                ].join('');
+                try { execFileSync('node', ['-e', untarScript], { stdio: 'pipe', shell: true }); } catch {
+                  throw tarErr;
+                }
+              }
+              srcPkgDir = path.join(tmpRoot, 'package');
+              if (!fs.existsSync(srcPkgDir)) throw new Error('tgz extract failed: package/ not found');
+            } catch (packErr) {
+              // npm pack 兜底：从本地已安装目录复制（至少比完全失败好）
+              const currentDir = path.dirname(fileURLToPath(import.meta.url));
+              srcPkgDir = path.resolve(currentDir, '../..');
             }
-            // 复制 package.json
-            execFileSync('cp' as string, [path.join(localPkgDir, 'package.json'), path.join(globalPkgDir, 'package.json')], { shell: true, stdio: 'pipe' });
 
+            // 复制子目录 dist/gui/bin
+            const subdirs = ['dist', 'gui', 'bin'];
+            for (const d of subdirs) {
+              const s = path.join(srcPkgDir, d);
+              if (!fs.existsSync(s)) continue;
+              if (os.platform() === 'win32') {
+                runRobocopy(s, path.join(globalPkgDir, d));
+              } else {
+                execFileSync('cp', ['-r', `${s}/`, path.join(globalPkgDir, d)], { stdio: 'pipe' });
+              }
+            }
+            // 复制 package.json（win32 使用 cmd copy /Y，避免 cp 不存在）
+            const srcPkgJson = path.join(srcPkgDir, 'package.json');
+            const dstPkgJson = path.join(globalPkgDir, 'package.json');
+            if (os.platform() === 'win32') {
+              execFileSync('cmd', ['/c', 'copy', '/Y', srcPkgJson, dstPkgJson], { stdio: 'pipe', shell: true });
+            } else {
+              execFileSync('cp', [srcPkgJson, dstPkgJson], { stdio: 'pipe' });
+            }
+
+            if (tempCleanup) tempCleanup();
             updateSpinner.succeed(chalk.green(i18n.t('update.ebusyFallbackSuccess') as string));
           } catch (fallbackError) {
             updateSpinner.fail(

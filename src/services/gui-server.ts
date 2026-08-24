@@ -15,8 +15,9 @@
  *   POST /api/config/complete - Complete configuration and save settings
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -533,38 +534,83 @@ export async function startGuiServer(): Promise<http.Server> {
                     console.log('[GUI] Detected EBUSY error, trying fallback copy...');
                     sendEvent({ type: 'progress', data: { message: 'Detected file lock, trying fallback copy...' } });
                     try {
-                      // 获取当前包路径（gui-server.ts 在 dist/services/ 下）
-                      const currentDir = path.dirname(fileURLToPath(import.meta.url));
-                      const localPkgDir = path.resolve(currentDir, '../..');
-                      // 尝试在全局 node_modules 找到 figma-dev-tools 路径
+                      const runRobocopy = (srcDir: string, dstDir: string): void => {
+                        const res = spawnSync(
+                          'robocopy',
+                          [srcDir, dstDir, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/R:2', '/W:1'],
+                          { shell: true, stdio: 'pipe' },
+                        );
+                        const rc = res.status ?? -1;
+                        if (rc >= 8) {
+                          throw new Error(`robocopy failed (exit ${rc}): ${(res.stderr ?? '').toString()}`);
+                        }
+                      };
+                      const mkdirp = (p: string): void => {
+                        if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+                      };
+                      const rmtree = (p: string): void => {
+                        if (!fs.existsSync(p)) return;
+                        fs.rmSync(p, { recursive: true, force: true, maxRetries: 2 });
+                      };
+
+                      // 全局包目录
                       const globalPrefix = execFileSync(packageManager, ['root', '-g'], { encoding: 'utf-8' }).trim();
                       const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
+                      mkdirp(globalPkgDir);
 
-                      if (os.platform() === 'win32') {
-                        // Windows 下使用 robocopy
-                        execFileSync('robocopy', [
-                          path.join(localPkgDir, 'dist'),
-                          path.join(globalPkgDir, 'dist'),
-                          '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
-                        ], { shell: true, stdio: 'pipe' });
-                        execFileSync('robocopy', [
-                          path.join(localPkgDir, 'gui'),
-                          path.join(globalPkgDir, 'gui'),
-                          '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
-                        ], { shell: true, stdio: 'pipe' });
-                        execFileSync('robocopy', [
-                          path.join(localPkgDir, 'bin'),
-                          path.join(globalPkgDir, 'bin'),
-                          '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS',
-                        ], { shell: true, stdio: 'pipe' });
-                      } else {
-                        // Unix 使用 cp -r
-                        execFileSync('cp', ['-r', path.join(localPkgDir, 'dist') + '/', path.join(globalPkgDir, 'dist')], { stdio: 'pipe' });
-                        execFileSync('cp', ['-r', path.join(localPkgDir, 'gui') + '/', path.join(globalPkgDir, 'gui')], { stdio: 'pipe' });
-                        execFileSync('cp', ['-r', path.join(localPkgDir, 'bin') + '/', path.join(globalPkgDir, 'bin')], { stdio: 'pipe' });
+                      // 优先从 registry 拉最新 tgz 解压后覆盖（避免从旧版本地目录复制导致内容不新）
+                      let srcPkgDir: string;
+                      let tempRoot: string | null = null;
+                      try {
+                        tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-dev-tools-install-'));
+                        execFileSync('npm', ['pack', `${packageName}@latest`, '--pack-destination', tempRoot], {
+                          cwd: tempRoot,
+                          stdio: 'pipe',
+                          shell: true,
+                        });
+                        const tgzList = fs.readdirSync(tempRoot).filter((f) => f.endsWith('.tgz'));
+                        if (tgzList.length === 0) throw new Error('npm pack produced no tgz');
+                        const tgzPath = path.join(tempRoot, tgzList[0] as string);
+                        try {
+                          execFileSync('tar', ['-xzf', tgzPath, '-C', tempRoot], { stdio: 'pipe', shell: true });
+                        } catch (tarErr) {
+                          const untarScript =
+                            "require('tar').x({file:" + JSON.stringify(tgzPath) +
+                            ",cwd:" + JSON.stringify(tempRoot) + ",sync:true})";
+                          try { execFileSync('node', ['-e', untarScript], { stdio: 'pipe', shell: true }); } catch {
+                            throw tarErr;
+                          }
+                        }
+                        srcPkgDir = path.join(tempRoot, 'package');
+                        if (!fs.existsSync(srcPkgDir)) throw new Error('tgz extract failed: package/ not found');
+                      } catch (packErr) {
+                        // 兜底：从本地已加载的包目录复制
+                        const currentDir = path.dirname(fileURLToPath(import.meta.url));
+                        srcPkgDir = path.resolve(currentDir, '../..');
                       }
-                      // 复制 package.json
-                      execFileSync('cp' as string, [path.join(localPkgDir, 'package.json'), path.join(globalPkgDir, 'package.json')], { shell: true, stdio: 'pipe' });
+
+                      const subdirs = ['dist', 'gui', 'bin'];
+                      for (const d of subdirs) {
+                        const s = path.join(srcPkgDir, d);
+                        if (!fs.existsSync(s)) continue;
+                        if (os.platform() === 'win32') {
+                          runRobocopy(s, path.join(globalPkgDir, d));
+                        } else {
+                          execFileSync('cp', ['-r', `${s}/`, path.join(globalPkgDir, d)], { stdio: 'pipe' });
+                        }
+                      }
+                      const srcPkgJson = path.join(srcPkgDir, 'package.json');
+                      const dstPkgJson = path.join(globalPkgDir, 'package.json');
+                      if (os.platform() === 'win32') {
+                        execFileSync('cmd', ['/c', 'copy', '/Y', srcPkgJson, dstPkgJson], { stdio: 'pipe', shell: true });
+                      } else {
+                        execFileSync('cp', [srcPkgJson, dstPkgJson], { stdio: 'pipe' });
+                      }
+
+                      if (tempRoot) {
+                        // 延迟清理，避免文件刚复制完仍被占用
+                        setTimeout(() => { try { rmtree(tempRoot as string); } catch { /* ignore */ } }, 5000);
+                      }
 
                       console.log('[GUI] Fallback copy succeeded');
                       sendEvent({ type: 'success', data: { message: `${packageName} updated via fallback copy (EBUSY bypass)` } });
