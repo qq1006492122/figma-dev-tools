@@ -321,24 +321,29 @@ export interface ErrorCodeInfo {
  * @returns 结构化的错误信息
  */
 export function getErrorInfo(errorCode: string, defaultMessage?: string): ErrorCodeInfo {
+  // 防御：入口归一化，避免 null / undefined / 非字符串调用方导致下游 title/reason 变 null，
+  // 再次触发 "Cannot read properties of undefined" 链式崩溃。
+  const code = errorCode == null ? 'UNKNOWN' : String(errorCode);
+  const fallbackMsg = defaultMessage == null ? code : String(defaultMessage);
+
   const i18n = getI18n();
   const messages = i18n.getMessages();
-  const errors = (messages.cli as Record<string, unknown>)?.errors as Record<string, unknown>;
-  const codes = errors.codes as Record<string, ErrorCodeInfo> | undefined;
+  const errors = ((messages.cli as Record<string, unknown>)?.errors ?? {}) as Record<string, unknown>;
+  const codes = (errors.codes ?? {}) as Record<string, ErrorCodeInfo>;
 
-  if (codes && codes[errorCode]) {
-    return codes[errorCode]!;
+  if (codes[code]) {
+    return codes[code]!;
   }
 
   const unknownError = errors.unknown as ((msg: string) => ErrorCodeInfo) | undefined;
   if (unknownError) {
-    return unknownError(defaultMessage || errorCode);
+    return unknownError(fallbackMsg);
   }
 
   return {
-    code: errorCode,
-    title: defaultMessage || errorCode,
-    reason: defaultMessage || errorCode,
+    code,
+    title: fallbackMsg,
+    reason: fallbackMsg,
     solutions: [],
   };
 }

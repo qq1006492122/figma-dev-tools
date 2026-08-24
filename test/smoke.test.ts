@@ -16,6 +16,9 @@ import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+import { initI18nSync, getErrorInfo, formatError } from '../src/i18n/index.js';
+import { FigmaDevError, FigmaApiError } from '../src/utils/errors.js';
+
 import {
   BrowserFallbackService,
   getBrowserFallbackService,
@@ -244,5 +247,80 @@ describe('冒烟测试：v1.4.4 新增服务', () => {
       // 横幅应包含还原度数字
       expect(result.banner).toMatch(/\d+.*%/);
     });
+  });
+});
+
+/**
+ * 发布级回归测试（P0 线上出现过的 bug）
+ * 任何版本改动导致以下任一失败，必须视为阻断发布。
+ */
+describe('发布级回归：i18n 路径 & Token 错误 & codes 空指针', () => {
+  beforeAll(() => {
+    // 强制初始化中英文 i18n，确保 messages 已挂载
+    initI18nSync();
+  });
+
+  it('i18n 路径应为 cli.errors.labels（而非 errors.labels），labels 返回对象且 TOKEN_INVALID/NETWORK_ERROR 有 title+reason', () => {
+    // 端到端：通过公共接口触发错误码读取，复现用户遇到的 "labels.tokenXXX is not a function" 链路
+    const info1 = getErrorInfo('TOKEN_INVALID');
+    expect(info1).toBeTypeOf('object');
+    expect(info1.title).toBeTypeOf('string');
+    expect((info1.title as string).length).toBeGreaterThan(0);
+    expect(info1.reason).toBeTypeOf('string');
+    expect((info1.reason as string).length).toBeGreaterThan(0);
+    expect(Array.isArray(info1.solutions)).toBe(true);
+
+    const info2 = getErrorInfo('NETWORK_ERROR');
+    expect(info2.title).toBeTypeOf('string');
+    expect(info2.reason).toBeTypeOf('string');
+    expect((info2.title as string).length).toBeGreaterThan(0);
+    expect((info2.reason as string).length).toBeGreaterThan(0);
+  });
+
+  it('getErrorInfo 对任何入参（包括空字符串/未知 code/null/undefined）应始终返回 ErrorCodeInfo 对象，绝不能抛 Cannot read properties of undefined (reading codes)', () => {
+    const cases: Array<[string | null | undefined, string]> = [
+      ['NETWORK_ERROR', '已知 code'],
+      ['__DOES_NOT_EXIST__', '未知 code'],
+      ['', '空字符串'],
+      [null as unknown as string, 'null'],
+      [undefined as unknown as string, 'undefined'],
+    ];
+    for (const [code, name] of cases) {
+      expect(() => getErrorInfo(code), `${name} getErrorInfo 不应 throw`).not.toThrow();
+      const info = getErrorInfo(code);
+      expect(info, `${name} getErrorInfo 应返回对象`).toBeTypeOf('object');
+      expect(info, `${name} getErrorInfo 不应返回 null`).not.toBeNull();
+      expect(info.title, `${name} info.title 应为字符串`).toBeTypeOf('string');
+      expect(info.reason, `${name} info.reason 应为字符串`).toBeTypeOf('string');
+      expect(Array.isArray(info.solutions), `${name} info.solutions 应为数组`).toBe(true);
+    }
+  });
+
+  it('FigmaDevError.toUserString() / FigmaApiError.toUserString() 不应抛 "labels.tokenXXX is not a function"', () => {
+    const err1 = new FigmaDevError('TOKEN_INVALID');
+    expect(() => err1.toUserString(), 'TOKEN_INVALID toUserString').not.toThrow();
+    const msg1 = err1.toUserString();
+    expect(msg1).toBeTypeOf('string');
+    expect(msg1.length).toBeGreaterThan(0);
+    expect(msg1).toContain('[TOKEN_INVALID]');
+
+    const err2 = new FigmaDevError('NETWORK_ERROR');
+    expect(() => err2.toUserString(), 'NETWORK_ERROR toUserString').not.toThrow();
+    expect(err2.toUserString().length).toBeGreaterThan(0);
+
+    // FigmaApiError（带 cause HTTP 状态）拼装时会读取 cli.errors.labels，确保路径不炸
+    const apiErr = new FigmaApiError('FORBIDDEN', 403, {
+      reason: 'Access denied (test)',
+      solution: 'Check your token scope',
+    });
+    expect(() => apiErr.toUserString(), 'FORBIDDEN FigmaApiError toUserString').not.toThrow();
+    expect(apiErr.toUserString().length).toBeGreaterThan(0);
+    expect(apiErr.status).toBe(403);
+  });
+
+  it('formatError 对未知 code 能走 defaultMessage 兜底，不崩溃', () => {
+    const msg = formatError('__NOPE__', 'fallback ok');
+    expect(msg).toBeTypeOf('string');
+    expect(msg).toContain('fallback ok');
   });
 });

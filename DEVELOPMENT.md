@@ -1,4 +1,4 @@
-# figma-dev-tools v1.4.12 开发指南
+# figma-dev-tools v1.4.13 开发指南
 
 ## 项目概述
 

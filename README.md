@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.12
+# 🎨 Figma Dev Tools v1.4.13
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -71,6 +71,7 @@ const service = new BrowserFallbackService({
 
 | 版本    | 主题                    | 核心内容                                                                                                   |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.13 | 发布级回归加固 + getErrorInfo 防御归一化 | 新增 smoke 发布级回归用例×4（i18n 路径/codes 空指针/错误格式化）；getErrorInfo 入口 null/undefined 归一化避免字段变 null 再次链式崩溃；build 0 错 + 99 case 全通过 |
 | v1.4.12 | --update EBUSY 兜底强化 + Windows robocopy 修复 | 修复 robocopy 误报失败（退出码<8 视为成功）、Windows cp 不存在改用 copy /Y、升级从 npm pack 拉取新版 tgz 覆盖全局，解决编辑器占用导致 npm 全局更新 EBUSY rename 失败 |
 | v1.4.11 | i18n 路径修复 + Token 交互增强 | 修复 Token 验证 i18n 路径错误（cli.errors.labels）、getErrorInfo codes 空指针、README QUICKSTART 链接 404；新增 FIGMA_ACCESS_TOKEN 环境变量 + password→input 降级兜底 |
 | v1.4.10 | 版本号统一 + figd_ Token 认证修复 | 修复 figd_ 类型 Token 认证（X-Figma-Token 头），CLI/GUI 版本号统一从 package.json 读取，所有文档版本号同步更新 |
@@ -764,7 +765,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.12                           │
+│                      figma-dev-tools MCP Server v1.4.13                           │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │

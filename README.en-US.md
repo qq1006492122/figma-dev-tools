@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.12
+# 🎨 Figma Dev Tools v1.4.13
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.13 | Release-Grade Regression Hardening + getErrorInfo Defensive Normalization | Add 4 smoke regressions (i18n path / codes null-pointer / error formatting); harden getErrorInfo entry against null/undefined so title/reason are always strings; tsc 0 errors + 99 tests green |
 | v1.4.12 | --update EBUSY Fallback Hardening + Windows robocopy Fix | Treat robocopy rc<8 as success; Windows `cp`→`copy /Y` for package.json; upgrade extracts latest tgz from npm pack then overwrites global dir, bypasses EBUSY rename locks caused by running editor processes |
 | v1.4.11 | i18n Path Fix + Token Input Enhancement | Fix Token validation i18n path error (cli.errors.labels), getErrorInfo codes null-pointer, README QUICKSTART 404 links; add FIGMA_ACCESS_TOKEN env fallback + password→input graceful degradation |
 | v1.4.10 | Version Unification + figd_ Token Auth Fix | Fix figd_ token auth (X-Figma-Token header), CLI/GUI version read from package.json, sync all docs version numbers |

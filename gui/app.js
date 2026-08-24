@@ -2,8 +2,8 @@ const I18N = {
   'zh-CN': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: '配置向导 v1.4.12',
-      footer: 'Figma Dev Tools v1.4.12 — 在 AI 编辑器中直接调用 MCP 工具',
+      subtitle: '配置向导 v1.4.13',
+      footer: 'Figma Dev Tools v1.4.13 — 在 AI 编辑器中直接调用 MCP 工具',
     },
     steps: {
       welcome: '欢迎',
@@ -124,8 +124,8 @@ const I18N = {
   'en-US': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: 'Setup Wizard v1.4.12',
-      footer: 'Figma Dev Tools v1.4.12 — Use MCP tools directly in AI editors',
+      subtitle: 'Setup Wizard v1.4.13',
+      footer: 'Figma Dev Tools v1.4.13 — Use MCP tools directly in AI editors',
     },
     steps: {
       welcome: 'Welcome',
