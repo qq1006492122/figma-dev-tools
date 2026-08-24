@@ -258,6 +258,14 @@ tokenCmd
     let tokenValue = cmdOptions.token;
 
     if (!tokenValue) {
+      // 1. 优先尝试从环境变量读取
+      if (process.env.FIGMA_ACCESS_TOKEN && process.env.FIGMA_ACCESS_TOKEN.length >= 20 && process.env.FIGMA_ACCESS_TOKEN.startsWith('figd_')) {
+        tokenValue = process.env.FIGMA_ACCESS_TOKEN;
+        console.log(chalk.cyan(i18n.t('cli.commands.token.envFallbackUsed') as string));
+      }
+    }
+
+    if (!tokenValue) {
       console.log(
         boxen(
           chalk.cyan((i18n.t('cli.commands.token.secureStorage') as string) + '\n\n') +
@@ -265,19 +273,34 @@ tokenCmd
             chalk.gray('- macOS: Keychain\n') +
             chalk.gray('- Windows: Credential Manager\n') +
             chalk.gray((('- Linux: libsecret (' + i18n.t('cli.commands.token.linuxFallback')) as string) + ')\n\n') +
-            chalk.yellow(i18n.t('cli.commands.token.privacyNotice') as string),
+            chalk.yellow(i18n.t('cli.commands.token.privacyNotice') as string) +
+            '\n\n' +
+            chalk.gray(i18n.t('cli.commands.token.pasteHint') as string),
           { padding: 1, borderColor: 'cyan', margin: { top: 1, bottom: 1 } },
         ),
       );
 
-      tokenValue = await password({
-        message: i18n.t('cli.commands.token.pastePrompt') as string,
-        validate: (v: string) => {
-          if (!v || v.length < 20) return i18n.t('cli.commands.token.invalidLength') as string;
-          if (!v.startsWith('figd_')) return i18n.t('cli.commands.token.invalidPrefix') as string;
-          return true;
-        },
-      });
+      // 校验函数
+      const tokenValidate = (v: string): string | boolean => {
+        if (!v || v.length < 20) return i18n.t('cli.commands.token.invalidLength') as string;
+        if (!v.startsWith('figd_')) return i18n.t('cli.commands.token.invalidPrefix') as string;
+        return true;
+      };
+
+      // 2. 优先使用 password（掩码），失败则降级为普通 input
+      try {
+        tokenValue = await password({
+          message: i18n.t('cli.commands.token.pastePrompt') as string,
+          validate: tokenValidate,
+        });
+      } catch (passwordError) {
+        // password 输入在部分 Windows 终端上会卡住或无法粘贴，降级为明文 input
+        console.warn(chalk.yellow('⚠️  掩码输入不兼容当前终端，已切换为明文模式'));
+        tokenValue = await input({
+          message: i18n.t('cli.commands.token.pastePromptFallback') as string,
+          validate: tokenValidate,
+        });
+      }
     }
 
     const spinner = ora(i18n.t('cli.commands.token.saving') as string).start();
@@ -1650,14 +1673,30 @@ program
         await open('https://www.figma.com/developers/api#access-tokens');
       }
 
-      const tokenValue = await password({
-        message: i18n.t('cli.commands.token.pastePrompt') as string,
-        validate: (v: string) => {
-          if (!v || v.length < 20) return i18n.t('cli.commands.token.invalidLength') as string;
-          if (!v.startsWith('figd_')) return i18n.t('cli.commands.token.invalidPrefix') as string;
-          return true;
-        },
-      });
+      console.log(chalk.gray(i18n.t('cli.commands.token.pasteHint') as string));
+      console.log('');
+
+      // 校验函数
+      const wizardTokenValidate = (v: string): string | boolean => {
+        if (!v || v.length < 20) return i18n.t('cli.commands.token.invalidLength') as string;
+        if (!v.startsWith('figd_')) return i18n.t('cli.commands.token.invalidPrefix') as string;
+        return true;
+      };
+
+      let tokenValue: string;
+      try {
+        tokenValue = await password({
+          message: i18n.t('cli.commands.token.pastePrompt') as string,
+          validate: wizardTokenValidate,
+        });
+      } catch (passwordError) {
+        // password 输入在部分 Windows 终端上会卡住或无法粘贴，降级为明文 input
+        console.warn(chalk.yellow('⚠️  掩码输入不兼容当前终端，已切换为明文模式'));
+        tokenValue = await input({
+          message: i18n.t('cli.commands.token.pastePromptFallback') as string,
+          validate: wizardTokenValidate,
+        });
+      }
 
       const tokenName = await input({
         message: i18n.t('cli.commands.wizard.tokenName') as string,

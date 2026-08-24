@@ -323,7 +323,7 @@ export interface ErrorCodeInfo {
 export function getErrorInfo(errorCode: string, defaultMessage?: string): ErrorCodeInfo {
   const i18n = getI18n();
   const messages = i18n.getMessages();
-  const errors = messages.errors as Record<string, unknown>;
+  const errors = (messages.cli as Record<string, unknown>)?.errors as Record<string, unknown>;
   const codes = errors.codes as Record<string, ErrorCodeInfo> | undefined;
 
   if (codes && codes[errorCode]) {

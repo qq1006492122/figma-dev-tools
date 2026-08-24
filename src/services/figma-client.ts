@@ -488,7 +488,7 @@ export class FigmaClient {
 
     // 从 i18n 取 HTTP 失败原因结构（按用户 GUI 选定语言解析）
     const i18n = getI18n();
-    const httpFailures = i18n.t('errors.httpFailures') as Record<
+    const httpFailures = i18n.t('cli.errors.httpFailures') as Record<
       string,
       Record<string, { reason: string | ((status: number) => string); solution: string }> | { reason: string | ((status: number) => string); solution: string }
     >;
@@ -670,7 +670,7 @@ export class FigmaClient {
 
       const ageHours = Math.round(stale.ageMs / (60 * 60 * 1000));
       const i18n = getI18n();
-      const labels = i18n.t('errors.labels') as {
+      const labels = i18n.t('cli.errors.labels') as {
         staleCacheWarning: (hours: number) => string;
       };
       this._lastWarning = labels.staleCacheWarning(ageHours);
@@ -727,7 +727,7 @@ export class FigmaClient {
     const baseURL = config.baseURL || DEFAULT_BASE_URL;
     if (!this._isLocalhost(baseURL) && !baseURL.startsWith(HTTPS_PROTOCOL)) {
       const i18n = getI18n();
-      const labels = i18n.t('errors.labels') as { httpsRequired: string };
+      const labels = i18n.t('cli.errors.labels') as { httpsRequired: string };
       throw new Error(labels.httpsRequired);
     }
 
@@ -817,12 +817,12 @@ export class FigmaClient {
         if (error.request) {
           // 请求已发出但未收到响应（网络问题、DNS 失败、超时等）。交给陈旧缓存降级逻辑处理。
           const i18n = getI18n();
-          const labels = i18n.t('errors.labels') as { networkError: string };
+          const labels = i18n.t('cli.errors.labels') as { networkError: string };
           throw new Error(labels.networkError);
         }
 
         const i18n = getI18n();
-        const labels = i18n.t('errors.labels') as { networkErrorWithMessage: (msg: string) => string };
+        const labels = i18n.t('cli.errors.labels') as { networkErrorWithMessage: (msg: string) => string };
         throw new Error(labels.networkErrorWithMessage(error.message));
       },
     );
@@ -904,7 +904,7 @@ export class FigmaClient {
     } catch (error) {
       const axiosError = error as AxiosError<FigmaApiErrorResponse>;
       const i18n = getI18n();
-      const labels = i18n.t('errors.labels') as Record<string, unknown>;
+      const labels = i18n.t('cli.errors.labels') as Record<string, unknown>;
 
       // 如果是 HTTP 错误响应（4xx/5xx）
       if (axiosError.response) {

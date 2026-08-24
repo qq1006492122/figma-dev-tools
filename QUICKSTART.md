@@ -1,7 +1,7 @@
-# ⚡ figma-dev-tools 快速上手指南 v1.4.10
+# ⚡ figma-dev-tools 快速上手指南 v1.4.11
 
 > 中 / [English](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)
-> 从安装到产出第一个 Figma → React/Vue 组件，约 5 分钟。本文由原 `INTEGRATION_GUIDE` / `QUICKSTART` / 落地速览合并简化而来，内容与 v1.4.10 实际实现一致。
+> 从安装到产出第一个 Figma → React/Vue 组件，约 5 分钟。本文由原 `INTEGRATION_GUIDE` / `QUICKSTART` / 落地速览合并简化而来，内容与 v1.4.11 实际实现一致。
 
 ---
 

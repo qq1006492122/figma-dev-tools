@@ -1,7 +1,7 @@
-# ⚡ figma-dev-tools Quick Start Guide v1.4.10
+# ⚡ figma-dev-tools Quick Start Guide v1.4.11
 
 > [中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md) / English
-> From install to your first Figma → React/Vue component in ~5 minutes. This is the merged & simplified version of the former `INTEGRATION_GUIDE` / `QUICKSTART` / landing overview, aligned with the actual v1.4.10 implementation.
+> From install to your first Figma → React/Vue component in ~5 minutes. This is the merged & simplified version of the former `INTEGRATION_GUIDE` / `QUICKSTART` / landing overview, aligned with the actual v1.4.11 implementation.
 
 ---
 

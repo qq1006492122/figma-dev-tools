@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.10
+# 🎨 Figma Dev Tools v1.4.11
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.11 | i18n Path Fix + Token Input Enhancement | Fix Token validation i18n path error (cli.errors.labels), getErrorInfo codes null-pointer, README QUICKSTART 404 links; add FIGMA_ACCESS_TOKEN env fallback + password→input graceful degradation |
 | v1.4.10 | Version Unification + figd_ Token Auth Fix | Fix figd_ token auth (X-Figma-Token header), CLI/GUI version read from package.json, sync all docs version numbers |
 | v1.4.9  | figd_ Token Auth Fix       | Fix figd_ token compatibility: must use X-Figma-Token header instead of Authorization header, token validation fully working |
 | v1.4.8  | --update EBUSY + Docs           | --update auto-detects EBUSY, robocopy fallback, CLI docs (-v/--ver/--update), fix double icon, error detail display |
@@ -108,7 +109,7 @@ const service = new BrowserFallbackService({
 
 ## 🚀 Quick Start
 
-> 📚 Want a condensed, version-synced walkthrough? See **[QUICKSTART.md](QUICKSTART.md)** (中文) / **[QUICKSTART.en-US.md](QUICKSTART.en-US.md)** (English). The sections below cover the details.
+> 📚 Want a condensed, version-synced walkthrough? See **[QUICKSTART.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md)** (中文) / **[QUICKSTART.en-US.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)** (English). The sections below cover the details.
 
 ### Option 0: GUI Visual Configuration (Beginner Recommended ⭐)
 

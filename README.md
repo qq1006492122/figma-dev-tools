@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.10
+# 🎨 Figma Dev Tools v1.4.11
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -71,6 +71,7 @@ const service = new BrowserFallbackService({
 
 | 版本    | 主题                    | 核心内容                                                                                                   |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.11 | i18n 路径修复 + Token 交互增强 | 修复 Token 验证 i18n 路径错误（cli.errors.labels）、getErrorInfo codes 空指针、README QUICKSTART 链接 404；新增 FIGMA_ACCESS_TOKEN 环境变量 + password→input 降级兜底 |
 | v1.4.10 | 版本号统一 + figd_ Token 认证修复 | 修复 figd_ 类型 Token 认证（X-Figma-Token 头），CLI/GUI 版本号统一从 package.json 读取，所有文档版本号同步更新 |
 | v1.4.9  | figd_ Token 认证修复       | 修复 figd_ 类型 Token 必须使用 X-Figma-Token 请求头而非 Authorization 的兼容性问题，Token 验证全面通过 |
 | v1.4.8  | --update EBUSY 兼容 + 文档   | --update 自动检测 EBUSY 并 robocopy 回退、CLI 文档补全（-v/--ver/--update）、修复重复图标、错误详情展示 |
@@ -111,7 +112,7 @@ const service = new BrowserFallbackService({
 
 ## 🚀 快速开始
 
-> 📚 想要一份精简、与版本同步的速成指南？见 **[QUICKSTART.md](QUICKSTART.md)**（中文）/ **[QUICKSTART.en-US.md](QUICKSTART.en-US.md)**（英文）。以下为详细说明。
+> 📚 想要一份精简、与版本同步的速成指南？见 **[QUICKSTART.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md)**（中文）/ **[QUICKSTART.en-US.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)**（英文）。以下为详细说明。
 
 ### 方式零：GUI 可视化配置（小白推荐 ⭐）
 
@@ -762,7 +763,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.10                           │
+│                      figma-dev-tools MCP Server v1.4.11                           │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │

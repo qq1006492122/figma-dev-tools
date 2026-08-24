@@ -395,7 +395,7 @@ class TokenStoreImpl implements TokenStore {
     const validation = await this.validateTokenWithApi(token);
     if (!validation.valid) {
       const i18n = getI18n();
-      const labels = i18n.t('errors.labels') as Record<string, unknown>;
+      const labels = i18n.t('cli.errors.labels') as Record<string, unknown>;
       throw new Error(
         (labels.tokenInvalid as (error: string) => string)(validation.error || (labels.tokenInvalidDefault as string)),
       );
@@ -553,7 +553,7 @@ class TokenStoreImpl implements TokenStore {
     const validation = await this.validateTokenWithApi(token);
     if (!validation.valid) {
       const i18n = getI18n();
-      const labels = i18n.t('errors.labels') as Record<string, unknown>;
+      const labels = i18n.t('cli.errors.labels') as Record<string, unknown>;
       throw new Error(
         (labels.tokenInvalid as (error: string) => string)(validation.error || (labels.tokenInvalidDefault as string)),
       );
@@ -808,7 +808,7 @@ class TokenStoreImpl implements TokenStore {
       }
 
       const i18n = getI18n();
-      const labels = i18n.t('errors.labels') as Record<string, unknown>;
+      const labels = i18n.t('cli.errors.labels') as Record<string, unknown>;
       return {
         valid: false,
         status: 'invalid',
