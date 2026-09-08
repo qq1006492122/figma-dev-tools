@@ -2055,8 +2055,14 @@ if (rawArgs.includes('--update')) {
 
       console.log(`\n${chalk.yellow(i18n.t('update.updateAvailable', currentVersion, latestVersion) as string)}`);
       const updateSpinner = ora(chalk.blue(i18n.t('update.updating') as string)).start();
+
+      // ============ 平台差异：Windows 下用 .cmd 后缀避免 Git Bash/MINGW64 MSYS 版本冲突 ============
+      const isWin = os.platform() === 'win32';
+      const npmBin = isWin ? 'npm.cmd' : 'npm';
+      const cmdBin = isWin ? 'cmd.exe' : 'cmd';
+
       try {
-        execSync('npm install -g figma-dev-tools', { stdio: 'pipe' });
+        execFileSync(npmBin, ['install', '-g', 'figma-dev-tools'], { stdio: 'pipe', shell: true });
         updateSpinner.succeed(chalk.green(i18n.t('update.success') as string));
       } catch (execError) {
         // 提取 npm 错误详情
@@ -2085,26 +2091,29 @@ if (rawArgs.includes('--update')) {
              * robocopy 在 Windows 下的退出码约定：
              *   0 = 无文件复制，无错误
              *   1 = 文件成功复制
-             *   2 = 目标有多余文件（/MIR 会删除，也正常）
+             *   2 = 目标有多余文件（/E 不删除，正常）
              *   >=8 = 真错误
              * 因此退出码 <8 视为成功。
+             *
+             * 注意：使用 /E 而非 /MIR——/MIR 会删除目标多余文件，但被 Trae/MCP 进程
+             * 锁住的文件无法删除，反而导致整个命令失败。/E 只覆盖/新增，忽略删不动的文件。
              */
             const runRobocopy = (srcDir: string, dstDir: string): void => {
               const res = spawnSync(
                 'robocopy',
-                [srcDir, dstDir, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/R:2', '/W:1'],
+                [srcDir, dstDir, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/R:2', '/W:1', '/XF', '*.ps1'],
                 { shell: true, stdio: 'pipe' },
               );
               const rc = res.status ?? -1;
+              // robocopy 退出码 <8 为成功（含 rc=0/1/2/4），>=8 才是真错误
               if (rc >= 8) {
-                const err = new Error(`robocopy failed (exit ${rc})`);
-                (err as Error & { stderr?: string }).stderr = (res.stderr ?? '').toString();
-                throw err;
+                const errMsg = (res.stderr ?? '').toString() || (res.stdout ?? '').toString();
+                throw new Error(`robocopy exit=${rc}: ${errMsg.trim()}`);
               }
             };
 
-            // 优先从 npm registry 拉取最新版 tgz，避免"从旧版本地目录复制"导致升级不完整
-            const globalPrefix = execFileSync('npm', ['root', '-g'], { encoding: 'utf-8' }).trim();
+            // ============ 统一用 npm.cmd 取全局路径，避免 MSYS npm 返回 MSYS 风格路径 ============
+            const globalPrefix = execFileSync(npmBin, ['root', '-g'], { encoding: 'utf-8', shell: true }).trim();
             const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
             void fs.ensureDirSync(globalPkgDir);
 
@@ -2115,7 +2124,7 @@ if (rawArgs.includes('--update')) {
               tempCleanup = () => {
                 try { fs.removeSync(tmpRoot); } catch { /* ignore */ }
               };
-              execFileSync('npm', ['pack', `figma-dev-tools@${latestVersion}`, '--pack-destination', tmpRoot], {
+              execFileSync(npmBin, ['pack', `figma-dev-tools@${latestVersion}`, '--pack-destination', tmpRoot], {
                 cwd: tmpRoot,
                 stdio: 'pipe',
                 shell: true,
@@ -2125,18 +2134,15 @@ if (rawArgs.includes('--update')) {
                 throw new Error('npm pack produced no tgz');
               }
               const tgzPath = path.join(tmpRoot, tgzList[0] as string);
-              // 跨平台解 tgz：优先 tar，Node 22+ 内置支持
+              // 跨平台解 tgz：优先 tar，兜底用 node 内置 zlib + tar
               try {
                 execFileSync('tar', ['-xzf', tgzPath, '-C', tmpRoot], { stdio: 'pipe', shell: true });
-              } catch (tarErr) {
-                // 兜底：node -e 用 zlib + tar（fs-extra 不内置 tar，这里最小依赖用原生 zlib）
+              } catch {
                 const untarScript = [
                   "const fs=require('fs');const zlib=require('zlib');const tar=require('tar');",
                   `tar.x({file:${JSON.stringify(tgzPath)},cwd:${JSON.stringify(tmpRoot)},sync:true});`,
                 ].join('');
-                try { execFileSync('node', ['-e', untarScript], { stdio: 'pipe', shell: true }); } catch {
-                  throw tarErr;
-                }
+                execFileSync('node', ['-e', untarScript], { stdio: 'pipe', shell: true });
               }
               srcPkgDir = path.join(tmpRoot, 'package');
               if (!fs.existsSync(srcPkgDir)) throw new Error('tgz extract failed: package/ not found');
@@ -2151,27 +2157,30 @@ if (rawArgs.includes('--update')) {
             for (const d of subdirs) {
               const s = path.join(srcPkgDir, d);
               if (!fs.existsSync(s)) continue;
-              if (os.platform() === 'win32') {
+              if (isWin) {
                 runRobocopy(s, path.join(globalPkgDir, d));
               } else {
                 execFileSync('cp', ['-r', `${s}/`, path.join(globalPkgDir, d)], { stdio: 'pipe' });
               }
             }
-            // 复制 package.json（win32 使用 cmd copy /Y，避免 cp 不存在）
+            // 复制 package.json（Windows 用 cmd.exe copy /Y 避免 cp 不存在；shell: true 确保 cmd 可解析 .exe）
             const srcPkgJson = path.join(srcPkgDir, 'package.json');
             const dstPkgJson = path.join(globalPkgDir, 'package.json');
-            if (os.platform() === 'win32') {
-              execFileSync('cmd', ['/c', 'copy', '/Y', srcPkgJson, dstPkgJson], { stdio: 'pipe', shell: true });
+            if (isWin) {
+              execFileSync(cmdBin, ['/c', 'copy', '/Y', srcPkgJson, dstPkgJson], { stdio: 'pipe', shell: true });
             } else {
               execFileSync('cp', [srcPkgJson, dstPkgJson], { stdio: 'pipe' });
             }
 
             if (tempCleanup) tempCleanup();
             updateSpinner.succeed(chalk.green(i18n.t('update.ebusyFallbackSuccess') as string));
+            console.log(chalk.gray(i18n.t('update.restartHint') as string));
           } catch (fallbackError) {
             updateSpinner.fail(
               chalk.red((i18n.t('update.ebusyFallbackFailed') as string)),
             );
+            const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            console.log(chalk.gray(`[debug] fallbackError: ${msg}`));
           }
         } else {
           updateSpinner.fail(

@@ -715,6 +715,7 @@ export const enUS = {
     ebusyDetected: 'File lock detected (EBUSY), trying fallback copy...',
     ebusyFallbackSuccess: 'Fallback copy update succeeded! Please restart your terminal or editor to apply changes',
     ebusyFallbackFailed: 'Fallback copy also failed. Please close the editor and retry, or manually run: npm install -g figma-dev-tools',
+    restartHint: '🔄 Overwrite succeeded! Some locked files could not be deleted but new ones are written. Please fully quit Trae/editor and reopen for the new version to take effect',
     notFound: 'Unable to fetch latest version info. Please check your network connection.',
     hint: '💡 You can also manually run: npm install -g figma-dev-tools',
   },

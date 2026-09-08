@@ -702,6 +702,7 @@ export const zhCN = {
     ebusyDetected: '检测到文件被占用（EBUSY），尝试使用备用复制方式...',
     ebusyFallbackSuccess: '备用复制更新成功！请重新启动终端或编辑器使更新生效',
     ebusyFallbackFailed: '备用复制也失败，请关闭编辑器后重试，或手动执行: npm install -g figma-dev-tools',
+    restartHint: '🔄 覆盖成功！因文件被占用无法删除旧版本，但新文件已写入。请完全退出 Trae/编辑器后重新打开，新版本即生效',
     notFound: '无法获取最新版本信息，请检查网络连接',
     hint: '💡 也可以手动执行: npm install -g figma-dev-tools',
   },

@@ -533,16 +533,19 @@ export async function startGuiServer(): Promise<http.Server> {
                   if (isEBUSY) {
                     console.log('[GUI] Detected EBUSY error, trying fallback copy...');
                     sendEvent({ type: 'progress', data: { message: 'Detected file lock, trying fallback copy...' } });
+                    const isWin = os.platform() === 'win32';
                     try {
                       const runRobocopy = (srcDir: string, dstDir: string): void => {
                         const res = spawnSync(
                           'robocopy',
-                          [srcDir, dstDir, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/R:2', '/W:1'],
+                          [srcDir, dstDir, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/R:2', '/W:1', '/XF', '*.ps1'],
                           { shell: true, stdio: 'pipe' },
                         );
                         const rc = res.status ?? -1;
+                        // robocopy exit <8 为成功；用 /E 而非 /MIR 避免删不掉锁文件导致整体失败
                         if (rc >= 8) {
-                          throw new Error(`robocopy failed (exit ${rc}): ${(res.stderr ?? '').toString()}`);
+                          const errMsg = (res.stderr ?? '').toString() || (res.stdout ?? '').toString();
+                          throw new Error(`robocopy exit=${rc}: ${errMsg.trim()}`);
                         }
                       };
                       const mkdirp = (p: string): void => {
@@ -553,8 +556,12 @@ export async function startGuiServer(): Promise<http.Server> {
                         fs.rmSync(p, { recursive: true, force: true, maxRetries: 2 });
                       };
 
+                      // ============ npm.cmd 避免 Git Bash/MINGW64 MSYS 版本冲突 ============
+                      const npmBin = isWin ? 'npm.cmd' : 'npm';
+                      const cmdBin = isWin ? 'cmd.exe' : 'cmd';
+
                       // 全局包目录
-                      const globalPrefix = execFileSync(packageManager, ['root', '-g'], { encoding: 'utf-8' }).trim();
+                      const globalPrefix = execFileSync(npmBin, ['root', '-g'], { encoding: 'utf-8', shell: true }).trim();
                       const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
                       mkdirp(globalPkgDir);
 
@@ -563,7 +570,7 @@ export async function startGuiServer(): Promise<http.Server> {
                       let tempRoot: string | null = null;
                       try {
                         tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-dev-tools-install-'));
-                        execFileSync('npm', ['pack', `${packageName}@latest`, '--pack-destination', tempRoot], {
+                        execFileSync(npmBin, ['pack', `${packageName}@latest`, '--pack-destination', tempRoot], {
                           cwd: tempRoot,
                           stdio: 'pipe',
                           shell: true,
@@ -593,7 +600,7 @@ export async function startGuiServer(): Promise<http.Server> {
                       for (const d of subdirs) {
                         const s = path.join(srcPkgDir, d);
                         if (!fs.existsSync(s)) continue;
-                        if (os.platform() === 'win32') {
+                        if (isWin) {
                           runRobocopy(s, path.join(globalPkgDir, d));
                         } else {
                           execFileSync('cp', ['-r', `${s}/`, path.join(globalPkgDir, d)], { stdio: 'pipe' });
@@ -601,8 +608,8 @@ export async function startGuiServer(): Promise<http.Server> {
                       }
                       const srcPkgJson = path.join(srcPkgDir, 'package.json');
                       const dstPkgJson = path.join(globalPkgDir, 'package.json');
-                      if (os.platform() === 'win32') {
-                        execFileSync('cmd', ['/c', 'copy', '/Y', srcPkgJson, dstPkgJson], { stdio: 'pipe', shell: true });
+                      if (isWin) {
+                        execFileSync(cmdBin, ['/c', 'copy', '/Y', srcPkgJson, dstPkgJson], { stdio: 'pipe', shell: true });
                       } else {
                         execFileSync('cp', [srcPkgJson, dstPkgJson], { stdio: 'pipe' });
                       }
