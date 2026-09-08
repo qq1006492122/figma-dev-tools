@@ -532,7 +532,7 @@ export const enUS = {
         // v1.4.4 fidelity verification prompts
         fidelityDepsInstallHint:
           'Run npm install pixelmatch pngjs to install dependencies, and ensure Playwright is installed (npm install playwright && npx playwright install chromium)',
-        // v1.4.14 OCR text extraction prompts
+        // v1.4.15 OCR text extraction prompts
         ocrDepsInstallHint:
           'Run npm install tesseract.js to install the OCR fallback dependency (for extracting text from images)',
         // Token validation error messages

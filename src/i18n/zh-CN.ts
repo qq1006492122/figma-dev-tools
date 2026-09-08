@@ -523,7 +523,7 @@ export const zhCN = {
         // v1.4.4 还原度校验相关提示
         fidelityDepsInstallHint:
           '运行 npm install pixelmatch pngjs 安装备用依赖，并确保已安装 Playwright（npm install playwright && npx playwright install chromium）',
-        // v1.4.14 OCR 文本提取相关提示
+        // v1.4.15 OCR 文本提取相关提示
         ocrDepsInstallHint:
           '运行 npm install tesseract.js 安装 OCR 备用依赖（用于从图片中识别文字）',
         // Token 验证错误消息

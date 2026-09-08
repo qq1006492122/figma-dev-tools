@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.14
+# 🎨 Figma Dev Tools v1.4.15
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.15 | `--update` EBUSY Fallback Hardening | Fix v1.4.14 `figma-dev --update` failing after EBUSY even the robocopy fallback on Windows Git Bash/MINGW64: 1) Use `npm.cmd` / `cmd.exe` instead of `npm` / `cmd` — MSYS `npm` returns `/c/Users/...` style paths that `path.join` + robocopy can't parse; 2) robocopy `/MIR` → `/E` (overwrite-only, don't delete locked files; Trae holds file handles and deletion fails the whole command) + add `/XF *.ps1`; 3) Add `shell: true` to all `execFileSync` for cross-shell robustness; 4) gui-server.ts EBUSY fallback path fixed the same way; 5) New i18n key `update.restartHint` |
 | v1.4.14 | OCR Text Extraction + Version Consistency Fix | 20th MCP tool `figma_ocr_extract`: native Figma TEXT node extraction (zero-dependency, 100% accurate) + tesseract.js image OCR fallback (chi_sim+eng, PSM/OEM tunable, SSRF-protected remote images); new `OcrService` with singleton + optional-dynamic-import + i18n error messages; tesseract.js added to optionalDependencies; 22 OCR unit tests; fix McpServer.version stuck at v1.4.4 in src/index.ts |
 | v1.4.13 | Release-Grade Regression Hardening + getErrorInfo Defensive Normalization | Add 4 smoke regressions (i18n path / codes null-pointer / error formatting); harden getErrorInfo entry against null/undefined so title/reason are always strings; tsc 0 errors + 99 tests green |
 | v1.4.12 | --update EBUSY Fallback Hardening + Windows robocopy Fix | Treat robocopy rc<8 as success; Windows `cp`→`copy /Y` for package.json; upgrade extracts latest tgz from npm pack then overwrites global dir, bypasses EBUSY rename locks caused by running editor processes |
