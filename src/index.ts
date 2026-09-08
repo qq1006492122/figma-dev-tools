@@ -260,7 +260,7 @@ function prependStaleCacheWarning(lines: string[], client: FigmaClient): void {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.4.14',
+  version: '1.4.15',
 });
 
 server.registerTool(
