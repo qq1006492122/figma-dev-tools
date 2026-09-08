@@ -1,4 +1,4 @@
-# figma-dev-tools v1.4.13 开发指南
+# figma-dev-tools v1.4.14 开发指南
 
 ## 项目概述
 
@@ -30,7 +30,7 @@ figma-dev-tools/
 ├── bin/                    # CLI 入口
 │   └── figma-dev.js
 ├── src/
-│   ├── index.ts           # MCP 服务器入口（19 个 MCP 工具）
+│   ├── index.ts           # MCP 服务器入口（20 个 MCP 工具）
 │   ├── cli/               # CLI 命令实现
 │   │   └── index.ts
 │   ├── i18n/              # 国际化（zh-CN/en-US）

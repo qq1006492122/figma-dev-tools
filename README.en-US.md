@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.13
+# 🎨 Figma Dev Tools v1.4.14
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.14 | OCR Text Extraction + Version Consistency Fix | 20th MCP tool `figma_ocr_extract`: native Figma TEXT node extraction (zero-dependency, 100% accurate) + tesseract.js image OCR fallback (chi_sim+eng, PSM/OEM tunable, SSRF-protected remote images); new `OcrService` with singleton + optional-dynamic-import + i18n error messages; tesseract.js added to optionalDependencies; 22 OCR unit tests; fix McpServer.version stuck at v1.4.4 in src/index.ts |
 | v1.4.13 | Release-Grade Regression Hardening + getErrorInfo Defensive Normalization | Add 4 smoke regressions (i18n path / codes null-pointer / error formatting); harden getErrorInfo entry against null/undefined so title/reason are always strings; tsc 0 errors + 99 tests green |
 | v1.4.12 | --update EBUSY Fallback Hardening + Windows robocopy Fix | Treat robocopy rc<8 as success; Windows `cp`→`copy /Y` for package.json; upgrade extracts latest tgz from npm pack then overwrites global dir, bypasses EBUSY rename locks caused by running editor processes |
 | v1.4.11 | i18n Path Fix + Token Input Enhancement | Fix Token validation i18n path error (cli.errors.labels), getErrorInfo codes null-pointer, README QUICKSTART 404 links; add FIGMA_ACCESS_TOKEN env fallback + password→input graceful degradation |
@@ -88,7 +89,7 @@ const service = new BrowserFallbackService({
 | Feature                         | Description                                                                                                          | Version        |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------- |
 | 🖥️ **GUI Visual Config Wizard** | Browser graphical interface configuration, welcome page → language selection → Token config + real-time validation → editor detection → one-click install → framework preference → completion page, zero barriers for beginners | **v1.3.0**     |
-| 🔗 **19 MCP tools**             | Full coverage: URL parsing → Token extraction → component generation → asset download → paywall fallback → fidelity verification | v1.4.4         |
+| 🔗 **20 MCP tools**             | Full coverage: URL parsing → Token extraction → component generation → asset download → paywall fallback → fidelity verification | v1.4.4         |
 | 🧠 **Framework-agnostic Structured Data** | Outputs id/name/role/type/size/layout/styles/text/asset/children JSON, supports Vue/Svelte/HTML/Angular/Solid and any framework | v1.1.0         |
 | ⚛️ **React + Tailwind First-class Support** | Semantic tag selection + Tailwind mapping + cn() merging + TODO markers, one-click high-fidelity TSX generation | v1.3.2         |
 | 🔧 **Flex Layout Auto-fix**     | Smart fix for icon deformation, text truncation, overflow and other Flex issues                                       | v1.3.2         |
@@ -106,6 +107,7 @@ const service = new BrowserFallbackService({
 | 💻 **CLI Command Line**          | Supports script and CI/CD integration, usable without MCP, new gui/structured/lint/lang/token commands                | v1 (gui v1.3.0) |
 | 🔄 **8+ Editor Support**          | Trae, VS Code, Cursor, Windsurf, Claude Desktop, Zed, Cline, Roo Code one-click install (GUI auto-detect)            | v1 (gui v1.3.0) |
 | 🚀 **Zero-config Startup**        | Supports `npx -y figma-dev-tools --figma-api-key=xxx` direct run, no pre-install config needed                         | v1.2           |
+| 🔍 **OCR Text Extraction**        | **⭐ v1.4.14 new: native Figma TEXT node extraction (zero-dependency, 100% accurate) + tesseract.js image OCR fallback (chi_sim+eng bilingual, PSM/OEM tunable, SSRF-protected remote images)** | **v1.4.14**     |
 
 ---
 
@@ -352,7 +354,7 @@ npx figma-dev token list    # List saved Tokens
 
 ## 🔧 MCP Tool Reference
 
-**19 MCP tools** in total, arranged by usage flow:
+**20 MCP tools** in total, arranged by usage flow:
 
 | #   | Tool Name                   | Function                                                                            | Key Parameters                           | Version     |
 | --- | --------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------- | ----------- |
@@ -375,6 +377,33 @@ npx figma-dev token list    # List saved Tokens
 | 17  | `figma_dev_fallback_status` | **⭐ v1.4.4 new: Query paywall fallback system status** (Playwright availability, config, fallback priority) | none | **v1.4.4**  |
 | 18  | `figma_dev_fallback_capture`| **⭐ v1.4.4 new: Trigger browser fallback screenshot** (paywall screenshot + Dev Mode CSS + visual approximation mode) | `figmaUrl/devicePixelRatio/framework` | **v1.4.4**  |
 | 19  | `figma_verify_fidelity`     | **⭐ v1.4.4 new: Fidelity verification** (pixel diff + diff heatmap + quantified score 0-100%) | `figmaUrl/codeContent/threshold` | **v1.4.4**  |
+| 20  | `figma_ocr_extract`         | **⭐ v1.4.14 new: OCR text extraction** (native node JSON first + tesseract.js image OCR fallback) | `figmaUrl/imagePath/language/psm/oem` | **v1.4.14** |
+
+---
+
+### Tool Parameter Details
+
+#### `figma_ocr_extract` (new in v1.4.14, OCR Text Extraction)
+
+```typescript
+{
+  figmaUrl?: string;           // Figma design URL (preferred native extraction when provided)
+  imagePath?: string;          // Image source: local path / http(s) URL / base64 data URI
+  language?: string;           // OCR language (tesseract format, '+' combinable), default 'chi_sim+eng'
+  psm?: number;                // Page segmentation mode 1-13, default 3 = auto
+  oem?: number;                // OCR engine mode 0-3, default 1 = LSTM
+  autoScreenshot?: boolean;    // Auto screenshot fallback when native extraction yields no text, default true
+  screenshotScale?: number;    // Auto screenshot scale 1-4, default 2
+  accessToken?: string;        // Optional, prefers env var
+}
+```
+
+**Hybrid Strategy:**
+1. **Native first** (when figmaUrl provided): Traverses Figma TEXT nodes reading `characters` field, zero-dependency, 100% accurate
+2. **Screenshot fallback**: When native extraction yields no text, automatically calls Figma image export API to download PNG for OCR
+3. **Image OCR** (when imagePath provided): tesseract.js performs optical character recognition on local/remote/base64 images
+
+**Dependencies:** tesseract.js is an optional dependency (only needed for image OCR path), with install hint when missing. Remote image URLs have SSRF protection (rejects private network addresses).
 
 ---
 
@@ -541,7 +570,7 @@ CLI parameters > environment variables > .env file > default values
 ├─────────────────────────────────────────────────────────────┤
 │  CLI Layer    │  GUI Layer    │  Service Layer  │  Tool Layer │
 │                │               │                 │              │
-│  figma-dev     │  Browser      │  figma-client   │  19 MCP     │
+│  figma-dev     │  Browser      │  figma-client   │  20 MCP     │
 │  <command>     │  UI           │  node-processor │  tools      │
 │                │               │  tailwind-      │              │
 │                │               │  mapper         │              │
@@ -832,7 +861,7 @@ It's recommended to run `figma_lint_design` to check design quality before gener
 - **Paywall Fallback**: figma-dev-tools v1.4.4's exclusive `BrowserFallbackService` — when the Figma REST API fails due to paywall, it automatically launches Playwright to capture a screenshot as a fallback. No competitor offers a similar mechanism.
 - **Fidelity Verification Loop**: `figma_verify_fidelity` provides pixel diff + diff heatmap + quantified score (0-100%). Other tools mostly stop at "pixel-perfect" marketing claims without automated verification.
 - **Framework-agnostic Structured Data**: `figma_get_structured_data` outputs standard JSON supporting any framework, while commercial SaaS solutions mostly lock into specific frameworks.
-- **Open Source + Free + Full-featured**: MIT license, no paid seat required to use all 19 MCP tools.
+- **Open Source + Free + Full-featured**: MIT license, no paid seat required to use all 20 MCP tools.
 
 ---
 

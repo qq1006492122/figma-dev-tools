@@ -491,6 +491,17 @@ export const enUS = {
             'If using a self-signed enterprise certificate, configure ssl.caCertPath',
           ],
         },
+        OCR_ERROR: {
+          code: 'OCR_ERROR',
+          title: 'OCR text extraction failed',
+          reason: 'Optical character recognition failed to extract text from the image.',
+          solutions: [
+            'Check that the image is clear and contains readable text',
+            'Verify the OCR language matches the text (try language: "chi_sim+eng")',
+            'Install the optional dependency: npm install tesseract.js',
+            'When a Figma URL is available, prefer native node JSON extraction',
+          ],
+        },
       },
       // Error message template labels (used by FigmaApiError assembly)
       labels: {
@@ -521,6 +532,9 @@ export const enUS = {
         // v1.4.4 fidelity verification prompts
         fidelityDepsInstallHint:
           'Run npm install pixelmatch pngjs to install dependencies, and ensure Playwright is installed (npm install playwright && npx playwright install chromium)',
+        // v1.4.14 OCR text extraction prompts
+        ocrDepsInstallHint:
+          'Run npm install tesseract.js to install the OCR fallback dependency (for extracting text from images)',
         // Token validation error messages
         tokenValidateFailed401: (msg: string) =>
           `Token validation failed (HTTP 401): ${msg}. Please check if the Token is correct or has expired`,

@@ -1,7 +1,7 @@
-# ⚡ figma-dev-tools 快速上手指南 v1.4.13
+# ⚡ figma-dev-tools 快速上手指南 v1.4.14
 
 > 中 / [English](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)
-> 从安装到产出第一个 Figma → React/Vue 组件，约 5 分钟。本文由原 `INTEGRATION_GUIDE` / `QUICKSTART` / 落地速览合并简化而来，内容与 v1.4.13 实际实现一致。
+> 从安装到产出第一个 Figma → React/Vue 组件，约 5 分钟。本文由原 `INTEGRATION_GUIDE` / `QUICKSTART` / 落地速览合并简化而来，内容与 v1.4.14 实际实现一致。
 
 ---
 
@@ -162,7 +162,7 @@ figma-dev-tools/
 
 | 你想 | 看这里 |
 |------|--------|
-| 全部功能 / 19 个 MCP 工具 / CLI 命令 | `README.md` |
+| 全部功能 / 20 个 MCP 工具 / CLI 命令 | `README.md` |
 | AI 用法 & 高保真还原检查 | `SKILL.md` |
 | 各编辑器 / 框架详细配置 | `README.md` → 支持编辑器 / 配置说明 |
 | 设计 Token → Token 映射规范 | `FIGMA-DESIGN-GUIDELINES.md` |

@@ -34,7 +34,8 @@ export type ErrorCode =
   | 'CODE_GENERATION_FAILED'
   | 'INVALID_NODE_TYPE'
   | 'STALE_CACHE_USED'
-  | 'STYLUS_ERROR';
+  | 'STYLUS_ERROR'
+  | 'OCR_ERROR';
 
 // ============ FigmaDevError 类 ============
 

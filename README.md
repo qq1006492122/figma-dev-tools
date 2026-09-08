@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.13
+# 🎨 Figma Dev Tools v1.4.14
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -71,6 +71,7 @@ const service = new BrowserFallbackService({
 
 | 版本    | 主题                    | 核心内容                                                                                                   |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.14 | OCR 文本提取 + 版本号统一修复 | 新增第 20 个 MCP 工具 `figma_ocr_extract`：原生节点 JSON 优先提取（零依赖、100% 准确）、tesseract.js OCR 兜底（chi_sim+eng、PSM/OEM 可调、SSRF 防护远程图片）；新增 `OcrService` + 单例管理 + 可选依赖动态导入 + i18n 错误消息；tesseract.js 加入 optionalDependencies；新增 22 个 OCR 单元测试；修复 src/index.ts McpServer.version 停留在 v1.4.4 的历史遗留 |
 | v1.4.13 | 发布级回归加固 + getErrorInfo 防御归一化 | 新增 smoke 发布级回归用例×4（i18n 路径/codes 空指针/错误格式化）；getErrorInfo 入口 null/undefined 归一化避免字段变 null 再次链式崩溃；build 0 错 + 99 case 全通过 |
 | v1.4.12 | --update EBUSY 兜底强化 + Windows robocopy 修复 | 修复 robocopy 误报失败（退出码<8 视为成功）、Windows cp 不存在改用 copy /Y、升级从 npm pack 拉取新版 tgz 覆盖全局，解决编辑器占用导致 npm 全局更新 EBUSY rename 失败 |
 | v1.4.11 | i18n 路径修复 + Token 交互增强 | 修复 Token 验证 i18n 路径错误（cli.errors.labels）、getErrorInfo codes 空指针、README QUICKSTART 链接 404；新增 FIGMA_ACCESS_TOKEN 环境变量 + password→input 降级兜底 |
@@ -91,7 +92,7 @@ const service = new BrowserFallbackService({
 | 特性                             | 说明                                                                                                              | 版本            |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------- |
 | 🖥️ **GUI 可视化配置向导**        | 浏览器图形界面配置，欢迎页→语言选择→Token配置+实时验证→编辑器检测一键安装→框架偏好选择→完成页，小白零门槛         | **v1.3.0**      |
-| 🔗 **19 个 MCP 工具**            | 完整覆盖 URL 解析 → Token 提取 → 组件生成 → 资源下载 → 付费墙兜底 → 还原度校验全流程                              | v1.4.4          |
+| 🔗 **20 个 MCP 工具**            | 完整覆盖 URL 解析 → Token 提取 → 组件生成 → 资源下载 → 付费墙兜底 → 还原度校验全流程                              | v1.4.4          |
 | 🧠 **框架无关结构化数据**        | 输出 id/name/role/type/size/layout/styles/text/asset/children JSON，支持 Vue/Svelte/HTML/Angular/Solid 等任意框架 | v1.1.0          |
 | ⚛️ **React + Tailwind 一级支持** | 语义标签选择 + Tailwind 映射 + cn() 合并 + TODO 标记，一键生成高保真 TSX                                          | v1.3.2          |
 | 🔧 **Flex 布局自动修复**         | 智能修复图标变形、文本截断、溢出等 Flex 问题                                                                      | v1.3.2          |
@@ -109,6 +110,7 @@ const service = new BrowserFallbackService({
 | 💻 **CLI 命令行**                | 支持脚本和 CI/CD 集成，无需 MCP 也可使用，新增 gui/structured/lint/lang/token 命令                                | v1 (gui v1.3.0) |
 | 🔄 **8+ 编辑器支持**            | Trae、VS Code、Cursor、Windsurf、Claude Desktop、Zed、Cline、Roo Code 一键安装（GUI 自动检测）                     | v1 (gui v1.3.0) |
 | 🚀 **零配置启动**                | 支持 `npx -y figma-dev-tools --figma-api-key=xxx` 直接运行，无需提前安装配置                                      | v1.2            |
+| 🔍 **OCR 文本提取**              | **⭐ v1.4.14 新：原生节点 JSON 优先提取（零依赖、100% 准确）+ tesseract.js 图片 OCR 兜底（chi_sim+eng 中英文、PSM/OEM 可调、SSRF 防护远程图片）** | **v1.4.14**     |
 
 ---
 
@@ -359,7 +361,7 @@ npx figma-dev token list    # 列出已保存 Token
 
 ## 🔧 MCP 工具参考
 
-共 **19 个 MCP 工具**，按使用流程排列：
+共 **20 个 MCP 工具**，按使用流程排列：
 
 | #   | 工具名称                    | 功能                                                                                  | 关键参数                                 | 版本        |
 | --- | --------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------- | ----------- |
@@ -382,8 +384,31 @@ npx figma-dev token list    # 列出已保存 Token
 | 17  | `figma_dev_fallback_status` | **⭐ v1.4.4 新：查询付费墙兜底系统状态**（Playwright 可用性、配置、兜底优先级）       | 无                                       | **v1.4.4**  |
 | 18  | `figma_dev_fallback_capture`| **⭐ v1.4.4 新：触发浏览器兜底截图**（付费墙时截图 + Dev Mode CSS + 视觉近似模式）    | `figmaUrl/devicePixelRatio/framework`    | **v1.4.4**  |
 | 19  | `figma_verify_fidelity`     | **⭐ v1.4.4 新：还原度校验**（像素 diff + 差异热力图 + 量化评分 0-100%）              | `figmaUrl/codeContent/threshold`         | **v1.4.4**  |
+| 20  | `figma_ocr_extract`         | **⭐ v1.4.14 新：OCR 文本提取**（原生节点 JSON 优先 + tesseract.js 图片 OCR 兜底）     | `figmaUrl/imagePath/language/psm/oem`    | **v1.4.14** |
 
 ### 工具详细参数
+
+#### `figma_ocr_extract`（v1.4.14 新，OCR 文本提取）
+
+```typescript
+{
+  figmaUrl?: string;           // Figma 设计稿 URL（提供时优先原生提取）
+  imagePath?: string;          // 图片来源：本地路径 / http(s) URL / base64 data URI
+  language?: string;           // OCR 语言（tesseract 格式，'+' 组合），默认 'chi_sim+eng'
+  psm?: number;                // 页面分割模式 1-13，默认 3 = 自动
+  oem?: number;                // OCR 引擎模式 0-3，默认 1 = LSTM
+  autoScreenshot?: boolean;    // 原生无文本时自动截图兜底，默认 true
+  screenshotScale?: number;    // 自动截图倍率 1-4，默认 2
+  accessToken?: string;        // 可选，优先使用环境变量
+}
+```
+
+**混合策略：**
+1. **原生优先**（有 figmaUrl 时）：遍历 Figma TEXT 节点读取 `characters` 字段，零依赖、100% 准确
+2. **截图兜底**：原生提取无文本时，自动调用 Figma 截图接口下载 PNG 做 OCR
+3. **图片 OCR**（有 imagePath 时）：tesseract.js 对本地文件/远程 URL/base64 做光学字符识别
+
+**依赖说明：** tesseract.js 为可选依赖（仅走图片 OCR 时需要），未安装时给出安装提示。远程图片 URL 有 SSRF 防护（拒绝私网地址）。
 
 #### `figma_generate_jsx`（v1.4.0 增强版，最常用）
 
@@ -765,7 +790,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.13                           │
+│                      figma-dev-tools MCP Server v1.4.14                           │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │
@@ -1204,7 +1229,7 @@ Token 会保存在系统安全存储中：
 - **付费墙兜底**：figma-dev-tools v1.4.4 独有的 `BrowserFallbackService`，当 Figma REST API 因付费墙失败时自动启动 Playwright 截图保底，竞品中无一提供类似机制
 - **还原度校验闭环**：`figma_verify_fidelity` 提供像素 diff + 差异热力图 + 量化评分（0-100%），其他工具多停留在"pixel-perfect"宣传，无自动化校验
 - **框架无关结构化数据**：`figma_get_structured_data` 输出标准 JSON，支持任意框架，商业 SaaS 多锁定特定框架
-- **开源 + 免费 + 全功能**：MIT 许可，无需付费席位即可使用全部 19 个 MCP 工具
+- **开源 + 免费 + 全功能**：MIT 许可，无需付费席位即可使用全部 20 个 MCP 工具
 
 ---
 

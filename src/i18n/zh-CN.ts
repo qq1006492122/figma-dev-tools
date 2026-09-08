@@ -483,6 +483,17 @@ export const zhCN = {
             '若使用企业自签名证书，请配置 ssl.caCertPath',
           ],
         },
+        OCR_ERROR: {
+          code: 'OCR_ERROR',
+          title: 'OCR 文本提取失败',
+          reason: '从图片中进行光学字符识别时未能成功提取到文字。',
+          solutions: [
+            '检查图片是否清晰、是否包含可识别文字',
+            '确认 OCR 语言与文字匹配（可尝试 language: "chi_sim+eng"）',
+            '安装可选依赖：npm install tesseract.js',
+            '若有 Figma 链接，优先使用节点 JSON 原生提取',
+          ],
+        },
       },
       // 错误消息模板词（用于 FigmaApiError 拼装）
       labels: {
@@ -512,6 +523,9 @@ export const zhCN = {
         // v1.4.4 还原度校验相关提示
         fidelityDepsInstallHint:
           '运行 npm install pixelmatch pngjs 安装备用依赖，并确保已安装 Playwright（npm install playwright && npx playwright install chromium）',
+        // v1.4.14 OCR 文本提取相关提示
+        ocrDepsInstallHint:
+          '运行 npm install tesseract.js 安装 OCR 备用依赖（用于从图片中识别文字）',
         // Token 验证错误消息
         tokenValidateFailed401: (msg: string) =>
           `Token 验证失败 (HTTP 401): ${msg}。请检查 Token 是否正确、是否已过期`,

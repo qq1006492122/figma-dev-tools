@@ -42,6 +42,11 @@ import {
 import { createFigmaClient, type FigmaClient } from './services/figma-client.js';
 import { createFileWriter } from './services/file-writer.js';
 import type { FlexFixEntry } from './services/flex-fixer.js';
+import {
+  OcrService,
+  type OcrOptions,
+  type OcrResult,
+} from './services/ocr-service.js';
 import type { ResponsiveSuggestion } from './services/responsive-inferrer.js';
 import { generateSvgSprite, generateSpriteTypes } from './services/svg-sprite-generator.js';
 import {
@@ -50,7 +55,7 @@ import {
 } from './services/visual-approximation.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
 import { createVueGenerator } from './services/vue-generator.js';
-import type { CodeGenResult, DesignTokens, TailwindExtension } from './types.js';
+import type { CodeGenResult, DesignTokens, FigmaNode, TailwindExtension } from './types.js';
 import type { ProcessedNode, StructuredNode } from './types/nodes.js';
 import type { FigmaApiError } from './utils/errors.js';
 import { isFigmaApiError, isFigmaDevError } from './utils/errors.js';
@@ -255,7 +260,7 @@ function prependStaleCacheWarning(lines: string[], client: FigmaClient): void {
 
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.4.4',
+  version: '1.4.14',
 });
 
 server.registerTool(
@@ -2224,6 +2229,247 @@ server.registerTool(
       };
     } catch (error) {
       return buildToolErrorResponse('还原度校验', error, getFigmaClientSafe(accessToken));
+    }
+  },
+);
+
+/**
+ * figma_ocr_extract - OCR 文本提取工具
+ *
+ * 从 Figma 设计稿或本地图片中提取文字，采用「原生优先、OCR 兜底」的混合策略：
+ * 1. 提供 figmaUrl 时，优先读取节点 JSON 原生提取 TEXT 节点文字（零依赖、100% 准确）
+ * 2. 无节点 JSON 或原生无结果时，使用 tesseract.js 对图片进行 OCR 识别
+ *
+ * 使用场景：
+ * - 从设计稿提取文案，用于国际化、文案校对、SEO 关键词提取
+ * - 从设计稿截图/切图中提取文字（无节点 JSON 时）
+ */
+server.registerTool(
+  'figma_ocr_extract',
+  {
+    title: 'OCR 文本提取',
+    description: `从 Figma 设计稿或图片中提取文字。
+
+混合策略：
+1. 原生优先：提供 figmaUrl 时，读取节点 JSON 并直接遍历 TEXT 节点提取文字（零依赖、100% 准确）
+2. 截图 OCR 兜底：原生提取无文本时，自动调用 Figma 截图接口下载节点图片做 OCR 识别
+3. 图片 OCR：提供 imagePath 时，使用 tesseract.js 对图片进行光学字符识别
+
+参数：
+- figmaUrl：Figma 设计稿链接（与 imagePath 至少提供一个）
+- imagePath：图片来源（本地文件路径 / 远程 http(s) URL / base64 data URI），与 figmaUrl 至少提供一个
+- language：OCR 语言代码（tesseract 格式，可用 '+' 组合，如 'chi_sim+eng'），默认 'chi_sim+eng'
+- psm：页面分割模式（1-13，默认 3 = 自动，11 = 稀疏文本，6 = 单一文本块）
+- oem：OCR 引擎模式（1 = LSTM 推荐，默认）
+- autoScreenshot：原生提取无文本时是否自动截图做 OCR 兜底（默认 true，需 figmaUrl）
+- screenshotScale：自动截图缩放比例（1-4，默认 2）
+- accessToken：Figma Access Token（可选，优先使用环境变量）
+
+依赖：tesseract.js（可选依赖，仅在图片 OCR 时需要，未安装时给出安装提示）`,
+    inputSchema: z.object({
+      figmaUrl: z
+        .string()
+        .optional()
+        .describe('Figma 设计稿 URL（如提供，优先读取节点 JSON 原生提取文字）。与 imagePath 至少提供一个'),
+      imagePath: z
+        .string()
+        .optional()
+        .describe('图片来源：本地文件路径、远程 http(s) URL、或 base64 data URI（用于 tesseract OCR 识别）。与 figmaUrl 至少提供一个'),
+      language: z
+        .string()
+        .optional()
+        .describe("OCR 语言代码（tesseract 格式，可用 '+' 组合，如 'chi_sim+eng'），默认 'chi_sim+eng'"),
+      psm: z
+        .number()
+        .int()
+        .min(1)
+        .max(13)
+        .optional()
+        .describe('页面分割模式 PSM（1-13），默认 3 = 自动；11 = 稀疏文本；6 = 单一文本块'),
+      oem: z
+        .number()
+        .int()
+        .min(0)
+        .max(3)
+        .optional()
+        .describe('OCR 引擎模式 OEM（0-3），默认 1 = LSTM'),
+      autoScreenshot: z
+        .boolean()
+        .optional()
+        .describe('原生提取无文本时，是否自动调用 Figma 截图接口下载节点图片做 OCR 兜底（默认 true，需提供 figmaUrl）'),
+      screenshotScale: z
+        .number()
+        .int()
+        .min(1)
+        .max(4)
+        .optional()
+        .describe('自动截图缩放比例（1-4，默认 2）'),
+      accessToken: z
+        .string()
+        .optional()
+        .describe('Figma Access Token（可选，优先使用环境变量）'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async ({ figmaUrl, imagePath, language, psm, oem, autoScreenshot, screenshotScale, accessToken }) => {
+    try {
+      const optionsToUpdate: Partial<OcrOptions> = {};
+      if (language !== undefined) optionsToUpdate.language = language;
+      if (psm !== undefined) optionsToUpdate.psm = psm;
+      if (oem !== undefined) optionsToUpdate.oem = oem;
+      const ocrService = new OcrService(optionsToUpdate);
+
+      // ============ 1. 确定提取输入 ============
+      let figmaNode: FigmaNode | undefined;
+      let imageSource: string | undefined;
+      let fileKey: string | undefined;
+      let nodeId: string | undefined;
+
+      if (figmaUrl) {
+        fileKey = extractFileKey(figmaUrl);
+        nodeId = extractNodeId(figmaUrl);
+        if (!fileKey) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: '❌ 无法从 figmaUrl 解析 fileKey，请确认 URL 格式正确，或改用 imagePath 参数。',
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const client = getFigmaClient(accessToken);
+        if (nodeId) {
+          figmaNode = (await client.getNode(fileKey, nodeId, -1)) ?? undefined;
+        } else {
+          const file = await client.getFile(fileKey, undefined, -1);
+          figmaNode = file.document;
+        }
+      }
+
+      if (imagePath) {
+        imageSource = imagePath;
+      }
+
+      if (!figmaNode && !imageSource) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: '❌ 必须提供 figmaUrl 或 imagePath 之一作为 OCR 提取输入。',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // ============ 2. 执行提取（含自动截图兜底） ============
+      let result: OcrResult;
+
+      if (figmaNode) {
+        // 先尝试原生提取，无结果时若有图片则 OCR 兜底
+        result = await ocrService.extractText({ figmaNode, image: imageSource });
+        // 原生无文本、未提供图片、允许自动截图且能定位节点时，自动截图 OCR 兜底
+        if (
+          result.items.length === 0 &&
+          !imageSource &&
+          autoScreenshot !== false &&
+          fileKey &&
+          nodeId
+        ) {
+          try {
+            const client = getFigmaClient(accessToken);
+            const images = await client.getImages(fileKey, [nodeId], 'png', screenshotScale ?? 2);
+            const screenshotUrl = images.images[nodeId];
+            if (screenshotUrl) {
+              const screenshotBuffer = await client.downloadImage(screenshotUrl);
+              result = await ocrService.extractTextFromImage(screenshotBuffer);
+              result.strategy = 'hybrid';
+              result.warnings = [
+                ...result.warnings,
+                '已自动使用 Figma 截图做 OCR 兜底（原生节点 JSON 未提取到文本）',
+              ];
+            }
+          } catch (screenshotError) {
+            const message =
+              screenshotError instanceof Error ? screenshotError.message : String(screenshotError);
+            result.warnings = [...result.warnings, `自动截图 OCR 兜底失败: ${message}`];
+          }
+        }
+      } else {
+        result = await ocrService.extractTextFromImage(imageSource!);
+      }
+
+      // ============ 3. 构造输出 ============
+      const strategyLabels: Record<string, string> = {
+        native: '原生提取（节点 JSON）',
+        ocr: 'OCR 识别（tesseract.js）',
+        hybrid: '混合（原生无结果，回退 OCR）',
+      };
+
+      const lines = [
+        `# OCR 文本提取结果\n`,
+        `## 提取策略`,
+        `${strategyLabels[result.strategy] ?? result.strategy}\n`,
+        `## 提取文本`,
+        result.text && result.text.trim().length > 0
+          ? result.text
+          : '（未提取到任何文本）',
+        `\n## 统计信息`,
+        `- 文本条目数: ${result.items.length}`,
+        `- 平均置信度: ${result.confidence.toFixed(2)}%\n`,
+      ];
+
+      if (result.items.length > 0) {
+        lines.push(`## 详细条目`);
+        result.items.forEach((item, index) => {
+          const meta =
+            item.source === 'native' && item.nodeId
+              ? ` (节点 ${item.nodeId}${item.nodeName ? ` - ${item.nodeName}` : ''})`
+              : item.source === 'ocr'
+                ? ` (置信度 ${item.confidence.toFixed(2)}%)`
+                : '';
+          lines.push(`${index + 1}. ${item.text.replace(/\n/g, ' ')}${meta}`);
+        });
+        lines.push('');
+      }
+
+      if (result.warnings.length > 0) {
+        lines.push(`## 警告信息`);
+        result.warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
+        lines.push('');
+      }
+
+      const structured = {
+        strategy: result.strategy,
+        text: result.text,
+        confidence: result.confidence,
+        itemCount: result.items.length,
+        items: result.items.map((item) => ({
+          text: item.text,
+          confidence: item.confidence,
+          source: item.source,
+          nodeId: item.nodeId ?? null,
+          nodeName: item.nodeName ?? null,
+          bbox: item.bbox ?? null,
+        })),
+        warnings: result.warnings,
+        extractedAt: result.extractedAt,
+      };
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: structured,
+      };
+    } catch (error) {
+      return buildToolErrorResponse('OCR 文本提取', error, getFigmaClientSafe(accessToken));
     }
   },
 );

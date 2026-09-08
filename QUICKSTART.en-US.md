@@ -1,7 +1,7 @@
-# ⚡ figma-dev-tools Quick Start Guide v1.4.13
+# ⚡ figma-dev-tools Quick Start Guide v1.4.14
 
 > [中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md) / English
-> From install to your first Figma → React/Vue component in ~5 minutes. This is the merged & simplified version of the former `INTEGRATION_GUIDE` / `QUICKSTART` / landing overview, aligned with the actual v1.4.13 implementation.
+> From install to your first Figma → React/Vue component in ~5 minutes. This is the merged & simplified version of the former `INTEGRATION_GUIDE` / `QUICKSTART` / landing overview, aligned with the actual v1.4.14 implementation.
 
 ---
 
@@ -162,7 +162,7 @@ figma-dev-tools/
 
 | Looking for | See |
 |-------------|-----|
-| All features / 19 MCP tools / CLI commands | `README.md` |
+| All features / 20 MCP tools / CLI commands | `README.md` |
 | AI usage & high-fidelity checklist | `SKILL.md` |
 | Per-editor / per-framework config | `README.md` → editors / config |
 | Design tokens → token mapping rules | `FIGMA-DESIGN-GUIDELINES.md` |

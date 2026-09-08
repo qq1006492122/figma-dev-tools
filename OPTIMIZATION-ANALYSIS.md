@@ -537,7 +537,7 @@
 
 1. **付费墙兜底机制**（v1.4.4 独有）：`BrowserFallbackService` 在 Figma API 付费受限时自动启动 Playwright 截图保底 + VLM 视觉近似模式，竞品中无一提供类似机制
 2. **还原度校验闭环**（v1.4.4 独有）：`figma_verify_fidelity` 提供像素 diff + 差异热力图 + 量化评分（0-100%），其他工具多停留在"pixel-perfect"宣传
-3. **MCP 原生 + AI Agent 优先**：最大差异化，专为 AI 编辑器设计，19 个 MCP 工具完整覆盖全流程
+3. **MCP 原生 + AI Agent 优先**：最大差异化，专为 AI 编辑器设计，20 个 MCP 工具完整覆盖全流程
 4. **本地优先，隐私安全**：所有处理本地完成，企业用户放心
 5. **开源免费 MIT**：完全开源，可自托管定制，无 vendor lock-in
 6. **渐进式上下文**：metadata → designContext → 完整数据，解决 AI 上下文爆炸
