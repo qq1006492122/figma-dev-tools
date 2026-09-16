@@ -12,7 +12,19 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('playwright', () => {
+  const launch = vi.fn(async () => ({
+    isConnected: () => true,
+    close: async () => undefined,
+  }));
+  return {
+    chromium: { launch },
+    firefox: { launch },
+    webkit: { launch },
+  };
+});
 
 import {
   BrowserPool,
@@ -95,6 +107,35 @@ describe('BrowserPool', () => {
         } catch (err) {
           expect(err).toBeInstanceOf(Error);
         }
+      }
+    });
+
+    it('配置更新后旧实例仍应能按原池配置正确回收', async () => {
+      const installed = await isModuleResolvable('playwright');
+      if (!installed) return;
+
+      const acquired = await pool.acquire();
+      acquired.release();
+      pool.updateOptions({ browser: 'firefox', idleTimeout: 0 });
+      await pool.sweepIdle();
+      expect(pool.getStats().totalInstances).toBe(0);
+    });
+
+    it('重复调用同一个 release 不应影响后续持有者的活跃计数', async () => {
+      const installed = await isModuleResolvable('playwright');
+      if (!installed) return;
+
+      let first: Awaited<ReturnType<BrowserPool['acquire']>> | undefined;
+      let second: Awaited<ReturnType<BrowserPool['acquire']>> | undefined;
+      try {
+        first = await pool.acquire();
+        first.release();
+        second = await pool.acquire();
+        first.release();
+        expect(pool.getStats().activeInstances).toBe(1);
+      } finally {
+        second?.release();
+        first?.release();
       }
     });
   });

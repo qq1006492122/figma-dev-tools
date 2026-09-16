@@ -26,3 +26,7 @@ _*.js
 # 用户本地配置
 figma-dev.config.json
 .figma-dev-cache/
+
+# 本地 IDE/Agent 工作流目录与历史分析文档（不随包发布）
+.trae/
+OPTIMIZATION-ANALYSIS.md

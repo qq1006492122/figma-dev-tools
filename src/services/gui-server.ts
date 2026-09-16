@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import * as tar from 'tar';
 import { fileURLToPath } from 'node:url';
 
 import chalk from 'chalk';
@@ -28,6 +29,7 @@ import open from 'open';
 
 import { initI18nSync } from '../i18n/index.js';
 import type { Language } from '../i18n/index.js';
+import { canUseFallbackPackage, fetchLatestStableVersion } from '../cli/update-utils.js';
 import {
   detectAllEditors,
   getEditorDefinitions,
@@ -57,6 +59,19 @@ function readVersion(): string {
 const VERSION = readVersion();
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
+
+function isAllowedLocalOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1')
+    );
+  } catch {
+    return false;
+  }
+}
 
 interface EditorInfo {
   id: string;
@@ -283,7 +298,16 @@ export async function startGuiServer(): Promise<http.Server> {
         const urlObj = new URL(reqUrl, `http://localhost:${port}`);
         const pathname = urlObj.pathname;
 
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+        if (!isAllowedLocalOrigin(origin)) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: false, error: 'Only localhost origins are allowed' }));
+          return;
+        }
+        if (origin) {
+          res.setHeader('Access-Control-Allow-Origin', origin);
+          res.setHeader('Vary', 'Origin');
+        }
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -465,7 +489,6 @@ export async function startGuiServer(): Promise<http.Server> {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
               Connection: 'keep-alive',
-              'Access-Control-Allow-Origin': '*',
             });
 
             /** 向前端推送一条 SSE 事件 */
@@ -534,6 +557,8 @@ export async function startGuiServer(): Promise<http.Server> {
                     console.log('[GUI] Detected EBUSY error, trying fallback copy...');
                     sendEvent({ type: 'progress', data: { message: 'Detected file lock, trying fallback copy...' } });
                     const isWin = os.platform() === 'win32';
+                    // 提升到 try 外声明，保证失败路径的 finally 也能清理临时目录
+                    let tempRoot: string | null = null;
                     try {
                       const runRobocopy = (srcDir: string, dstDir: string): void => {
                         const res = spawnSync(
@@ -551,10 +576,6 @@ export async function startGuiServer(): Promise<http.Server> {
                       const mkdirp = (p: string): void => {
                         if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
                       };
-                      const rmtree = (p: string): void => {
-                        if (!fs.existsSync(p)) return;
-                        fs.rmSync(p, { recursive: true, force: true, maxRetries: 2 });
-                      };
 
                       // ============ npm.cmd 避免 Git Bash/MINGW64 MSYS 版本冲突 ============
                       const npmBin = isWin ? 'npm.cmd' : 'npm';
@@ -565,12 +586,16 @@ export async function startGuiServer(): Promise<http.Server> {
                       const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
                       mkdirp(globalPkgDir);
 
-                      // 优先从 registry 拉最新 tgz 解压后覆盖（避免从旧版本地目录复制导致内容不新）
+                      // 先解析 registry 最新稳定版本，全程钉住该版本（不用浮动的 @latest）
+                      const latestVersion = await fetchLatestStableVersion(
+                        'https://registry.npmjs.org/figma-dev-tools/latest',
+                      );
+
+                      // 优先从 registry 拉指定版本 tgz 解压后覆盖（避免从旧版本地目录复制导致内容不新）
                       let srcPkgDir: string;
-                      let tempRoot: string | null = null;
                       try {
                         tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-dev-tools-install-'));
-                        execFileSync(npmBin, ['pack', `${packageName}@latest`, '--pack-destination', tempRoot], {
+                        execFileSync(npmBin, ['pack', `${packageName}@${latestVersion}`, '--pack-destination', tempRoot], {
                           cwd: tempRoot,
                           stdio: 'pipe',
                           shell: true,
@@ -578,22 +603,21 @@ export async function startGuiServer(): Promise<http.Server> {
                         const tgzList = fs.readdirSync(tempRoot).filter((f) => f.endsWith('.tgz'));
                         if (tgzList.length === 0) throw new Error('npm pack produced no tgz');
                         const tgzPath = path.join(tempRoot, tgzList[0] as string);
-                        try {
-                          execFileSync('tar', ['-xzf', tgzPath, '-C', tempRoot], { stdio: 'pipe', shell: true });
-                        } catch (tarErr) {
-                          const untarScript =
-                            "require('tar').x({file:" + JSON.stringify(tgzPath) +
-                            ",cwd:" + JSON.stringify(tempRoot) + ",sync:true})";
-                          try { execFileSync('node', ['-e', untarScript], { stdio: 'pipe', shell: true }); } catch {
-                            throw tarErr;
-                          }
-                        }
+                        await tar.x({ file: tgzPath, cwd: tempRoot, strict: true });
                         srcPkgDir = path.join(tempRoot, 'package');
                         if (!fs.existsSync(srcPkgDir)) throw new Error('tgz extract failed: package/ not found');
                       } catch (packErr) {
-                        // 兜底：从本地已加载的包目录复制
-                        const currentDir = path.dirname(fileURLToPath(import.meta.url));
-                        srcPkgDir = path.resolve(currentDir, '../..');
+                        throw new Error(
+                          `Failed to fetch the v${latestVersion} package: ${packErr instanceof Error ? packErr.message : String(packErr)}`,
+                        );
+                      }
+
+                      // 来源包版本必须与目标版本严格一致（仅校验格式不足以发现镜像滞后/拉错版本）
+                      const sourcePkg = JSON.parse(fs.readFileSync(path.join(srcPkgDir, 'package.json'), 'utf8')) as { version?: unknown };
+                      if (!canUseFallbackPackage(sourcePkg.version, latestVersion)) {
+                        throw new Error(
+                          `Fallback package version mismatch: expected v${latestVersion}, got v${String(sourcePkg.version)}`,
+                        );
                       }
 
                       const subdirs = ['dist', 'gui', 'bin'];
@@ -614,21 +638,48 @@ export async function startGuiServer(): Promise<http.Server> {
                         execFileSync('cp', [srcPkgJson, dstPkgJson], { stdio: 'pipe' });
                       }
 
-                      if (tempRoot) {
-                        // 延迟清理，避免文件刚复制完仍被占用
-                        setTimeout(() => { try { rmtree(tempRoot as string); } catch { /* ignore */ } }, 5000);
+                      // 落盘后重读 package.json 校验：robocopy /E 会跳过被锁文件，
+                      // 不校验可能在内容实际未更新时仍向前端谎报 success
+                      const installedPkg = JSON.parse(fs.readFileSync(dstPkgJson, 'utf8')) as { version?: unknown };
+                      if (!canUseFallbackPackage(installedPkg.version, latestVersion)) {
+                        throw new Error(
+                          `Post-update version verification failed: expected v${latestVersion}, got v${String(installedPkg.version)}`,
+                        );
                       }
 
                       console.log('[GUI] Fallback copy succeeded');
-                      sendEvent({ type: 'success', data: { message: `${packageName} updated via fallback copy (EBUSY bypass)` } });
+                      sendEvent({
+                        type: 'success',
+                        data: {
+                          message: `${packageName} updated to v${latestVersion} via fallback copy (EBUSY bypass). Please restart the editor to apply changes`,
+                        },
+                      });
                     } catch (fallbackError) {
                       console.error('[GUI] Fallback copy also failed:', fallbackError);
+                      const reason = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
                       sendEvent({
                         type: 'error',
                         data: {
-                          message: `Installation failed (EBUSY). Please close the editor (Trae/Cursor/VS Code) and try again, or run manually: npm install -g figma-dev-tools`,
+                          message: `Installation failed (EBUSY): ${reason}. Please close the editor (Trae/Cursor/VS Code) and try again, or run manually: npm install -g figma-dev-tools`,
                         },
                       });
+                    } finally {
+                      // 成功/失败都立即清理临时目录，5s 后再幂等兜底一次（应对文件短暂占用）
+                      if (tempRoot) {
+                        const target = tempRoot;
+                        try {
+                          fs.rmSync(target, { recursive: true, force: true, maxRetries: 2 });
+                        } catch {
+                          /* ignore */
+                        }
+                        setTimeout(() => {
+                          try {
+                            fs.rmSync(target, { recursive: true, force: true, maxRetries: 2 });
+                          } catch {
+                            /* ignore */
+                          }
+                        }, 5000).unref?.();
+                      }
                     }
                   } else {
                     sendEvent({
@@ -728,7 +779,7 @@ export async function startGuiServer(): Promise<http.Server> {
       });
 
       await new Promise<void>((resolve, reject) => {
-        server.listen(port, () => {
+        server.listen(port, '127.0.0.1', () => {
           console.log('[GUI] Server listening on port:', port);
           resolve();
         });

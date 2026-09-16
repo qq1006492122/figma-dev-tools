@@ -61,6 +61,8 @@ interface BrowserEntry {
   playwrightModule: typeof import('playwright');
   /** 浏览器类型 */
   browserType: 'chromium' | 'firefox' | 'webkit';
+  /** 实例创建时所属的池键，配置变更后仍用于正确回收 */
+  poolKey: string;
   /** 是否无头模式 */
   headless: boolean;
   /** 最后一次使用时间戳 */
@@ -197,7 +199,7 @@ export class BrowserPool {
         this._clearIdleTimer(entry);
         return {
           browser: entry.browser,
-          release: () => this._release(entry),
+          release: this._createRelease(entry),
           isNewInstance: false,
           useCount: entry.useCount,
         };
@@ -240,6 +242,7 @@ export class BrowserPool {
       browser,
       playwrightModule: playwright,
       browserType: this._options.browser,
+      poolKey,
       headless: this._options.headless,
       lastUsedAt: Date.now(),
       activePageCount: 1,
@@ -253,9 +256,21 @@ export class BrowserPool {
 
     return {
       browser,
-      release: () => this._release(entry),
+      release: this._createRelease(entry),
       isNewInstance: true,
       useCount: 1,
+    };
+  }
+
+  /**
+   * 创建幂等的释放句柄，避免调用方在多个 finally 分支中重复归还同一次获取。
+   */
+  private _createRelease(entry: BrowserEntry): () => void {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._release(entry);
     };
   }
 
@@ -329,7 +344,7 @@ export class BrowserPool {
    */
   private async _closeEntry(entry: BrowserEntry): Promise<void> {
     this._clearIdleTimer(entry);
-    const poolKey = this._getPoolKey();
+    const poolKey = entry.poolKey;
     const instances = this._pool.get(poolKey);
     if (instances) {
       const idx = instances.indexOf(entry);

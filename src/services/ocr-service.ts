@@ -23,6 +23,7 @@
 // ============ 依赖导入 ============
 
 import * as fs from 'node:fs/promises';
+import { lookup } from 'node:dns/promises';
 import * as net from 'node:net';
 
 import { getI18n } from '../i18n/index.js';
@@ -110,31 +111,122 @@ const DEFAULT_OPTIONS: OcrOptions = {
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const REMOTE_IMAGE_TIMEOUT_MS = 30_000;
 
-function isPrivateOrReservedAddress(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (normalized === 'localhost' || normalized.endsWith('.localhost')) return true;
+function hasSupportedImageSignature(buffer: Buffer): boolean {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return true;
+  }
+  if (buffer.length >= 3 && buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return true;
+  if (buffer.length >= 6 && (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' || buffer.subarray(0, 6).toString('ascii') === 'GIF89a')) return true;
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return true;
+  if (buffer.length >= 2 && buffer.subarray(0, 2).equals(Buffer.from([0x42, 0x4d]))) return true;
+  return buffer.length >= 4 && (buffer.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])) || buffer.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a])));
+}
 
-  const ipVersion = net.isIP(normalized);
+function validateImageBuffer(buffer: Buffer): Buffer {
+  if (buffer.length === 0) throw new Error('图片数据不能为空');
+  if (buffer.length > MAX_IMAGE_BYTES) throw new Error('图片数据不能超过 10 MiB');
+  if (!hasSupportedImageSignature(buffer)) throw new Error('图片格式不受支持或图片数据无效');
+  return buffer;
+}
+
+function validateOcrOptions(options: OcrOptions): OcrOptions {
+  if (!options.language.trim()) throw new FigmaDevError('OCR_ERROR', 'OCR language 不能为空');
+  if (!Number.isInteger(options.psm) || options.psm < 1 || options.psm > 13) {
+    throw new FigmaDevError('OCR_ERROR', 'OCR PSM 必须是 1-13');
+  }
+  if (!Number.isInteger(options.oem) || options.oem < 0 || options.oem > 3) {
+    throw new FigmaDevError('OCR_ERROR', 'OCR OEM 必须是 0-3');
+  }
+  return options;
+}
+
+export async function readResponseWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  if (!response.body) throw new Error('远程图片响应为空');
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > maxBytes) throw new Error('远程图片不能超过 10 MiB');
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
+
+/**
+ * 判断主机名/IP 是否为本机、内网或保留地址（SSRF 黑名单）。
+ *
+ * 覆盖 RFC 9110/6890/6598/2544/5737/8155 等保留/特殊段；导出供单元测试逐段回归。
+ */
+export function isPrivateOrReservedAddress(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i)?.[1];
+  const address = mappedIpv4 ?? normalized;
+  if (address === 'localhost' || address.endsWith('.localhost')) return true;
+
+  const ipVersion = net.isIP(address);
   if (ipVersion === 4) {
-    const [first, second] = normalized.split('.').map(Number);
+    const [first, second, third] = address.split('.').map(Number);
     return (
       first === 0 ||
       first === 10 ||
       first === 127 ||
-      first === 169 && second === 254 ||
-      first === 172 && second !== undefined && second >= 16 && second <= 31 ||
-      first === 192 && second === 168
+      (first === 100 && second !== undefined && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second !== undefined && second >= 16 && second <= 31) ||
+      // 192.0.0.0/24 由 third===0 整段拦截；192.0.2.0/24（TEST-NET-1）单独拦截
+      (first === 192 && second === 0 && (third === 0 || third === 2)) ||
+      (first === 192 && second === 168) ||
+      // RFC 2544 基准测试段为 198.18.0.0/15，同时包含 198.18.x 与 198.19.x
+      (first === 198 && (second === 18 || second === 19)) ||
+      (first === 198 && second === 51 && third === 100) ||
+      (first === 203 && second === 0 && third === 113) ||
+      (first !== undefined && first >= 224)
     );
   }
 
   if (ipVersion === 6) {
-    return normalized === '::1' || normalized === '::' || normalized.startsWith('fe80:') || normalized.startsWith('fc') || normalized.startsWith('fd');
+    return (
+      address === '::1' ||
+      address === '::' ||
+      address.startsWith('fe80:') ||
+      address.startsWith('fc') ||
+      address.startsWith('fd')
+    );
   }
 
-  return false;
+  return address === 'localhost' || address.endsWith('.localhost');
 }
 
-function validateRemoteImageUrl(source: string): URL {
+/** DNS 解析结果形状（与 node:dns/promises.lookup({all:true}) 一致） */
+interface DnsAddressRecord {
+  address: string;
+}
+
+/**
+ * 远程图片网络接缝：仅供单元测试注入，生产路径不传，行为与默认实现完全一致。
+ */
+export interface RemoteImageNetworkSeams {
+  /** DNS 解析实现，默认 node:dns/promises.lookup */
+  lookup?: (hostname: string, options: { all: true }) => Promise<DnsAddressRecord[]>;
+  /** fetch 实现，默认全局 fetch */
+  fetchImpl?: typeof fetch;
+}
+
+export async function validateRemoteImageUrl(
+  source: string,
+  seams: RemoteImageNetworkSeams = {},
+): Promise<URL> {
   let url: URL;
   try {
     url = new URL(source);
@@ -151,6 +243,24 @@ function validateRemoteImageUrl(source: string): URL {
   if (isPrivateOrReservedAddress(url.hostname)) {
     throw new Error('远程图片 URL 不允许指向本机、内网或保留地址');
   }
+  if (net.isIP(url.hostname) === 0) {
+    // 任一解析结果落在内网/保留段即拒绝（防止同时返回公网+内网地址绕过）。
+    //
+    // 安全说明（DNS rebinding 残留 TOCTOU 风险）：此处先解析校验，随后 fetch
+    // 建连时会再次独立解析 DNS，两次查询之间存在时间窗。攻击者控制低 TTL 权威
+    // DNS 时可在校验通过后把地址切换为 127.0.0.1/内网。当前缓解措施：
+    //   1) 域名解析结果任一为内网/保留地址即拒绝；
+    //   2) fetch 使用 redirect:'error'，禁止 3xx 跳转到未校验主机；
+    //   3) 仅允许 http/https、拒绝 URL 凭据。
+    // 彻底消除需自定义 undici dispatcher 的 connect.lookup，把已校验 IP 钉到
+    // 连接层，作为后续加固项（Node 20 原生 fetch 不支持直接传 lookup）。
+    const resolveDns: NonNullable<RemoteImageNetworkSeams['lookup']> =
+      seams.lookup ?? ((hostname) => lookup(hostname, { all: true }));
+    const resolved = await resolveDns(url.hostname, { all: true });
+    if (resolved.length === 0 || resolved.some(({ address }) => isPrivateOrReservedAddress(address))) {
+      throw new Error('远程图片 URL 解析到了本机、内网或保留地址');
+    }
+  }
   return url;
 }
 
@@ -159,12 +269,16 @@ function validateRemoteImageUrl(source: string): URL {
  *
  * 外部调用者可传 Buffer、本地路径、http(s) URL 或 base64 data URI。远程和本地
  * 图片都限制为 10 MiB，避免一次 OCR 调用意外占用过多内存。
+ *
+ * @param image - 图片二进制、本地路径、远程 URL 或 data URI
+ * @param seams - 仅供单元测试注入 DNS/fetch 接缝，生产调用无需传
  */
-export async function resolveImageBuffer(image: Buffer | string): Promise<Buffer> {
+export async function resolveImageBuffer(
+  image: Buffer | string,
+  seams: RemoteImageNetworkSeams = {},
+): Promise<Buffer> {
   if (Buffer.isBuffer(image)) {
-    if (image.length === 0) throw new Error('图片数据不能为空');
-    if (image.length > MAX_IMAGE_BYTES) throw new Error('图片数据不能超过 10 MiB');
-    return image;
+    return validateImageBuffer(image);
   }
 
   const source = image.trim();
@@ -176,17 +290,17 @@ export async function resolveImageBuffer(image: Buffer | string): Promise<Buffer
       throw new Error('无效的图片 base64 data URI：仅支持 data:image/*;base64,... 格式');
     }
     const buffer = Buffer.from(match[1].replace(/\s/g, ''), 'base64');
-    if (buffer.length === 0) throw new Error('图片 base64 数据不能为空');
-    if (buffer.length > MAX_IMAGE_BYTES) throw new Error('图片数据不能超过 10 MiB');
-    return buffer;
+    return validateImageBuffer(buffer);
   }
 
   if (/^https?:\/\//i.test(source)) {
-    const url = validateRemoteImageUrl(source);
+    const url = await validateRemoteImageUrl(source, seams);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REMOTE_IMAGE_TIMEOUT_MS);
     try {
-      const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
+      // redirect:'error'：禁止跟随 3xx，避免跳转到未经过 SSRF 校验的主机
+      const doFetch = seams.fetchImpl ?? fetch;
+      const response = await doFetch(url, { signal: controller.signal, redirect: 'error' });
       if (!response.ok) {
         throw new Error(`下载远程图片失败 (HTTP ${response.status}): ${source}`);
       }
@@ -194,11 +308,8 @@ export async function resolveImageBuffer(image: Buffer | string): Promise<Buffer
       if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_BYTES) {
         throw new Error('远程图片不能超过 10 MiB');
       }
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      if (buffer.length === 0) throw new Error('远程图片数据不能为空');
-      if (buffer.length > MAX_IMAGE_BYTES) throw new Error('远程图片不能超过 10 MiB');
-      return buffer;
+      const buffer = await readResponseWithLimit(response, MAX_IMAGE_BYTES);
+      return validateImageBuffer(buffer);
     } finally {
       clearTimeout(timeout);
     }
@@ -206,9 +317,10 @@ export async function resolveImageBuffer(image: Buffer | string): Promise<Buffer
 
   try {
     const stat = await fs.stat(source);
+    if (!stat.isFile()) throw new Error('图片路径必须指向普通文件');
     if (stat.size > MAX_IMAGE_BYTES) throw new Error('本地图片不能超过 10 MiB');
     if (stat.size === 0) throw new Error('本地图片不能为空');
-    return await fs.readFile(source);
+    return validateImageBuffer(await fs.readFile(source));
   } catch (error) {
     if (error instanceof Error && (error.message.includes('不能超过') || error.message.includes('不能为空'))) {
       throw error;
@@ -240,7 +352,7 @@ export class OcrService {
    * @param options - 配置选项（部分提供时合并默认值）
    */
   constructor(options: Partial<OcrOptions> = {}) {
-    this._options = { ...DEFAULT_OPTIONS, ...options };
+    this._options = validateOcrOptions({ ...DEFAULT_OPTIONS, ...options });
   }
 
   /**
@@ -501,6 +613,7 @@ export class OcrService {
    * @param options - 要更新的配置项
    */
   updateOptions(options: Partial<OcrOptions>): void {
+    validateOcrOptions({ ...this._options, ...options });
     Object.assign(this._options, options);
   }
 }

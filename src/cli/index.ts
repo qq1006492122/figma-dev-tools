@@ -6,7 +6,8 @@
 
 import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
-import path from 'node:path';
+import * as path from 'node:path';
+import * as tar from 'tar';
 import { fileURLToPath } from 'node:url';
 
 import { input, password, select, confirm } from '@inquirer/prompts';
@@ -31,6 +32,13 @@ import { createFileWriter } from '../services/file-writer.js';
 import { createTokenStore } from '../services/token-store.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
 import { createVueGenerator } from '../services/vue-generator.js';
+import {
+  canUseFallbackPackage,
+  compareStableVersions,
+  fetchLatestStableVersion,
+  getUpdateExitCode,
+  isValidStableVersion,
+} from './update-utils.js';
 import type { CodeGenResult, TailwindExtension, PendingAsset } from '../types.js';
 import type {
   ProcessedAsset,
@@ -2029,26 +2037,27 @@ if (rawArgs.includes('-v') || rawArgs.includes('--ver')) {
 if (rawArgs.includes('--update')) {
   // 使用 IIFE 处理异步更新逻辑，外层用 process.exit 终止
   void (async () => {
+    let installSucceeded = false;
+    let fallbackSucceeded = false;
     const spinner = ora(chalk.blue(i18n.t('update.checking') as string)).start();
     try {
       const pkgJson = await fs.readJson(
         path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../package.json'),
       );
       const currentVersion = pkgJson.version as string;
-
-      const response = await fetch('https://registry.npmjs.org/figma-dev-tools/latest');
-      if (!response.ok) {
-        spinner.fail(chalk.red(i18n.t('update.notFound') as string));
-        process.exit(1);
+      if (!isValidStableVersion(currentVersion)) {
+        throw new Error(i18n.t('update.invalidCurrentVersion', String(pkgJson.version)) as string);
       }
-      const data = (await response.json()) as { version: string };
-      const latestVersion = data.version;
+
+      const latestVersion = await fetchLatestStableVersion(
+        'https://registry.npmjs.org/figma-dev-tools/latest',
+      );
 
       spinner.stop();
       console.log(chalk.gray(i18n.t('update.currentVersion', currentVersion) as string));
       console.log(chalk.gray(i18n.t('update.latestVersion', latestVersion) as string));
 
-      if (currentVersion === latestVersion) {
+      if (compareStableVersions(latestVersion, currentVersion) <= 0) {
         console.log(`\n${chalk.green(i18n.t('update.alreadyLatest') as string)}`);
         process.exit(0);
       }
@@ -2063,6 +2072,7 @@ if (rawArgs.includes('--update')) {
 
       try {
         execFileSync(npmBin, ['install', '-g', 'figma-dev-tools'], { stdio: 'pipe', shell: true });
+        installSucceeded = true;
         updateSpinner.succeed(chalk.green(i18n.t('update.success') as string));
       } catch (execError) {
         // 提取 npm 错误详情
@@ -2086,6 +2096,8 @@ if (rawArgs.includes('--update')) {
         const isEBUSY = stderrStr.includes('EBUSY') || stderrStr.includes('errno -4082');
         if (isEBUSY) {
           updateSpinner.text = chalk.yellow(i18n.t('update.ebusyDetected') as string);
+          // 提升到 try 外声明，保证 catch/finally 都能访问并清理临时目录
+          let tmpRoot: string | null = null;
           try {
             /**
              * robocopy 在 Windows 下的退出码约定：
@@ -2115,15 +2127,12 @@ if (rawArgs.includes('--update')) {
             // ============ 统一用 npm.cmd 取全局路径，避免 MSYS npm 返回 MSYS 风格路径 ============
             const globalPrefix = execFileSync(npmBin, ['root', '-g'], { encoding: 'utf-8', shell: true }).trim();
             const globalPkgDir = path.join(globalPrefix, 'figma-dev-tools');
-            void fs.ensureDirSync(globalPkgDir);
+            fs.ensureDirSync(globalPkgDir);
 
+            // 临时目录在 finally 中无条件清理，避免任何失败路径泄漏 figma-dev-tools-upgrade-*
+            tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-dev-tools-upgrade-'));
             let srcPkgDir: string;
-            let tempCleanup: (() => void) | null = null;
             try {
-              const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-dev-tools-upgrade-'));
-              tempCleanup = () => {
-                try { fs.removeSync(tmpRoot); } catch { /* ignore */ }
-              };
               execFileSync(npmBin, ['pack', `figma-dev-tools@${latestVersion}`, '--pack-destination', tmpRoot], {
                 cwd: tmpRoot,
                 stdio: 'pipe',
@@ -2134,22 +2143,24 @@ if (rawArgs.includes('--update')) {
                 throw new Error('npm pack produced no tgz');
               }
               const tgzPath = path.join(tmpRoot, tgzList[0] as string);
-              // 跨平台解 tgz：优先 tar，兜底用 node 内置 zlib + tar
-              try {
-                execFileSync('tar', ['-xzf', tgzPath, '-C', tmpRoot], { stdio: 'pipe', shell: true });
-              } catch {
-                const untarScript = [
-                  "const fs=require('fs');const zlib=require('zlib');const tar=require('tar');",
-                  `tar.x({file:${JSON.stringify(tgzPath)},cwd:${JSON.stringify(tmpRoot)},sync:true});`,
-                ].join('');
-                execFileSync('node', ['-e', untarScript], { stdio: 'pipe', shell: true });
-              }
+              await tar.x({ file: tgzPath, cwd: tmpRoot, strict: true });
               srcPkgDir = path.join(tmpRoot, 'package');
               if (!fs.existsSync(srcPkgDir)) throw new Error('tgz extract failed: package/ not found');
             } catch (packErr) {
-              // npm pack 兜底：从本地已安装目录复制（至少比完全失败好）
-              const currentDir = path.dirname(fileURLToPath(import.meta.url));
-              srcPkgDir = path.resolve(currentDir, '../..');
+              throw new Error(
+                i18n.t(
+                  'update.fallbackPackageFetch',
+                  latestVersion,
+                  packErr instanceof Error ? packErr.message : String(packErr),
+                ) as string,
+              );
+            }
+
+            const sourcePackage = fs.readJsonSync(path.join(srcPkgDir, 'package.json')) as { version?: unknown };
+            if (!canUseFallbackPackage(sourcePackage.version, latestVersion)) {
+              throw new Error(
+                i18n.t('update.fallbackVersionMismatch', latestVersion, String(sourcePackage.version)) as string,
+              );
             }
 
             // 复制子目录 dist/gui/bin
@@ -2172,15 +2183,33 @@ if (rawArgs.includes('--update')) {
               execFileSync('cp', [srcPkgJson, dstPkgJson], { stdio: 'pipe' });
             }
 
-            if (tempCleanup) tempCleanup();
+            const installedPackage = fs.readJsonSync(dstPkgJson) as { version?: unknown };
+            if (!canUseFallbackPackage(installedPackage.version, latestVersion)) {
+              throw new Error(
+                i18n.t('update.fallbackVerifyFailed', latestVersion, String(installedPackage.version)) as string,
+              );
+            }
+            fallbackSucceeded = true;
+
             updateSpinner.succeed(chalk.green(i18n.t('update.ebusyFallbackSuccess') as string));
             console.log(chalk.gray(i18n.t('update.restartHint') as string));
           } catch (fallbackError) {
             updateSpinner.fail(
               chalk.red((i18n.t('update.ebusyFallbackFailed') as string)),
             );
+            // 展示具体失败原因（i18n 文案）帮助排查，不输出 [debug] 等技术前缀
             const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-            console.log(chalk.gray(`[debug] fallbackError: ${msg}`));
+            console.log(chalk.gray(msg));
+            console.log(chalk.gray(i18n.t('update.hint') as string));
+          } finally {
+            // 成功/失败均清理临时目录（含 tgz 与解包内容），清理失败不影响退出码
+            if (tmpRoot) {
+              try {
+                fs.removeSync(tmpRoot);
+              } catch {
+                /* ignore */
+              }
+            }
           }
         } else {
           updateSpinner.fail(
@@ -2194,7 +2223,7 @@ if (rawArgs.includes('--update')) {
       spinner2.fail(chalk.red(i18n.t('update.failed') as string) + ': ' + (error instanceof Error ? error.message : String(error)));
       console.log(chalk.gray(i18n.t('update.hint') as string));
     }
-    process.exit(0);
+    process.exit(getUpdateExitCode({ installSucceeded, fallbackSucceeded }));
   })();
 } else {
   // 解析命令行参数

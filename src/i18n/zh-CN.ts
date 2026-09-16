@@ -705,6 +705,15 @@ export const zhCN = {
     restartHint: '🔄 覆盖成功！因文件被占用无法删除旧版本，但新文件已写入。请完全退出 Trae/编辑器后重新打开，新版本即生效',
     notFound: '无法获取最新版本信息，请检查网络连接',
     hint: '💡 也可以手动执行: npm install -g figma-dev-tools',
+    // v1.4.17：更新链路版本校验相关错误，禁止硬编码中文
+    invalidCurrentVersion: (v: string) => `当前版本号无效: ${v}`,
+    fallbackPackageFetch: (version: string, reason: string) =>
+      `无法获取目标版本 v${version} 的安装包: ${reason}`,
+    fallbackPackageInvalid: (v: string) => `备用安装包版本号无效: ${v}`,
+    fallbackVersionMismatch: (expected: string, actual: string) =>
+      `备用安装包版本不匹配，期望 v${expected}，实际 v${actual}`,
+    fallbackVerifyFailed: (expected: string, actual: string) =>
+      `备用更新后版本校验失败，期望 v${expected}，实际 v${actual}`,
   },
 } as const;
 

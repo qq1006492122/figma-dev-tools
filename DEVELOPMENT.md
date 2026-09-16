@@ -1,4 +1,4 @@
-# figma-dev-tools v1.4.15 开发指南
+# figma-dev-tools v1.4.17 开发指南
 
 ## 项目概述
 
@@ -130,8 +130,9 @@ npm test          # 确保测试通过
 
 ### 5. 版本号管理
 
-- 版本号在 package.json、src/cli/index.ts、src/index.ts 三处保持一致
-- 不要在代码中硬编码版本号，从 package.json 读取或统一常量
+- 版本号唯一真源是 package.json（package-lock.json 根条目同步）
+- 不要在代码中硬编码版本号：CLI/GUI 与 MCP 握手版本（src/index.ts 的 McpServer.version）均在运行时从 package.json 读取
+- 发布版本时同步更新 package.json version/description、package-lock.json 及 README×2/QUICKSTART×2/SKILL.md/DEVELOPMENT.md 中的版本号与版本历史
 
 ### 6. Git 提交规范
 

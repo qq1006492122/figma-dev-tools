@@ -15,8 +15,15 @@ import {
   getOcrService,
   resetOcrService,
   resolveImageBuffer,
+  validateRemoteImageUrl,
+  isPrivateOrReservedAddress,
+  type RemoteImageNetworkSeams,
 } from '../../src/services/ocr-service.js';
 import type { FigmaNode } from '../../src/types.js';
+
+function makePngBuffer(): Buffer {
+  return Buffer.from('89504e470d0a1a0a', 'hex');
+}
 
 function makeTextNode(id: string, name: string, characters: string, visible: boolean = true): FigmaNode {
   return {
@@ -29,6 +36,22 @@ function makeTextNode(id: string, name: string, characters: string, visible: boo
 }
 
 describe('OcrService', () => {
+  it('readResponseWithLimit 超限时应取消底层响应流', async () => {
+    const { readResponseWithLimit } = await import('../../src/services/ocr-service.js');
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(11));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = new Response(body);
+    await expect(readResponseWithLimit(response, 10)).rejects.toThrow('不能超过');
+    expect(cancelled).toBe(true);
+  });
+
   let service: OcrService;
 
   beforeEach(() => {
@@ -56,11 +79,24 @@ describe('OcrService', () => {
       expect(options.oem).toBe(1);
     });
 
+    it('应拒绝空语言和越界 OCR 参数', () => {
+      expect(() => new OcrService({ language: '  ' })).toThrow(/language|语言/);
+      expect(() => new OcrService({ psm: 0 })).toThrow(/PSM|psm/);
+      expect(() => new OcrService({ oem: 4 })).toThrow(/OEM|oem/);
+    });
+
     it('updateOptions 应合并配置', () => {
       service.updateOptions({ psm: 11 });
       expect(service.getOptions().psm).toBe(11);
       expect(service.getOptions().language).toBe('chi_sim+eng');
     });
+
+    it('updateOptions 应拒绝非法 OCR 参数', () => {
+      expect(() => service.updateOptions({ language: '' })).toThrow(/language|语言/);
+      expect(() => service.updateOptions({ psm: 14 })).toThrow(/PSM|psm/);
+      expect(() => service.updateOptions({ oem: -1 })).toThrow(/OEM|oem/);
+    });
+
   });
 
   describe('原生文本提取', () => {
@@ -126,24 +162,34 @@ describe('OcrService', () => {
 
   describe('图片来源解析', () => {
     it('应支持 Buffer 和图片 base64 data URI', async () => {
-      const buffer = Buffer.from('image-data');
+      const buffer = makePngBuffer();
       await expect(resolveImageBuffer(buffer)).resolves.toEqual(buffer);
       await expect(resolveImageBuffer(`data:image/png;base64,${buffer.toString('base64')}`)).resolves.toEqual(buffer);
     });
 
-    it('应拒绝空数据和非图片 data URI', async () => {
-      await expect(resolveImageBuffer('')).rejects.toThrow('不能为空');
-      await expect(resolveImageBuffer('data:text/plain;base64,SGVsbG8=')).rejects.toThrow('无效');
+    it('应拒绝没有图片签名的 Buffer', async () => {
+      await expect(resolveImageBuffer(Buffer.from('not-an-image'))).rejects.toThrow(/图片格式|图片数据/);
+    });
+
+    it('应拒绝解码后不是图片的 base64 data URI', async () => {
+      const payload = Buffer.from('plain text').toString('base64');
+      await expect(resolveImageBuffer(`data:image/png;base64,${payload}`)).rejects.toThrow(/图片格式|图片数据/);
+    });
+
+
+    it('应拒绝目录作为本地图片路径', async () => {
+      await expect(resolveImageBuffer(process.cwd())).rejects.toThrow('普通文件');
     });
 
     it('应支持本地图片路径', async () => {
-      const filePath = `${process.cwd()}/.ocr-test-image.bin`;
-      await import('node:fs/promises').then(({ writeFile, unlink }) =>
-        writeFile(filePath, Buffer.from('image-data')).then(async () => {
-          await expect(resolveImageBuffer(filePath)).resolves.toEqual(Buffer.from('image-data'));
-          await unlink(filePath);
-        }),
-      );
+      const filePath = `${process.cwd()}/.ocr-test-image.png`;
+      const { writeFile, unlink } = await import('node:fs/promises');
+      await writeFile(filePath, makePngBuffer());
+      try {
+        await expect(resolveImageBuffer(filePath)).resolves.toEqual(makePngBuffer());
+      } finally {
+        await unlink(filePath).catch(() => undefined);
+      }
     });
   });
 
@@ -159,8 +205,79 @@ describe('OcrService', () => {
       await expect(resolveImageBuffer(url)).rejects.toThrow('不允许指向本机、内网或保留地址');
     });
 
+    it('应拒绝 IPv4-mapped IPv6 的本机地址', async () => {
+      await expect(resolveImageBuffer('http://[::ffff:127.0.0.1]/image.png')).rejects.toThrow(/本机、内网或保留地址/);
+    });
+
     it('应拒绝 URL 中的凭据', async () => {
       await expect(resolveImageBuffer('https://user:secret@example.com/image.png')).rejects.toThrow('不允许包含用户名或密码');
+    });
+
+    it.each([
+      ['198.18.0.1', true],
+      ['198.18.255.255', true],
+      ['198.19.0.1', true],
+      ['198.19.255.255', true],
+      ['192.0.0.1', true],
+      ['192.0.2.10', true],
+      ['100.64.0.1', true],
+      ['169.254.1.1', true],
+      ['172.16.0.1', true],
+      ['172.32.0.1', false],
+      ['198.51.100.7', true],
+      ['203.0.113.9', true],
+      ['8.8.8.8', false],
+      ['114.114.114.114', false],
+    ])('RFC 保留段判定 isPrivateOrReservedAddress(%s) === %s', (ip, expected) => {
+      expect(isPrivateOrReservedAddress(ip)).toBe(expected);
+    });
+
+    it('DNS 解析结果中混入内网地址时应拒绝（防多 A 记录绕过）', async () => {
+      const mixedLookup: NonNullable<RemoteImageNetworkSeams['lookup']> = async () => [
+        { address: '93.184.216.34' },
+        { address: '10.0.0.1' },
+      ];
+      await expect(
+        resolveImageBuffer('http://cdn.example.com/a.png', { lookup: mixedLookup }),
+      ).rejects.toThrow('解析到了本机、内网或保留地址');
+    });
+
+    it('应通过注入的 DNS 接缝拒绝 DNS rebinding 到 127.0.0.1', async () => {
+      const evilLookup: NonNullable<RemoteImageNetworkSeams['lookup']> = async () => [
+        { address: '127.0.0.1' },
+      ];
+      await expect(
+        validateRemoteImageUrl('http://rebind.example.com/a.png', { lookup: evilLookup }),
+      ).rejects.toThrow('解析到了本机、内网或保留地址');
+    });
+
+    it('DNS 仅解析到公网地址时应放行并返回 URL', async () => {
+      const safeLookup: NonNullable<RemoteImageNetworkSeams['lookup']> = async () => [
+        { address: '93.184.216.34' },
+      ];
+      const url = await validateRemoteImageUrl('http://cdn.example.com/a.png', { lookup: safeLookup });
+      expect(url).toBeInstanceOf(URL);
+      expect(url.hostname).toBe('cdn.example.com');
+    });
+
+    it('下载远程图片时必须使用 redirect:error 模式（禁止跳转绕过 SSRF 校验）', async () => {
+      const safeLookup: NonNullable<RemoteImageNetworkSeams['lookup']> = async () => [
+        { address: '93.184.216.34' },
+      ];
+      let captured: RequestInit | undefined;
+      const fetchImpl: typeof fetch = async (_input, init) => {
+        captured = init;
+        return new Response(new Uint8Array(makePngBuffer()), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      };
+      const buffer = await resolveImageBuffer('http://cdn.example.com/a.png', {
+        lookup: safeLookup,
+        fetchImpl,
+      });
+      expect(buffer).toEqual(makePngBuffer());
+      expect(captured?.redirect).toBe('error');
     });
   });
 

@@ -10,11 +10,12 @@
  * - 设计规范检查（含维度评分）
  * - 本地缓存加速
  *
- * @version 1.4.4
+ * @version 版本号运行时读取 package.json（见 readPackageVersion），无需手动维护
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -25,6 +26,7 @@ import { initI18nSync } from './i18n/index.js';
 import type { A11yReportEntry } from './services/a11y-enhancer.js';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
 import {
+  BrowserFallbackService,
   getBrowserFallbackService,
   type BrowserFallbackResult,
 } from './services/browser-fallback.js';
@@ -35,7 +37,7 @@ import { createDesignContextService } from './services/design-context.js';
 import { createDesignLinter } from './services/design-linter.js';
 import type { DesignSystemSuggestion } from './services/design-system.js';
 import {
-  getFidelityVerifyService,
+  FidelityVerifyService,
   type FidelityVerifyOptions,
   type FidelityVerifyResult,
 } from './services/fidelity-verify.js';
@@ -258,9 +260,24 @@ function prependStaleCacheWarning(lines: string[], client: FigmaClient): void {
   }
 }
 
+/**
+ * 运行时读取包版本，避免 MCP 握手版本与 package.json 脱节。
+ *
+ * 编译后本文件位于 dist/index.js，package.json 在其上一级目录。
+ */
+function readPackageVersion(): string {
+  try {
+    const pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: unknown };
+    return typeof pkg.version === 'string' && pkg.version.length > 0 ? pkg.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const server = new McpServer({
   name: 'figma-dev-tools',
-  version: '1.4.16',
+  version: readPackageVersion(),
 });
 
 server.registerTool(
@@ -1881,11 +1898,9 @@ server.registerTool(
         };
       }
 
-      // 配置兜底服务
-      const fallbackService = getBrowserFallbackService();
-      if (devicePixelRatio !== undefined) {
-        fallbackService.updateOptions({ devicePixelRatio });
-      }
+      const fallbackService = new BrowserFallbackService(
+        devicePixelRatio === undefined ? {} : { devicePixelRatio },
+      );
 
       // 执行浏览器兜底截图
       const fallbackResult: BrowserFallbackResult = await fallbackService.captureScreenshot(
@@ -2123,17 +2138,13 @@ server.registerTool(
       }
 
       // ============ 2. 配置并执行还原度校验 ============
-      const verifyService = getFidelityVerifyService();
       const optionsToUpdate: Partial<FidelityVerifyOptions> = {};
       if (threshold !== undefined) optionsToUpdate.threshold = threshold;
       if (devicePixelRatio !== undefined) optionsToUpdate.devicePixelRatio = devicePixelRatio;
       if (viewportWidth !== undefined) optionsToUpdate.viewportWidth = viewportWidth;
       if (viewportHeight !== undefined) optionsToUpdate.viewportHeight = viewportHeight;
       if (outputDir !== undefined) optionsToUpdate.outputDir = outputDir;
-
-      if (Object.keys(optionsToUpdate).length > 0) {
-        verifyService.updateOptions(optionsToUpdate);
-      }
+      const verifyService = new FidelityVerifyService(optionsToUpdate);
 
       // 先检查依赖可用性
       const deps = await verifyService.checkDependencies();

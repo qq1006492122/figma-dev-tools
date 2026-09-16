@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.15
+# 🎨 Figma Dev Tools v1.4.17
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -71,6 +71,8 @@ const service = new BrowserFallbackService({
 
 | 版本    | 主题                    | 核心内容                                                                                                   |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.17 | MCP 并发可靠性 + OCR SSRF 加固 + 更新链路双校验 | 1) BrowserPool 增加 `poolKey` 快照与幂等 `release`，修复并发请求串池/重复释放；2) OCR 远程图片 SSRF 补齐 RFC2544 `198.19.0.0/16` 保留段拦截、DNS 多 A 记录任一为内网即拒绝、`redirect:'error'` 禁止跳转，并以可注入接缝补齐 DNS rebinding/redirect 单测（代码注明残留 TOCTOU 风险）；3) `--update`/GUI 备用复制先解析并钉住最新稳定版本（弃用浮动 `@latest`），来源 tgz 与落盘 package.json 双重严格版本校验，校验失败不再谎报成功；4) CLI/GUI 升级临时目录统一 try/finally 必清理，失败提示全面 i18n（zh-CN/en-US 新增 5 键）并补 `update.hint`；5) GUI 仅监听 127.0.0.1 并加 Origin 白名单与 OPTIONS 预检；6) McpServer 握手版本改为运行时读取 package.json，杜绝版本号漂移；测试 134→152 全绿 |
+| v1.4.16 | npm 版本占位发布 | 版本号占用发布，代码与 v1.4.15 一致，无功能变更；版本历史文档自本版起补齐 |
 | v1.4.15 | `--update` EBUSY 备用复制加固 | 修复 v1.4.14 的 `figma-dev --update` 在 Windows Git Bash/MINGW64 下 EBUSY 后 robocopy 也失败：1) 统一用 `npm.cmd` / `cmd.exe` 避免 MSYS npm 返回 `/c/Users/...` 风格路径；2) robocopy `/MIR` 改 `/E`（只覆盖不删除，Trae 进程锁住的文件删不动会导致整体失败）+ 加 `/XF *.ps1`；3) 所有 `execFileSync` 补 `shell: true` 跨 shell 兼容；4) gui-server.ts EBUSY fallback 同步修复；5) 新增 `update.restartHint` i18n 键 |
 | v1.4.14 | OCR 文本提取 + 版本号统一修复 | 新增第 20 个 MCP 工具 `figma_ocr_extract`：原生节点 JSON 优先提取（零依赖、100% 准确）、tesseract.js OCR 兜底（chi_sim+eng、PSM/OEM 可调、SSRF 防护远程图片）；新增 `OcrService` + 单例管理 + 可选依赖动态导入 + i18n 错误消息；tesseract.js 加入 optionalDependencies；新增 22 个 OCR 单元测试；修复 src/index.ts McpServer.version 停留在 v1.4.4 的历史遗留 |
 | v1.4.13 | 发布级回归加固 + getErrorInfo 防御归一化 | 新增 smoke 发布级回归用例×4（i18n 路径/codes 空指针/错误格式化）；getErrorInfo 入口 null/undefined 归一化避免字段变 null 再次链式崩溃；build 0 错 + 99 case 全通过 |
@@ -791,7 +793,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.15                           │
+│                      figma-dev-tools MCP Server v1.4.17                           │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │

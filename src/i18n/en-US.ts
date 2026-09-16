@@ -718,6 +718,15 @@ export const enUS = {
     restartHint: '🔄 Overwrite succeeded! Some locked files could not be deleted but new ones are written. Please fully quit Trae/editor and reopen for the new version to take effect',
     notFound: 'Unable to fetch latest version info. Please check your network connection.',
     hint: '💡 You can also manually run: npm install -g figma-dev-tools',
+    // v1.4.17: update-flow version validation errors (no hardcoded user-facing strings)
+    invalidCurrentVersion: (v: string) => `Invalid current version: ${v}`,
+    fallbackPackageFetch: (version: string, reason: string) =>
+      `Failed to fetch the v${version} package: ${reason}`,
+    fallbackPackageInvalid: (v: string) => `Invalid fallback package version: ${v}`,
+    fallbackVersionMismatch: (expected: string, actual: string) =>
+      `Fallback package version mismatch: expected v${expected}, got v${actual}`,
+    fallbackVerifyFailed: (expected: string, actual: string) =>
+      `Post-update version verification failed: expected v${expected}, got v${actual}`,
   },
 } as const;
 

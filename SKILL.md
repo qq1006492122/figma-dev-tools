@@ -1,13 +1,13 @@
 ---
 name: 'figma-dev-tools'
 description:
-  'Figma 设计到代码增强工具集 v1.4.15 -
+  'Figma 设计到代码增强工具集 v1.4.17 -
   20个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div
   soup、上下文爆炸、hex写死、资源路径处理、深层嵌套截断、层级混乱等问题。支持Trae/VS
   Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。'
 ---
 
-# Figma Dev Tools v1.4.15 - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.4.17 - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 
@@ -675,6 +675,32 @@ import { publicCdnUrl } from '@/lib/utils';
 ---
 
 ## 📋 更新日志
+
+### v1.4.17（并发可靠性 + SSRF 加固 + 更新链路硬化）
+
+**🔀 MCP 并发可靠性**
+
+- BrowserPool 新增 `poolKey` 快照，关页时按创建时的池键归还，修复并发请求串池
+- `release` 改为幂等闭包，重复释放不再误杀其他请求正在用的浏览器实例
+
+**🔒 OCR 远程图片 SSRF 加固**
+
+- 补齐 RFC2544 `198.19.0.0/16` 基准测试保留段拦截（原仅拦 `198.18.0.0/15` 的一半）
+- DNS 解析多 A 记录时任一为内网/保留地址即拒绝，防止公网+内网混合绕过
+- 远程下载强制 `redirect:'error'`，禁止 3xx 跳转到未校验主机
+- 新增可注入 DNS/fetch 测试接缝，补齐 DNS rebinding、redirect 契约单测；代码注释明确标注残留 TOCTOU 风险与后续钉 IP 方案
+
+**⬆️ 更新链路硬化（CLI + GUI）**
+
+- EBUSY 备用复制先从 registry 解析最新稳定版本并全程钉住，弃用浮动 `@latest`
+- 来源 tgz 与落盘 package.json 双重严格版本校验（`canUseFallbackPackage`），失败如实报错，不再谎报 success
+- 升级临时目录统一 try/finally 必清理；失败提示全部走 i18n（zh-CN/en-US 新增 5 键）并补 `update.hint`
+- GUI 服务仅监听 `127.0.0.1`，新增 Origin 白名单与 OPTIONS 预检
+- MCP 握手版本改为运行时读取 package.json，杜绝版本号漂移；单元测试 134 → 152 全绿
+
+### v1.4.16
+
+- npm 版本占位发布，代码与 v1.4.15 一致，无功能变更
 
 ### v1.4.0（安全与层级增强）
 

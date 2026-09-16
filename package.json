@@ -1,7 +1,7 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.4.16",
-  "description": "Figma Dev Tools MCP Server v1.4.16 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, paywall browser fallback, visual approximation mode, fidelity pixel-diff verification, OCR text extraction (native + tesseract.js fallback), zero `any` types for type safety, and one-click installation across 8+ editors.",
+  "version": "1.4.17",
+  "description": "Figma Dev Tools MCP Server v1.4.17 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, paywall browser fallback, visual approximation mode, fidelity pixel-diff verification, OCR text extraction (native + tesseract.js fallback), SSRF hardening for remote images, zero `any` types for type safety, and one-click installation across 8+ editors.",
   "keywords": [
     "a11y",
     "accessibility",
@@ -104,6 +104,7 @@
     "sanitize-html": "^2.17.5",
     "svgo": "^3.3.2",
     "tailwind-merge": "^3.6.0",
+    "tar": "^7.5.22",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -117,8 +118,8 @@
   },
   "optionalDependencies": {
     "pixelmatch": "^6.0.0",
-    "pngjs": "^7.0.0",
     "playwright": "^1.40.0",
+    "pngjs": "^7.0.0",
     "tesseract.js": "^7.0.0"
   },
   "engines": {
