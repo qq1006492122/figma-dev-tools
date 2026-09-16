@@ -74,7 +74,20 @@ import { createFlexFixer, type FlexFixResult } from './flex-fixer.js';
 import { createInteractionInferrer, type InteractionInferrerResult } from './interaction-inferrer.js';
 import { createResponsiveInferrer, type ResponsiveResult } from './responsive-inferrer.js';
 import { SvgInlineRenderer, isVectorNode, type InlineSvgResult } from './svg-inline-renderer.js';
-import { createTailwindMapper, type TailwindMapping } from './tailwind-mapper.js';
+import {
+  assertStyleFormatSupported,
+  createStyleRenderer,
+  mergeStyleWithExtraTokens,
+  STYLE_FORMATS_NEW_PIPELINE,
+  type StyleExtensionNeeded,
+  type StyleFormat,
+  type StyleHint,
+  type StyleRenderer,
+  type StyleSidecarFile,
+  type UnocssMode,
+} from './style-renderers/index.js';
+import { normalizeAssetUrlPath, planAssetReference, toAssetVarName, type BundlerKind } from './asset-paths.js';
+import { generateReactPropsInterface } from './props-type-generator.js';
 
 // ============ 类型定义 ============
 
@@ -108,14 +121,16 @@ interface ProcessedNodeContext {
   isRoot: boolean;
   /** 需要引入的 import 语句集合 */
   imports: Set<string>;
-  /** 需要 @theme 扩展的值列表 */
-  extensions: TailwindMapping['extensionsNeeded'];
+  /** 需要 @theme 扩展的值列表（v1.4.18 T7 起采用渲染器公共契约类型） */
+  extensions: StyleExtensionNeeded[];
   /** Tailwind 映射过程中产生的警告（用于人工复核） */
   warnings: string[];
   /** 需要下载的资源列表（nodeId → 建议文件名） */
   pendingAssets: Array<{ nodeId: string; name: string; type: string }>;
   /** 是否使用 publicCdnUrl 引用资源 */
   usePublicCdn: boolean;
+  /** 目标构建器（v1.4.18，决定图片资源引用形态；默认 none 等同 1.4.17） */
+  bundler: BundlerKind;
   /** 场景名称（用于资源路径组织） */
   sceneName: string;
   /** 组件使用统计映射 */
@@ -410,6 +425,12 @@ export class CodeGenerator {
       componentName?: string;
       /** 是否使用 publicCdnUrl() 引用资源，默认 true */
       usePublicCdn?: boolean;
+      /** 目标构建器（v1.4.18）：默认 none，产物与 1.4.17 一致；vite/webpack/nextjs/remix 产出对应资源引用 */
+      bundler?: BundlerKind;
+      /** 样式方案（v1.4.18 T7）：默认 tailwind；新管线仅 tailwind/unocss，其他值经注册表显式拒绝 */
+      styleFormat?: StyleFormat;
+      /** UnoCSS 模式（v1.4.18 T8，仅 styleFormat=unocss 生效）：wind（默认）| attributify */
+      unocssMode?: UnocssMode;
       /** 场景名称（用于资源路径组织） */
       sceneName?: string;
       /** 是否跳过增强器（flex-fixer/a11y/design-system/responsive），默认 false */
@@ -430,11 +451,20 @@ export class CodeGenerator {
     warnings: string[];
     /** 增强报告（v1.2.0 新增） */
     reports: EnhancementReports;
+    /** 样式方案配置建议（v1.4.18 T8，UnoCSS 非空；仅建议，不写入用户项目） */
+    styleHints: StyleHint[];
+    /** 同名旁路样式文件（v1.4.18 T9，仅 css-modules：${componentName}.module.css） */
+    styleSidecar?: StyleSidecarFile;
   }> {
     const componentName = options.componentName || this._generateComponentName(context.node.name);
-    const twMapper = createTailwindMapper({ allowArbitrary: true });
+    // v1.4.18（T7/T8）：样式方案走注册表校验 + 渲染器工厂；
+    // 新管线仅 tailwind/unocss，planned/其他管线值显式抛错而非静默错配
+    const effectiveStyleFormat = options.styleFormat ?? 'tailwind';
+    assertStyleFormatSupported(effectiveStyleFormat, STYLE_FORMATS_NEW_PIPELINE);
+    const unocssMode: UnocssMode = options.unocssMode ?? 'wind';
+    const styleRenderer = createStyleRenderer(effectiveStyleFormat, { framework: 'react', unocssMode });
     const imports = new Set<string>(['import React from "react";']);
-    const extensionsNeeded: TailwindMapping['extensionsNeeded'] = [];
+    const extensionsNeeded: StyleExtensionNeeded[] = [];
     const warnings: string[] = [];
     const pendingAssets: Array<{ nodeId: string; name: string; type: string }> = [];
     const reports: EnhancementReports = {};
@@ -480,7 +510,7 @@ export class CodeGenerator {
     }
 
     // ============ 递归生成 JSX 主体（异步，支持 SVG 内联渲染） ============
-    const jsxBody = await this._generateProcessedNodeJsx(context.node, twMapper, {
+    const jsxBody = await this._generateProcessedNodeJsx(context.node, styleRenderer, {
       depth: 1,
       isRoot: true,
       imports,
@@ -488,6 +518,7 @@ export class CodeGenerator {
       warnings,
       pendingAssets,
       usePublicCdn: options.usePublicCdn !== false,
+      bundler: options.bundler ?? 'none',
       sceneName: options.sceneName || '',
       componentMap: context.componentsUsed,
       fileKey: context.fileKey,
@@ -498,6 +529,14 @@ export class CodeGenerator {
     if (jsxBody.includes('publicCdnUrl')) {
       needsPublicCdnUrl = true;
     }
+
+    // ============ v1.4.18 T9：CSS Modules 同名 .module.css 旁路文件 ============
+    // 整棵树渲染完成后从渲染器聚合声明（含 composes 复用关系）；
+    // 主组件仅 import styles 并以 styles.x 引用，工具不直接写用户项目目录。
+    const styleSidecar =
+      effectiveStyleFormat === 'css-modules' && styleRenderer.buildSidecar
+        ? styleRenderer.buildSidecar(componentName)
+        : undefined;
 
     // ============ 组装完整 TSX 文件 ============
     const propsName = `${componentName}Props`;
@@ -510,6 +549,10 @@ export class CodeGenerator {
     // 注意：组内不按字母排序，保持逻辑引入顺序
     const allImports = new Set(imports);
     allImports.add('import { cn } from "@/lib/utils";');
+    // v1.4.18 T9：CSS Modules 同名旁路文件（相对路径归入 external 分组）
+    if (styleSidecar) {
+      allImports.add(`import styles from "./${styleSidecar.fileName}";`);
+    }
     if (needsPublicCdnUrl) {
       allImports.add('import { publicCdnUrl } from "@/lib/asset-path";');
     }
@@ -519,9 +562,10 @@ export class CodeGenerator {
     const internalImports: string[] = [];
 
     for (const imp of allImports) {
-      if (imp.includes('from "react"')) {
+      // v1.4.18：引号无关匹配（资源 import 经规划器产出时为单引号）
+      if (/from ['"]react['"]/.test(imp)) {
         reactImports.push(imp);
-      } else if (imp.includes('from "@/')) {
+      } else if (/from ['"]@\//.test(imp)) {
         internalImports.push(imp);
       } else {
         externalImports.push(imp);
@@ -545,11 +589,18 @@ export class CodeGenerator {
       lines.push(...reportComments);
     }
 
+    // v1.4.18 T10：由根节点 Component Properties 推导 Props interface
+    // TR-10.3：无属性时不生成空 interface，FC 泛型直接内联 HTMLAttributes
+    const componentProps = context.node.componentProperties ?? [];
+    const propsInterface = generateReactPropsInterface(componentName, componentProps);
+
     lines.push('');
-    lines.push(`export interface ${propsName} extends React.HTMLAttributes<HTMLElement> {`);
-    lines.push('}');
-    lines.push('');
-    lines.push(`export const ${componentName}: React.FC<${propsName}> = ({ className, ...rest }) => {`);
+    if (propsInterface) {
+      lines.push(...propsInterface.split('\n'));
+      lines.push('');
+    }
+    const fcGeneric = propsInterface ? propsName : 'React.HTMLAttributes<HTMLElement>';
+    lines.push(`export const ${componentName}: React.FC<${fcGeneric}> = ({ className, ...rest }) => {`);
 
     // 插入交互推断生成的 state 声明（v1.4.0 新增）
     if (reports.interaction?.stateDeclarations.length) {
@@ -600,6 +651,15 @@ export class CodeGenerator {
       return true;
     });
 
+    // v1.4.18 T8：UnoCSS attributify 产物在文件头提示 TS shim（仅注释，不改用户配置）
+    if (effectiveStyleFormat === 'unocss' && unocssMode === 'attributify') {
+      lines.unshift(
+        '// UnoCSS attributify mode: utility classes are emitted as JSX attributes.',
+        '// If TypeScript reports unknown attributes, add the env.d.ts shim from the generation output hints.',
+        '',
+      );
+    }
+
     const rawCode = lines.join('\n');
     const formattedCode = await formatCode(rawCode, { filePath: `${componentName}.tsx` });
 
@@ -611,6 +671,8 @@ export class CodeGenerator {
       pendingAssets: dedupedAssets,
       warnings: Array.from(new Set(warnings)),
       reports,
+      styleHints: [...(styleRenderer.hints ?? [])],
+      styleSidecar,
     };
   }
 
@@ -722,13 +784,13 @@ export class CodeGenerator {
    * 8. 递归生成子节点（异步等待）
    *
    * @param node - 当前精简节点
-   * @param twMapper - Tailwind 映射器实例
+   * @param styleRenderer - 样式渲染器实例（v1.4.18 T7：注册表派生，tailwind/unocss 原子类）
    * @param ctx - 生成上下文（depth、imports、extensions 等）
    * @returns JSX 代码字符串（Promise）
    */
   private async _generateProcessedNodeJsx(
     node: ProcessedNode,
-    twMapper: ReturnType<typeof createTailwindMapper>,
+    styleRenderer: StyleRenderer,
     ctx: ProcessedNodeContext,
   ): Promise<string> {
     const indent = '  '.repeat(ctx.depth + 1);
@@ -743,7 +805,7 @@ export class CodeGenerator {
     if (node.role === 'layout-only') {
       if (!node.children || node.children.length === 0) return '';
       const childResults = await Promise.all(
-        node.children.map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx)),
+        node.children.map((child) => this._generateProcessedNodeJsx(child, styleRenderer, nextCtx)),
       );
       return childResults.filter(Boolean).join('\n');
     }
@@ -767,8 +829,8 @@ export class CodeGenerator {
       // SVG 渲染失败时，回退到普通 span 占位
     }
 
-    // ============ 5. Tailwind 样式映射 ============
-    const tw = twMapper.mapNode(node);
+    // ============ 5. 样式映射（注册表渲染器：tailwind/unocss 原子类） ============
+    const tw = styleRenderer.renderNode(node);
     ctx.extensions.push(...tw.extensionsNeeded);
 
     // 收集 Tailwind 映射警告（去重后添加到上下文）
@@ -781,11 +843,16 @@ export class CodeGenerator {
       }
     }
 
-    // 合并 Flex 修复类名（由 flex-fixer 添加到 node._flexFixes）
-    let finalClassName = tw.className;
-    if (node._flexFixes && Array.isArray(node._flexFixes)) {
-      finalClassName = cn(finalClassName, ...(node._flexFixes as string[]));
-    }
+    // 合并 Flex 修复类名（由 flex-fixer 添加到 node._flexFixes）；
+    // v1.4.18 T8：attributify 模式下安全 token 同时分流为元素属性（mergeStyleWithExtraTokens 内部分区）
+    // v1.4.18 T9：CSS Modules 已在渲染器内产出完整原生 flex 声明，
+    //             flexFixes 是 Tailwind 原子类补丁，合入反而会引入未声明的工具类，故跳过
+    const isCssModulesFormat = styleRenderer.id === 'css-modules';
+    const finalStyle =
+      !isCssModulesFormat && node._flexFixes && Array.isArray(node._flexFixes) && node._flexFixes.length > 0
+        ? mergeStyleWithExtraTokens(tw, node._flexFixes as string[])
+        : tw;
+    const finalClassName = finalStyle.className;
 
     // ============ 6. 语义标签选择（优先使用 a11y-enhancer 推荐的标签） ============
     let tag = this._selectSemanticTag(node);
@@ -813,9 +880,25 @@ export class CodeGenerator {
 
     // className：根节点合并外部传入的 className，其他节点直接使用
     if (ctx.isRoot) {
-      props.push(`className={cn("${finalClassName}", className)}`);
-    } else {
-      props.push(`className="${finalClassName}"`);
+      // attributify 全属性化节点可能无回退 class，仅透传外部 className
+      if (!finalClassName) {
+        props.push('className={className}');
+      } else if (isCssModulesFormat) {
+        // v1.4.18 T9：CSS Modules 以 styles['local-name'] 引用（本地名为 kebab-case，必须方括号访问）
+        props.push(`className={cn(styles['${finalClassName}'], className)}`);
+      } else {
+        props.push(`className={cn("${finalClassName}", className)}`);
+      }
+    } else if (finalClassName) {
+      // T9：模块本地类必须经 styles 间接引用（方括号 + 花括号）；原子类沿用静态字符串
+      props.push(isCssModulesFormat ? `className={styles['${finalClassName}']}` : `className="${finalClassName}"`);
+    }
+
+    // UnoCSS attributify（v1.4.18 T8）：安全原子类以无值属性输出（JSX 统一空串值，兼容 React 透传）
+    if (finalStyle.attributes) {
+      for (const attr of finalStyle.attributes) {
+        props.push(`${attr.name}="${attr.value}"`);
+      }
     }
 
     // data 属性用于调试溯源（XSS 防护：清理并转义）
@@ -874,10 +957,20 @@ export class CodeGenerator {
       // src 优先使用已下载的本地路径，其次是 CDN URL，最后用透明像素占位（避免 src="" 导致请求当前页面）
       const hasSrc = props.some((p) => p.startsWith('src='));
       if (!hasSrc) {
-        if (node.asset?.cdnUrl) {
-          props.push(`src={publicCdnUrl('${node.asset.cdnUrl}')}`);
-        } else if (node.asset?.localPath) {
-          props.push(`src={publicCdnUrl('${node.asset.localPath}')}`);
+        if (node.asset?.cdnUrl || node.asset?.localPath) {
+          // v1.4.18：按目标构建器规划引用（none 时与 1.4.17 逐字节一致）；
+          // normalizeAssetUrlPath 兼容下载后 cdnUrl 已被 publicCdnUrl() 包裹的情况
+          const assetUrlRaw = node.asset.cdnUrl ?? node.asset.localPath ?? '';
+          const urlPath = normalizeAssetUrlPath(assetUrlRaw);
+          const plannedAsset = planAssetReference({
+            bundler: ctx.bundler,
+            urlPath,
+            varName: toAssetVarName(urlPath),
+          });
+          for (const assetImport of plannedAsset.imports) {
+            ctx.imports.add(assetImport);
+          }
+          props.push(`src={${plannedAsset.expression}}`);
         } else {
           ctx.pendingAssets.push({ nodeId: node.figmaId, name: node.name, type: node.asset?.type || 'image' });
           // 1x1 透明 GIF data URI，避免 src="" 产生额外请求
@@ -965,7 +1058,7 @@ export class CodeGenerator {
     // ============ 15. 递归生成子节点（异步等待） ============
     const childrenJsx =
       node.children && node.children.length > 0
-        ? (await Promise.all(node.children.map((child) => this._generateProcessedNodeJsx(child, twMapper, nextCtx))))
+        ? (await Promise.all(node.children.map((child) => this._generateProcessedNodeJsx(child, styleRenderer, nextCtx))))
             .filter(Boolean)
             .join('\n')
         : '';

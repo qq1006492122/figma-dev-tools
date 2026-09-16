@@ -35,6 +35,7 @@ import type {
   ProcessingResult,
 } from '../types/nodes.js';
 import { createHierarchyFixer } from './hierarchy-fixer.js';
+import { extractComponentProperties } from './props-type-generator.js';
 
 // ============ 配置类型 ============
 
@@ -1029,6 +1030,9 @@ export class NodeProcessor {
       this.stats.componentInstanceCount++;
     }
 
+    // v1.4.18 T10：Component Properties 归一化（COMPONENT 定义 / INSTANCE 当前值）
+    const componentProperties = extractComponentProperties(node);
+
     const processedNode: ProcessedNode = {
       id: `${node.id}-${depth}`,
       name: node.name,
@@ -1056,6 +1060,8 @@ export class NodeProcessor {
       componentId: node.componentId,
       componentKey: node.key,
       componentName: node.componentId ? node.name : undefined,
+      // v1.4.18 T10：Component Properties 归一化（无属性时为 undefined，TR-10.3 不产空接口）
+      componentProperties: componentProperties.length > 0 ? componentProperties : undefined,
       asset,
       children: processedChildren.length > 0 ? processedChildren : undefined,
       figmaId: node.id,

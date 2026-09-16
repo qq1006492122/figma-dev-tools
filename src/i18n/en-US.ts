@@ -77,7 +77,107 @@ export const enUS = {
       description: 'Generate shell autocompletion script',
     },
 
+    // v1.4.18 T6: --help example sections for every command (zh/en parity)
+    helpExamples: {
+      root: `Examples:
+  $ figma-dev wizard                        # Interactive first-time setup
+  $ figma-dev sync "https://figma.com/design/xxx" -o ./src/styles
+  $ figma-dev jsx <design-url> --node 1:2 --style tailwind
+  $ figma-dev -l zh-CN --help               # Show help in Chinese for this run`,
+      lang: `Examples:
+  $ figma-dev lang set en-US                # Persist English as the language
+  $ figma-dev lang list                     # List all available languages
+  $ figma-dev lang switch                   # Pick a language interactively`,
+      langSet: `Examples:
+  $ figma-dev lang set en-US
+  $ figma-dev lang set zh-CN`,
+      langList: `Examples:
+  $ figma-dev lang list
+  $ figma-dev lang ls                       # Alias of list`,
+      langSwitch: `Examples:
+  $ figma-dev lang switch                   # Arrow keys to pick, Enter to confirm`,
+      validate: `Examples:
+  $ figma-dev validate                      # Validate the saved default token
+  $ figma-dev validate -t figd_xxxxx        # Validate a specific token`,
+      token: `Examples:
+  $ figma-dev token set personal -t figd_xxxxx
+  $ figma-dev token list
+  $ figma-dev token default personal`,
+      tokenSet: `Examples:
+  $ figma-dev token set                     # Interactive entry (default name)
+  $ figma-dev token set work -t figd_xxxxx -n "Work account"
+  $ figma-dev token set ci --token $FIGMA_ACCESS_TOKEN`,
+      tokenGet: `Examples:
+  $ figma-dev token get
+  $ figma-dev token get work                # Show a named token (masked)`,
+      tokenList: `Examples:
+  $ figma-dev token list                    # List all saved tokens`,
+      tokenDelete: `Examples:
+  $ figma-dev token delete work
+  $ figma-dev token delete ci --force       # Skip confirmation`,
+      tokenDefault: `Examples:
+  $ figma-dev token default personal
+  $ figma-dev token default work`,
+      info: `Examples:
+  $ figma-dev info "https://www.figma.com/design/abc/MyApp"
+  $ figma-dev info abc:def --node 1:2`,
+      sync: `Examples:
+  $ figma-dev sync <design-url> -o ./src/styles/figma
+  $ figma-dev sync <fileKey> --output-format dtcg
+  $ figma-dev sync <fileKey> --format hex --spacing-unit rem --prefix portal`,
+      component: `Examples:
+  $ figma-dev component <design-url> --node 1:2 -o ./src/components
+  $ figma-dev component <url> --typescript --style css-modules`,
+      screenshot: `Examples:
+  $ figma-dev screenshot <design-url> --node 1:2 -o shot.png
+  $ figma-dev screenshot <url> --scale 2 --format jpg`,
+      metadata: `Examples:
+  $ figma-dev metadata <design-url>
+  $ figma-dev metadata <fileKey> --node 1:2`,
+      lint: `Examples:
+  $ figma-dev lint <design-url>
+  $ figma-dev lint <fileKey> --node 1:2 --json`,
+      structured: `Examples:
+  $ figma-dev structured <design-url>
+  $ figma-dev structured <fileKey> --node 1:2 --depth 3`,
+      jsx: `Examples:
+  $ figma-dev jsx <design-url> --node 1:2 -o Button.tsx
+  $ figma-dev jsx <url> --style unocss --unocss-attributify
+  $ figma-dev jsx <url> --style css-modules --framework vue --typescript`,
+      assets: `Examples:
+  $ figma-dev assets <design-url> -o ./public/assets
+  $ figma-dev assets <fileKey> --node 1:2 --format svg --bundler vite`,
+      tutorial: `Examples:
+  $ figma-dev tutorial                      # Open the getting-started guide`,
+      mcp: `Examples:
+  $ figma-dev mcp                           # Start MCP server over stdio (IDE/Agent)
+  $ figma-dev mcp --help`,
+      wizard: `Examples:
+  $ figma-dev wizard                        # Recommended for first-time use`,
+      gui: `Examples:
+  $ figma-dev gui                           # Launch the visual setup UI
+  $ figma-dev gui --port 5180`,
+      cache: `Examples:
+  $ figma-dev cache status
+  $ figma-dev cache clear --force`,
+      cacheStatus: `Examples:
+  $ figma-dev cache status
+  $ figma-dev cache stats                   # Alias of status`,
+      cacheClear: `Examples:
+  $ figma-dev cache clear                   # Ask before clearing
+  $ figma-dev cache clear --force           # Clear without confirmation`,
+      privacy: `Examples:
+  $ figma-dev privacy                       # Privacy pledge and .gitignore advice`,
+    },
+
     commands: {
+      cache: {
+        description: 'Manage local cache',
+        status: 'Show cache statistics',
+        clear: 'Clear all cached data',
+        force: 'Force clear without confirmation',
+        privacy: 'Show the privacy pledge',
+      },
       wizard: {
         description: 'Interactive setup wizard (recommended for first-time use)',
         title: '🎨 Figma Dev Tools Setup Wizard',
@@ -230,7 +330,7 @@ export const enUS = {
         format: 'Color format (hex/rgb/oklch/hsl)',
         spacingUnit: 'Spacing unit (px/rem)',
         prefix: 'Token name prefix',
-        outputFormat: 'Output format (css/tailwind/json/all)',
+        outputFormat: 'Output format (css/tailwind/json/dtcg/all)',
         fileName: 'Output file name',
         syncing: 'Syncing design Tokens from Figma...',
         file: 'File',
@@ -250,7 +350,7 @@ export const enUS = {
         description: 'Generate React component code from Figma node',
         name: 'Component name',
         js: 'Generate JavaScript code (default TypeScript)',
-        style: 'Style format (tailwind/css-modules/inline)',
+        style: 'Style format (tailwind/css-modules/inline-styles, default tailwind)',
         noChildren: 'Do not include children',
         output: 'Output directory',
         noNodeId: 'Error: Please provide node ID (?node-id= parameter in Figma URL)',
@@ -315,7 +415,8 @@ export const enUS = {
         description: 'Generate React/Vue + Tailwind/UnoCSS component code in one click (v1.4.0 enhanced)',
         scene: 'Scene name (for public/portal/<scene>/ asset path)',
         framework: 'Target framework: react (default) | vue',
-        style: 'Style format: tailwind (default) | unocss',
+        bundler:
+          'Target project bundler (v1.4.18): auto (default, auto-detect) | vite | webpack | nextjs | remix | none (legacy publicCdnUrl)',
         skipLint: 'Skip design lint warnings',
         noNodeId: 'Error: Please provide node ID (?node-id= parameter or --node option)',
         generating: 'Generating component code (v1.4.0 enhanced pipeline)...',
@@ -331,17 +432,29 @@ export const enUS = {
         usedTimes: 'used',
         times: 'times',
         codeSaved: '✅ Code written to',
+        // v1.4.18 T8: UnoCSS attributify mode toggle and config hints
+        attributify:
+          'UnoCSS attributify mode (v1.4.18, use with --style unocss only; emits utilities as element attributes; off by default = wind mode)',
+        attributifyIgnored:
+          '--attributify only takes effect with --style unocss; ignored for this run (wind utilities are used).',
+        styleHintsSuffix:
+          'setup hints (apply manually as needed; the tool never modifies your project files)',
+        moduleCssSaved: 'Co-located CSS Modules file saved',
+        moduleCssPreview: 'Co-located CSS Modules file (save it next to the component)',
         failed: 'Component generation failed',
         lintWarning: '⚠️  Code restore quality notice',
       },
 
       assets: {
-        description: 'Download design assets to public/portal/<scene>/ directory',
+        description:
+          'Download design assets into the project asset directory (since v1.4.18 placed by bundler: public/ or src/assets/)',
         node: 'Node ID (can specify multiple, comma-separated)',
         nodes: 'Node ID list (comma-separated)',
         scene: 'Scene name (e.g. health, edu, ai-innovation-class)',
         projectRoot: 'Project root (auto-detected)',
         svgFormat: 'Vector export format (svg/png)',
+        bundler:
+          'Target project bundler (v1.4.18): auto (default, auto-detect) | vite | webpack | nextjs | remix | none (legacy publicCdnUrl)',
         noNodeId: 'Error: Please provide node ID (--node or --nodes)',
         downloading: 'Downloading design assets...',
         sceneName: 'Scene',
@@ -512,6 +625,21 @@ export const enUS = {
         staleCacheWarning: (hours: number) =>
           `Live request failed, fell back to local stale cache (about ${hours} hours ago). Output may not reflect the latest design.`,
         httpsRequired: 'Figma API Base URL must use HTTPS (except for local debugging)',
+        // v1.4.18 custom CA (FIGMA_CA_CERT_PATH) errors
+        caCertPathMissing: (certPath: string) =>
+          `Custom CA certificate file not found: ${certPath} (FIGMA_CA_CERT_PATH). Check that the certificate path is correct.`,
+        caCertReadFailed: (certPath: string, reason: string) =>
+          `Failed to read custom CA certificate: ${certPath} (${reason}). Check the path and file permissions.`,
+        caCertInvalid: (certPath: string) =>
+          `Invalid custom CA certificate content: ${certPath}. The file must be PEM-formatted (contain a BEGIN CERTIFICATE marker).`,
+        invalidBundlerChoice: (choice: string) =>
+          `Invalid bundler option: "${choice}". Allowed: auto, vite, webpack, nextjs, remix, none.`,
+        unknownStyleFormat: (format: string, choices: string) =>
+          `Unknown style format: "${format}". Allowed: ${choices}.`,
+        styleFormatPlanned: (format: string, version: string, supported: string) =>
+          `Style format "${format}" is not supported yet (planned for v${version}). Available: ${supported}.`,
+        styleFormatNotInPipeline: (format: string, supported: string) =>
+          `Style format "${format}" is not available in this generation pipeline. Available: ${supported}.`,
         networkError:
           'Figma API request failed: network connection error or request timeout. Please check network settings, HTTP_PROXY/HTTPS_PROXY env vars or proxy config.',
         networkErrorWithMessage: (msg: string) => `Figma API request failed: ${msg}`,

@@ -22,6 +22,14 @@ import ora from 'ora';
 import { initI18nSync } from '../i18n/index.js';
 import type { Language } from '../i18n/index.js';
 import { createAssetDownloader } from '../services/asset-downloader.js';
+import { detectBundler, type BundlerKind } from '../services/bundler-detector.js';
+import {
+  assertStyleFormatSupported,
+  buildStyleFormatHelp,
+  STYLE_FORMATS_LEGACY_REACT,
+  STYLE_FORMATS_NEW_PIPELINE,
+  type StyleFormat,
+} from '../services/style-renderers/index.js';
 import { createFigmaCache } from '../services/cache.js';
 import { createCodeGenerator } from '../services/code-generator.js';
 import { createComponentMapper } from '../services/component-mapper.js';
@@ -55,6 +63,20 @@ dotenv.config();
 
 // 初始化 i18n（v1.2.0 新增）
 const i18n = initI18nSync();
+
+// v1.4.18 T6：在任何命令/帮助文案定义之前解析全局 -l/--lang，
+// 以内存态（不写配置）切换语言，保证 `figma-dev -l en-US <cmd> --help` 即时生效
+{
+  const argv = process.argv;
+  const eqMatch = argv.find((arg) => arg.startsWith('--lang='));
+  const langFlagIndex = argv.findIndex((arg) => arg === '-l' || arg === '--lang');
+  const requestedLang = eqMatch
+    ? eqMatch.slice('--lang='.length)
+    : langFlagIndex >= 0
+      ? argv[langFlagIndex + 1]
+      : undefined;
+  if (requestedLang) i18n.useLanguage(requestedLang);
+}
 
 const program = new Command();
 
@@ -156,6 +178,43 @@ function parseTarget(target: string): { fileKey: string; nodeId?: string } {
     return { fileKey: parsed.fileKey, nodeId: parsed.nodeId };
   }
   return { fileKey: target };
+}
+
+/**
+ * 解析 --bundler 选项（v1.4.18，T4）
+ *
+ * @param choice - 用户传入值（缺省 auto）
+ * @param projectRoot - auto 检测时的项目根目录
+ * @returns 构建器标识；非法值抛出 i18n 错误
+ */
+async function resolveCliBundler(choice: string | undefined, projectRoot: string): Promise<BundlerKind> {
+  const value = (choice ?? 'auto').toLowerCase();
+  if (value === 'auto') {
+    return (await detectBundler(projectRoot)).kind;
+  }
+  if (value === 'vite' || value === 'webpack' || value === 'nextjs' || value === 'remix' || value === 'none') {
+    return value;
+  }
+  throw new Error(i18n.t('cli.errors.labels.invalidBundlerChoice', value) as string);
+}
+
+/**
+ * 解析并校验 CLI --style 参数（v1.4.18，T7）。
+ *
+ * 注册表是样式方案的单一数据源：未知值/计划中值/其他管线值均抛 i18n 错误，
+ * 错误文本同时给出当前管线支持的方案，避免静默错配。
+ *
+ * @param choice - 用户传入的 --style 字符串（缺省 tailwind）
+ * @param supportedInPipeline - 当前管线支持的方案集合（新管线/legacy）
+ * @returns 校验通过的 StyleFormat
+ */
+function resolveCliStyleFormat<T extends StyleFormat>(
+  choice: string | undefined,
+  supportedInPipeline: readonly T[],
+): T {
+  const value = (choice ?? 'tailwind').toLowerCase();
+  // 已由注册表断言 membership，窄化为该管线的字面量联合（供 legacy 窄类型入参）
+  return assertStyleFormatSupported(value, supportedInPipeline, i18n.getLanguage()) as T;
 }
 
 // ============= 命令: 语言设置 (v1.2.0 新增) =============
@@ -567,6 +626,15 @@ program
         files.push(jsonPath);
       }
 
+      // v1.4.18 T11：W3C DTCG 标准 tokens 文件
+      if (format === 'dtcg' || format === 'all') {
+        const dtcgName = cmdOptions.fileName
+          ? cmdOptions.fileName.replace(/\.[^.]+$/, '.tokens.json')
+          : 'design-tokens.tokens.json';
+        const dtcgPath = await writer.writeDtcgTokens(tokens, dtcgName);
+        files.push(dtcgPath);
+      }
+
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
       spinner.succeed(chalk.green((i18n.t('cli.commands.sync.completed') as string) + ` (${duration}s)`));
@@ -621,12 +689,17 @@ program
     console.log(chalk.gray(`${i18n.t('cli.commands.sync.node') as string}: ${nodeId}`));
 
     try {
+      // v1.4.18（T7）：legacy 管线样式校验（仅 tailwind/css-modules/inline-styles），网络请求前快速失败
+      const legacyStyleFormat = resolveCliStyleFormat(
+        cmdOptions.style as string | undefined,
+        STYLE_FORMATS_LEGACY_REACT,
+      );
       const client = await getClient(opts.token);
       const generator = createCodeGenerator(client, {
         format: 'react',
         framework: 'react',
         typescript: !cmdOptions.js,
-        styleFormat: cmdOptions.style,
+        styleFormat: legacyStyleFormat,
         componentName: cmdOptions.name,
         includeChildren: cmdOptions.children !== false,
       });
@@ -1155,7 +1228,17 @@ program
   .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
   .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
   .option('--framework <framework>', i18n.t('cli.commands.jsx.framework') as string, 'react')
-  .option('--style <styleFormat>', i18n.t('cli.commands.jsx.style') as string, 'tailwind')
+  .option('--style <styleFormat>', buildStyleFormatHelp(i18n.getLanguage()), 'tailwind')
+  .option(
+    '--attributify',
+    i18n.t('cli.commands.jsx.attributify') as string,
+    false,
+  )
+  .option(
+    '--bundler <bundler>',
+    i18n.t('cli.commands.jsx.bundler') as string,
+    'auto',
+  )
   .option('--skip-lint', i18n.t('cli.commands.jsx.skipLint') as string)
   .option('--inline-svg', '内联渲染 SVG 图标节点（v1.4.0 新增，默认开启）', true)
   .action(async (target, cmdOptions) => {
@@ -1181,6 +1264,17 @@ program
     const startTime = Date.now();
 
     try {
+      // v1.4.18（T4/T7）：本地参数解析先行——构建器检测仅文件 IO，样式注册表校验纯内存，
+      // 均无网络依赖，非法值在任何 Figma 请求前快速失败
+      const bundlerDetectRoot = cmdOptions.output ? path.dirname(path.resolve(cmdOptions.output)) : process.cwd();
+      const effectiveBundler = await resolveCliBundler(cmdOptions.bundler as string | undefined, bundlerDetectRoot);
+      const styleFormat = resolveCliStyleFormat(cmdOptions.style as string | undefined, STYLE_FORMATS_NEW_PIPELINE);
+      // v1.4.18 T8：--attributify 仅对 unocss 生效；非 unocss 时显式忽略并提示，避免用户误以为生效
+      const unocssMode: 'wind' | 'attributify' = cmdOptions.attributify === true ? 'attributify' : 'wind';
+      if (unocssMode === 'attributify' && styleFormat !== 'unocss') {
+        console.warn(chalk.yellow('  ↳ ' + (i18n.t('cli.commands.jsx.attributifyIgnored') as string)));
+      }
+
       const client = await getClient(opts.token);
       const ctxService = createDesignContextService(client);
       const codeGen = createCodeGenerator(client);
@@ -1239,7 +1333,9 @@ program
           componentName: cmdOptions.name,
           sceneName: cmdOptions.scene,
           usePublicCdn: true,
-          styleFormat: cmdOptions.style === 'unocss' ? 'unocss' : 'tailwind',
+          bundler: effectiveBundler,
+          styleFormat,
+          unocssMode,
         });
         result = vueResult as unknown as CodeGenResult;
       } else {
@@ -1247,6 +1343,9 @@ program
           componentName: cmdOptions.name,
           sceneName: cmdOptions.scene,
           usePublicCdn: true,
+          bundler: effectiveBundler,
+          styleFormat,
+          unocssMode,
         })) as unknown as CodeGenResult;
       }
 
@@ -1394,6 +1493,30 @@ program
         console.log(result.code);
       }
       console.log(chalk.cyan('─'.repeat(70)));
+
+      // v1.4.18 T9：CSS Modules 同名 .module.css 旁路文件
+      // --output 指定主组件路径时，旁路文件写入同目录（用户显式要求落盘）；否则仅在终端展示
+      if (styleFormat === 'css-modules' && result.styleSidecar) {
+        if (cmdOptions.output) {
+          const sidecarPath = path.resolve(path.dirname(cmdOptions.output), result.styleSidecar.fileName);
+          await fs.writeFile(sidecarPath, result.styleSidecar.content, 'utf-8');
+          console.log(chalk.green((i18n.t('cli.commands.jsx.moduleCssSaved') as string) + `: ${sidecarPath}`));
+        } else {
+          console.log('');
+          console.log(chalk.magenta(`📎 ${i18n.t('cli.commands.jsx.moduleCssPreview') as string}: ${result.styleSidecar.fileName}`));
+          console.log(chalk.gray(result.styleSidecar.content));
+        }
+      }
+
+      // v1.4.18 T8：UnoCSS 配置指引（仅在终端展示，不写入用户项目）
+      if (styleFormat === 'unocss' && result.styleHints && result.styleHints.length > 0) {
+        console.log('');
+        console.log(chalk.magenta(`🎛️ UnoCSS ${unocssMode} ${i18n.t('cli.commands.jsx.styleHintsSuffix') as string}`));
+        for (const hint of result.styleHints) {
+          console.log(chalk.yellow(`\n### ${hint.title}`));
+          console.log(chalk.gray(hint.code));
+        }
+      }
     } catch (error) {
       spinner.fail(
         chalk.red(
@@ -1417,6 +1540,11 @@ program
   .option('--project-root <dir>', i18n.t('cli.commands.assets.projectRoot') as string)
   .option('--scale <scale>', i18n.t('cli.commands.screenshot.scale') as string, '2')
   .option('--svg-format <format>', i18n.t('cli.commands.assets.svgFormat') as string, 'svg')
+  .option(
+    '--bundler <bundler>',
+    i18n.t('cli.commands.assets.bundler') as string,
+    'auto',
+  )
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
@@ -1462,6 +1590,10 @@ program
       }
       console.log(chalk.gray(`${i18n.t('cli.commands.assets.projectRootDetected') as string}: ${projectRoot}`));
 
+      // v1.4.18（T4）：解析构建器（auto 时检测项目根）
+      const effectiveBundler = await resolveCliBundler(cmdOptions.bundler as string | undefined, projectRoot);
+      console.log(chalk.gray(`  bundler: ${effectiveBundler}`));
+
       // 获取资源元数据
       const ctxService = createDesignContextService(client);
       const assets: ProcessedAsset[] = [];
@@ -1502,6 +1634,7 @@ program
         projectRoot,
         scale: scale as 1 | 2 | 3 | 4,
         svgFormat: cmdOptions.svgFormat as 'svg' | 'png',
+        bundler: effectiveBundler,
       });
 
       const results = await downloader.downloadAssets(fileKey, sceneName, uniqueAssets);
@@ -1848,12 +1981,14 @@ program
 
 // ============= 命令: 缓存管理 (v1.4.0 新增) =============
 
-const cacheCmd = program.command('cache').description('管理本地缓存');
+const cacheCmd = program
+  .command('cache')
+  .description(i18n.t('cli.commands.cache.description') as string);
 
 cacheCmd
   .command('status')
   .alias('stats')
-  .description('查看缓存统计信息')
+  .description(i18n.t('cli.commands.cache.status') as string)
   .action(async () => {
     const cache = createFigmaCache();
     const stats = await cache.getStats();
@@ -1875,8 +2010,8 @@ cacheCmd
 cacheCmd
   .command('clear')
   .alias('clean')
-  .description('清空所有缓存')
-  .option('-f, --force', '强制清空，不确认')
+  .description(i18n.t('cli.commands.cache.clear') as string)
+  .option('-f, --force', i18n.t('cli.commands.cache.force') as string)
   .action(async (cmdOptions) => {
     if (!cmdOptions.force) {
       const confirmed = await confirm({
@@ -1910,7 +2045,7 @@ function formatBytes(bytes: number): string {
 
 program
   .command('privacy')
-  .description('查看隐私承诺声明')
+  .description(i18n.t('cli.commands.cache.privacy') as string)
   .action(() => {
     console.log(
       boxen(getPrivacyStatement(), {
@@ -1940,6 +2075,9 @@ program
   });
 
 // ============= Shell 自动补全 =============
+
+// v1.4.18 T6：根帮助先展示常用示例，再展示补全说明
+program.addHelpText('after', i18n.t('cli.helpExamples.root') as string);
 
 program.addHelpText(
   'after',
@@ -2226,6 +2364,56 @@ if (rawArgs.includes('--update')) {
     process.exit(getUpdateExitCode({ installSucceeded, fallbackSucceeded }));
   })();
 } else {
+  // v1.4.18 T6：为全部（子）命令统一挂接本地化示例段。
+  // 路径按 'a b'（空格分隔父子）描述；键对应 cli.helpExamples.*。
+  const HELP_EXAMPLE_BINDINGS: ReadonlyArray<readonly [commandPath: string, i18nKey: string]> = [
+    ['lang', 'lang'],
+    ['lang set', 'langSet'],
+    ['lang list', 'langList'],
+    ['lang switch', 'langSwitch'],
+    ['validate', 'validate'],
+    ['token', 'token'],
+    ['token set', 'tokenSet'],
+    ['token get', 'tokenGet'],
+    ['token list', 'tokenList'],
+    ['token delete', 'tokenDelete'],
+    ['token default', 'tokenDefault'],
+    ['info', 'info'],
+    ['sync', 'sync'],
+    ['component', 'component'],
+    ['screenshot', 'screenshot'],
+    ['metadata', 'metadata'],
+    ['lint', 'lint'],
+    ['structured', 'structured'],
+    ['jsx', 'jsx'],
+    ['assets', 'assets'],
+    ['tutorial', 'tutorial'],
+    ['mcp', 'mcp'],
+    ['wizard', 'wizard'],
+    ['gui', 'gui'],
+    ['cache', 'cache'],
+    ['cache status', 'cacheStatus'],
+    ['cache clear', 'cacheClear'],
+    ['privacy', 'privacy'],
+  ];
+
+  /** 按空格路径在 commander 树中查找命令实例 */
+  const findCommand = (commandPath: string): Command | undefined => {
+    let current: Command | undefined = program;
+    for (const segment of commandPath.split(' ')) {
+      current = current?.commands.find((cmd) => cmd.name() === segment);
+      if (!current) return undefined;
+    }
+    return current;
+  };
+
+  for (const [commandPath, i18nKey] of HELP_EXAMPLE_BINDINGS) {
+    const command = findCommand(commandPath);
+    if (command) {
+      command.addHelpText('after', i18n.t(`cli.helpExamples.${i18nKey}`) as string);
+    }
+  }
+
   // 解析命令行参数
   program.parse();
 }

@@ -19,6 +19,7 @@ import {
   isPrivateOrReservedAddress,
   type RemoteImageNetworkSeams,
 } from '../../src/services/ocr-service.js';
+import type { CustomCaConfig } from '../../src/services/tls-agent.js';
 import type { FigmaNode } from '../../src/types.js';
 
 function makePngBuffer(): Buffer {
@@ -278,6 +279,67 @@ describe('OcrService', () => {
       });
       expect(buffer).toEqual(makePngBuffer());
       expect(captured?.redirect).toBe('error');
+    });
+  });
+
+  describe('远程图片自定义 CA 分支（T3）', () => {
+    /** 公网 DNS 接缝（不真实建连，下载层均被注入） */
+    const safeLookup: NonNullable<RemoteImageNetworkSeams['lookup']> = async () => [
+      { address: '93.184.216.34' },
+    ];
+    /** 测试用 CA 配置 */
+    const caConfig: CustomCaConfig = {
+      certPath: '/test/ca.pem',
+      extraCa: ['-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n'],
+    };
+
+    it('存在自定义 CA 时改走 httpDownload 接缝且绝不调用 fetch', async () => {
+      let downloadCalled = false;
+      let receivedConfig: CustomCaConfig | undefined;
+      const buffer = await resolveImageBuffer('https://cdn.example.com/a.png', {
+        lookup: safeLookup,
+        loadCaConfig: () => caConfig,
+        httpDownload: async (url, options) => {
+          downloadCalled = true;
+          receivedConfig = options.caConfig;
+          expect(url.pathname).toBe('/a.png');
+          return makePngBuffer();
+        },
+        fetchImpl: async () => {
+          throw new Error('存在自定义 CA 时不应走 fetch 分支');
+        },
+      });
+      expect(buffer).toEqual(makePngBuffer());
+      expect(downloadCalled).toBe(true);
+      expect(receivedConfig).toBe(caConfig);
+    });
+
+    it('无自定义 CA 时保持 1.4.17 行为：仍走全局 fetch 路径', async () => {
+      const buffer = await resolveImageBuffer('http://cdn.example.com/b.png', {
+        lookup: safeLookup,
+        loadCaConfig: () => undefined,
+        httpDownload: async () => {
+          throw new Error('无 CA 配置时不应走下载器分支');
+        },
+        fetchImpl: async () =>
+          new Response(new Uint8Array(makePngBuffer()), {
+            status: 200,
+            headers: { 'content-type': 'image/png' },
+          }),
+      });
+      expect(buffer).toEqual(makePngBuffer());
+    });
+
+    it('下载器错误（如 302 禁跳转）原样透传', async () => {
+      await expect(
+        resolveImageBuffer('https://cdn.example.com/c.png', {
+          lookup: safeLookup,
+          loadCaConfig: () => caConfig,
+          httpDownload: async () => {
+            throw new Error('下载远程图片失败：服务器返回重定向 (HTTP 302)，安全策略禁止自动跳转');
+          },
+        }),
+      ).rejects.toThrow(/302/);
     });
   });
 

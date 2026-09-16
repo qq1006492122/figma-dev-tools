@@ -29,6 +29,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 
 import type { DesignTokens, GeneratedComponent, FigmaDevConfig } from '../types.js';
+import { buildDtcgTokens, validateDtcgTokens } from './dtcg-token-formatter.js';
 
 // ============ 类型定义 ============
 
@@ -119,6 +120,37 @@ export class FileWriter {
     await this.ensureDir(path.dirname(filePath));
 
     const content = JSON.stringify(tokens, null, 2);
+    await this._writeFile(filePath, content, 'json');
+
+    return filePath;
+  }
+
+  /**
+   * 写入 W3C DTCG 标准 Tokens JSON 文件（v1.4.18，T11）
+   *
+   * 输出 Design Tokens Format Module 合规的嵌套令牌树
+   *（叶子为 `{ $type, $value, $description? }`）；写入前执行内置
+   * schema 校验，理论上构建产物必然合法，校验为防御性兜底。
+   *
+   * @param tokens - 结构化的设计 tokens 对象
+   * @param fileName - 输出文件名，默认 'design-tokens.tokens.json'
+   * @returns 写入的文件绝对路径
+   * @throws 构建产物未通过 DTCG 内置校验时抛出错误
+   */
+  async writeDtcgTokens(
+    tokens: DesignTokens,
+    fileName: string = 'design-tokens.tokens.json',
+  ): Promise<string> {
+    const tree = buildDtcgTokens(tokens);
+    const validation = validateDtcgTokens(tree);
+    if (!validation.valid) {
+      throw new Error(`Generated DTCG tokens failed validation:\n${validation.errors.join('\n')}`);
+    }
+
+    const filePath = path.join(this._options.outputDir, fileName);
+    await this.ensureDir(path.dirname(filePath));
+
+    const content = `${JSON.stringify(tree, null, 2)}\n`;
     await this._writeFile(filePath, content, 'json');
 
     return filePath;

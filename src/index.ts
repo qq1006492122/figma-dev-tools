@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { initI18nSync } from './i18n/index.js';
 import type { A11yReportEntry } from './services/a11y-enhancer.js';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
+import { detectBundler, type BundlerKind } from './services/bundler-detector.js';
 import {
   BrowserFallbackService,
   getBrowserFallbackService,
@@ -32,6 +33,13 @@ import {
 } from './services/browser-fallback.js';
 import { createFigmaCache } from './services/cache.js';
 import { createCodeGenerator } from './services/code-generator.js';
+import {
+  ALL_STYLE_FORMATS,
+  assertStyleFormatSupported,
+  STYLE_FORMATS_LEGACY_REACT,
+  STYLE_FORMATS_NEW_PIPELINE,
+  type StyleFormat,
+} from './services/style-renderers/index.js';
 import { createComponentMapper } from './services/component-mapper.js';
 import { createDesignContextService } from './services/design-context.js';
 import { createDesignLinter } from './services/design-linter.js';
@@ -43,6 +51,7 @@ import {
 } from './services/fidelity-verify.js';
 import { createFigmaClient, type FigmaClient } from './services/figma-client.js';
 import { createFileWriter } from './services/file-writer.js';
+import { serializeDtcgTokens } from './services/dtcg-token-formatter.js';
 import type { FlexFixEntry } from './services/flex-fixer.js';
 import {
   OcrService,
@@ -279,6 +288,26 @@ const server = new McpServer({
   name: 'figma-dev-tools',
   version: readPackageVersion(),
 });
+
+/**
+ * 样式方案参数（v1.4.18，T7）：
+ * schema 层暴露注册表全部 11 个方案（单一数据源），
+ * handler 层按管线用 assertStyleFormatSupported 显式拒绝未启用值，
+ * 用户可看到「计划于 1.4.19/1.5.0 支持」的提示而非静默错配。
+ */
+const STYLE_FORMAT_PARAM = z
+  .enum(ALL_STYLE_FORMATS as [StyleFormat, ...StyleFormat[]])
+  .default('tailwind')
+  .describe('样式方案：tailwind（默认）/unocss 已启用；styled/emotion/less/sass/vanilla-extract/panda 计划 1.4.19；css-variables 计划 1.5.0');
+
+/**
+ * legacy React 管线（figma_generate_component）样式参数：
+ * 仅 tailwind/css-modules/inline-styles，枚举由注册表常量展开派生。
+ */
+const LEGACY_STYLE_FORMAT_PARAM = z
+  .enum([...STYLE_FORMATS_LEGACY_REACT])
+  .default('tailwind')
+  .describe('样式格式：tailwind（默认）| css-modules | inline-styles');
 
 server.registerTool(
   'figma_parse_url',
@@ -530,7 +559,7 @@ server.registerTool(
       figmaUrl: z.string().optional().describe('Figma URL（如果提供则自动解析 fileKey 和 nodeId）'),
       componentName: z.string().optional().describe('组件名称（默认从节点名称生成）'),
       typescript: z.boolean().default(true).describe('是否生成 TypeScript 代码'),
-      styleFormat: z.enum(['tailwind', 'css-modules', 'inline-styles']).default('tailwind').describe('样式格式'),
+      styleFormat: LEGACY_STYLE_FORMAT_PARAM,
       includeChildren: z.boolean().default(true).describe('是否包含子元素'),
       skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能（Flex 修复、a11y 等）'),
       accessToken: z.string().optional().describe('Figma Access Token'),
@@ -575,6 +604,9 @@ server.registerTool(
           isError: true,
         };
       }
+
+      // v1.4.18（T7）：legacy 管线防御性校验（schema 已限三值，此处防程序化误调）
+      assertStyleFormatSupported(styleFormat, STYLE_FORMATS_LEGACY_REACT);
 
       const client = getFigmaClient(accessToken);
       const generator = createCodeGenerator(client, {
@@ -686,10 +718,14 @@ server.registerTool(
     description: `将提取的设计 tokens 转换为可用的样式配置文件：
 - CSS Variables 文件（:root 变量）
 - Tailwind CSS v4 @theme inline 格式（适配项目现有样式系统）
+- W3C DTCG 格式（$type/$value 嵌套 JSON，跨工具标准格式）
 输出格式与项目的 @repo/tailwind-config 兼容。`,
     inputSchema: z.object({
       tokens: z.record(z.unknown()).describe('从 figma_extract_tokens 获取的 tokens 数据'),
-      outputFormat: z.enum(['css-variables', 'tailwind-v4', 'json']).default('tailwind-v4').describe('输出格式'),
+      outputFormat: z
+        .enum(['css-variables', 'tailwind-v4', 'json', 'dtcg'])
+        .default('tailwind-v4')
+        .describe('输出格式（dtcg=W3C Design Tokens 标准 JSON）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -729,6 +765,11 @@ server.registerTool(
           output = JSON.stringify(designTokens, null, 2);
           language = 'json';
           break;
+        case 'dtcg':
+          // v1.4.18 T11：W3C DTCG（$type/$value）标准 JSON
+          output = serializeDtcgTokens(designTokens).trimEnd();
+          language = 'json';
+          break;
       }
 
       return {
@@ -758,12 +799,16 @@ server.registerTool(
 - CSS Variables 文件
 - Tailwind 主题文件
 - JSON 格式的 tokens 文件
+- W3C DTCG 标准 tokens 文件（v1.4.18）
 文件会自动格式化并创建备份。`,
     inputSchema: z.object({
       tokens: z.record(z.unknown()).describe('设计 tokens'),
       outputDir: z.string().describe('输出目录路径（绝对路径）'),
       fileName: z.string().optional().describe('文件名（默认 figma-tokens.css）'),
-      format: z.enum(['css', 'tailwind', 'json', 'all']).default('all').describe('输出格式'),
+      format: z
+        .enum(['css', 'tailwind', 'json', 'dtcg', 'all'])
+        .default('all')
+        .describe('输出格式（all=css+tailwind+json+dtcg）'),
     }),
     annotations: {
       readOnlyHint: false,
@@ -798,6 +843,15 @@ server.registerTool(
           fileName?.replace(/\.[^.]+$/, '.json') || 'design-tokens.json',
         );
         files.push(jsonPath);
+      }
+
+      // v1.4.18 T11：W3C DTCG 标准 tokens 文件
+      if (format === 'dtcg' || format === 'all') {
+        const dtcgName = fileName
+          ? fileName.replace(/\.[^.]+$/, '.tokens.json')
+          : 'design-tokens.tokens.json';
+        const dtcgPath = await writer.writeDtcgTokens(designTokens, dtcgName);
+        files.push(dtcgPath);
       }
 
       return {
@@ -1004,12 +1058,23 @@ server.registerTool(
   },
 );
 
+/**
+ * 构建器选择参数（v1.4.18，T4）：
+ * auto = 依据 projectRoot 的 package.json/配置文件自动检测；
+ * none = 强制 1.4.17 兼容行为（publicCdnUrl）。
+ */
+const BUNDLER_PARAM = z
+  .enum(['auto', 'vite', 'webpack', 'nextjs', 'remix', 'none'])
+  .default('auto')
+  .describe('目标项目构建器：auto=自动检测（默认）；vite/webpack/nextjs/remix 显式指定；none=旧版 publicCdnUrl 行为');
+
 server.registerTool(
   'figma_download_assets',
   {
-    title: '下载设计资源到项目 public 目录',
-    description: `将 figma_get_design_context 返回的资源下载到项目 public/portal/<场景名>/ 目录，
-并自动生成 publicCdnUrl() 引用代码。下载的图片可直接在组件中通过 publicCdnUrl('/<场景>/xxx.png') 引用。
+    title: '下载设计资源到项目资源目录',
+    description: `将 figma_get_design_context 返回的资源下载到项目资源目录，并生成与构建器匹配的引用代码。
+v1.4.18 起按 bundler 落位：vite/webpack → src/assets/<场景>/（ESM import / require）；
+nextjs/remix/未识别 → public/<场景>/（绝对路径或 publicCdnUrl()）。
 v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
 遵循项目资源落位规范（figma-to-code.md）。`,
     inputSchema: z.object({
@@ -1018,6 +1083,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       assetNodeIds: z.array(z.string()).describe('要下载的资源节点 ID 列表'),
       figmaUrl: z.string().optional().describe('Figma URL（自动解析 fileKey）'),
       projectRoot: z.string().optional().describe('项目根目录绝对路径（默认自动检测）'),
+      bundler: BUNDLER_PARAM,
       scale: z.number().min(1).max(4).default(2).describe('导出倍率（默认2x）'),
       svgFormat: z.enum(['svg', 'png']).default('svg').describe('矢量图形导出格式'),
       optimizeSvg: z.boolean().default(true).describe('是否使用 SVGO 优化 SVG（移除冗余属性、压缩体积），默认 true'),
@@ -1030,7 +1096,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       openWorldHint: false,
     },
   },
-  async ({ fileKey, sceneName, assetNodeIds, figmaUrl, projectRoot, scale, svgFormat, optimizeSvg, accessToken }) => {
+  async ({ fileKey, sceneName, assetNodeIds, figmaUrl, projectRoot, bundler, scale, svgFormat, optimizeSvg, accessToken }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       if (!key) return { content: [{ type: 'text', text: '请提供 fileKey 或 figmaUrl' }], isError: true };
@@ -1049,6 +1115,10 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
         }
         if (!root) root = process.cwd();
       }
+
+      // v1.4.18（T4）：解析构建器；auto 时检测项目信号，未识别得到 none（等同 1.4.17）
+      const effectiveBundler: BundlerKind =
+        bundler === 'auto' ? (await detectBundler(root)).kind : bundler;
 
       const client = getFigmaClient(accessToken);
 
@@ -1089,6 +1159,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
         scale: scale as 1 | 2 | 3 | 4,
         svgFormat: svgFormat as 'svg' | 'png',
         optimizeSvg,
+        bundler: effectiveBundler,
       });
 
       const results = await downloader.downloadAssets(key, sceneName, uniqueAssets);
@@ -1099,7 +1170,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
 
       return {
         content: [{ type: 'text', text: finalReport }],
-        structuredContent: { results, projectRoot: root, sceneName, skippedNodeIds },
+        structuredContent: { results, projectRoot: root, sceneName, bundler: effectiveBundler, skippedNodeIds },
       };
     } catch (error) {
       return buildToolErrorResponse('下载资源', error, getFigmaClientSafe(accessToken));
@@ -1346,20 +1417,26 @@ v1.2.0 新增强化功能：
 1. 先调用 figma_get_metadata 了解结构
 2. 可选：调用 figma_lint_design 检查设计规范并修复问题
 3. 对目标区块调用 figma_generate_jsx 生成代码（指定 framework=vue 生成 Vue 3）
-4. 如有图片，调用 figma_download_assets 下载到 public/portal/<场景>/
+4. 如有图片，调用 figma_download_assets 下载资源（v1.4.18 起按构建器落位 public/ 或 src/assets/）
 5. 将生成代码复制到项目，处理 TODO 注释（复用组件映射）`,
     inputSchema: z.object({
       fileKey: z.string().describe('Figma 文件 Key（URL 中 /design/<key>/ 部分）'),
       nodeId: z.string().describe('目标节点 ID（URL 中 node-id= 参数）'),
       figmaUrl: z.string().optional().describe('Figma URL（可替代 fileKey+nodeId）'),
       componentName: z.string().optional().describe('生成的组件名（默认从节点名推断）'),
-      sceneName: z.string().optional().describe('场景名（用于 public/portal/<场景>/ 资源路径）'),
+      sceneName: z.string().optional().describe('场景名（用于资源子路径组织）'),
+      projectRoot: z
+        .string()
+        .optional()
+        .describe('项目根目录绝对路径（bundler=auto 时用于检测构建器；默认取当前工作目录）'),
+      bundler: BUNDLER_PARAM,
       maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）'),
       framework: z.enum(['react', 'vue']).default('react').describe('目标框架：react (默认) | vue (v1.4.0新增)'),
-      styleFormat: z
-        .enum(['tailwind', 'unocss'])
-        .default('tailwind')
-        .describe('样式方案：tailwind (默认) | unocss (v1.4.0新增)'),
+      styleFormat: STYLE_FORMAT_PARAM,
+      unocssAttributify: z
+        .boolean()
+        .default(false)
+        .describe('UnoCSS attributify 模式（v1.4.18新增，仅 styleFormat=unocss 生效；默认 false=wind 模式）'),
       skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能'),
       skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示'),
       accessToken: z.string().optional().describe('Figma Access Token'),
@@ -1377,9 +1454,12 @@ v1.2.0 新增强化功能：
     figmaUrl,
     componentName,
     sceneName,
+    projectRoot,
+    bundler,
     maxDepth,
     framework,
     styleFormat,
+    unocssAttributify,
     skipEnhancements,
     skipLintCheck,
     accessToken,
@@ -1395,6 +1475,13 @@ v1.2.0 新增强化功能：
       if (!resolvedKey || !resolvedNode) {
         return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId，或 figmaUrl' }], isError: true };
       }
+
+      // v1.4.18（T4）：解析构建器；auto 时以 projectRoot（默认 cwd）检测，未识别得到 none
+      const effectiveBundler: BundlerKind =
+        bundler === 'auto' ? (await detectBundler(projectRoot ?? process.cwd())).kind : bundler;
+
+      // v1.4.18（T7）：新管线样式注册表校验；planned/其他管线值显式报错（含计划版本），不静默降级
+      assertStyleFormatSupported(styleFormat, STYLE_FORMATS_NEW_PIPELINE);
 
       const client = getFigmaClient(accessToken);
       const ctxService = createDesignContextService(client);
@@ -1419,13 +1506,17 @@ v1.2.0 新增强化功能：
       }
 
       let result: CodeGenResult;
+      // v1.4.18 T8：UnoCSS attributify 模式透传（仅 unocss 时有意义，其他格式渲染器忽略该参数）
+      const unocssMode: 'wind' | 'attributify' = unocssAttributify ? 'attributify' : 'wind';
 
       if (framework === 'vue') {
         const vueResult = await vueGen.generateFromContext(ctx, {
           componentName,
           sceneName,
           usePublicCdn: true,
-          styleFormat: styleFormat === 'unocss' ? 'unocss' : 'tailwind',
+          bundler: effectiveBundler,
+          styleFormat,
+          unocssMode,
           skipEnhancements,
         });
         result = vueResult as unknown as CodeGenResult;
@@ -1434,6 +1525,9 @@ v1.2.0 新增强化功能：
           componentName,
           sceneName,
           usePublicCdn: true,
+          bundler: effectiveBundler,
+          styleFormat,
+          unocssMode,
           skipEnhancements,
         })) as unknown as CodeGenResult;
       }
@@ -1541,6 +1635,31 @@ v1.2.0 新增强化功能：
       lines.push(framework === 'vue' ? '```vue' : '```tsx');
       lines.push(result.code);
       lines.push('```\n');
+
+      // v1.4.18 T8：UnoCSS 配置指引（仅建议文本，不写用户项目文件；attributify 模式额外附 TS shim）
+      if (styleFormat === 'unocss' && result.styleHints && result.styleHints.length > 0) {
+        lines.push(`## 🎛️ UnoCSS 配置指引（${unocssMode} 模式）\n`);
+        lines.push('> 以下为配置建议，工具不会修改你的项目文件，请按需手动落地。\n');
+        for (const hint of result.styleHints) {
+          lines.push(`### ${hint.title}\n`);
+          lines.push('```ts');
+          lines.push(hint.code);
+          lines.push('```\n');
+        }
+      }
+
+      // v1.4.18 T9：CSS Modules 同名 .module.css 旁路文件（工具只输出内容，不直接写项目目录）
+      if (styleFormat === 'css-modules' && result.styleSidecar) {
+        lines.push(`## 📎 同名样式模块（CSS Modules）：${result.styleSidecar.fileName}\n`);
+        lines.push(
+          `> 请将以下内容保存为与组件同目录的 \`${result.styleSidecar.fileName}\`；组件代码已按 ${
+            framework === 'vue' ? '$style.x' : 'styles.x'
+          } 引用，重复样式经 composes 复用。\n`,
+        );
+        lines.push('```css');
+        lines.push(result.styleSidecar.content);
+        lines.push('```\n');
+      }
 
       if ((result.extensionsNeeded || []).length > 0) {
         lines.push('## ⚠️ 需要 @theme 扩展的 token\n');
@@ -2488,5 +2607,5 @@ server.registerTool(
 export async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Figma Dev Tools MCP Server v1.4.4 running via stdio');
+  console.error(`Figma Dev Tools MCP Server v${readPackageVersion()} running via stdio`);
 }

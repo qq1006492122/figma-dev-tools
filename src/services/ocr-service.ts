@@ -29,6 +29,8 @@ import * as net from 'node:net';
 import { getI18n } from '../i18n/index.js';
 import { FigmaDevError, isFigmaDevError } from '../utils/errors.js';
 import type { FigmaNode } from '../types.js';
+import { downloadHttpBuffer } from './ca-aware-downloader.js';
+import { loadCustomCaConfig, type CustomCaConfig } from './tls-agent.js';
 
 // ============ 类型定义 ============
 
@@ -219,8 +221,15 @@ interface DnsAddressRecord {
 export interface RemoteImageNetworkSeams {
   /** DNS 解析实现，默认 node:dns/promises.lookup */
   lookup?: (hostname: string, options: { all: true }) => Promise<DnsAddressRecord[]>;
-  /** fetch 实现，默认全局 fetch */
+  /** fetch 实现，默认全局 fetch（无自定义 CA 时使用） */
   fetchImpl?: typeof fetch;
+  /** 自定义 CA 配置提供者，默认读取 FIGMA_CA_CERT_PATH（仅供单元测试注入） */
+  loadCaConfig?: () => CustomCaConfig | undefined;
+  /** 自定义 CA 存在时的 http(s) 缓冲下载实现，默认 node:http/https 下载器 */
+  httpDownload?: (
+    url: URL,
+    options: { signal: AbortSignal; maxBytes: number; caConfig: CustomCaConfig },
+  ) => Promise<Buffer>;
 }
 
 export async function validateRemoteImageUrl(
@@ -298,6 +307,18 @@ export async function resolveImageBuffer(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REMOTE_IMAGE_TIMEOUT_MS);
     try {
+      // 自定义 CA 分支：全局 fetch（undici）无法注入 https.Agent，改走 node:http/https
+      // 下载器；下载器同样禁 3xx 跳转并在流式层强制 10 MiB 上限。
+      const caConfig = (seams.loadCaConfig ?? loadCustomCaConfig)();
+      if (caConfig) {
+        const doDownload = seams.httpDownload ?? downloadHttpBuffer;
+        const caBuffer = await doDownload(url, {
+          signal: controller.signal,
+          maxBytes: MAX_IMAGE_BYTES,
+          caConfig,
+        });
+        return validateImageBuffer(caBuffer);
+      }
       // redirect:'error'：禁止跟随 3xx，避免跳转到未经过 SSRF 校验的主机
       const doFetch = seams.fetchImpl ?? fetch;
       const response = await doFetch(url, { signal: controller.signal, redirect: 'error' });

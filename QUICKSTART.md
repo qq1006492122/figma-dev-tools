@@ -1,7 +1,7 @@
-# ⚡ figma-dev-tools 快速上手指南 v1.4.17
+# ⚡ figma-dev-tools 快速上手指南 v1.4.18
 
 > 中 / [English](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)
-> 从安装到产出第一个 Figma → React/Vue 组件，约 5 分钟。本文由原 `INTEGRATION_GUIDE` / `QUICKSTART` / 落地速览合并简化而来，内容与 v1.4.17 实际实现一致。
+> 从安装到产出第一个 Figma → React/Vue 组件，约 5 分钟。本文由原 `INTEGRATION_GUIDE` / `QUICKSTART` / 落地速览合并简化而来，内容与 v1.4.18 实际实现一致。
 
 ---
 
@@ -93,8 +93,8 @@ AI 会自动按标准管线执行：
 figma_parse_url 解析链接
   → figma_get_metadata     页面结构概览（避免上下文爆炸）
   → figma_get_screenshot   视觉基准
-  → figma_generate_jsx     生成组件（React/Vue + Tailwind）
-  → figma_download_assets  下载图片/SVG 到 public/<场景>/
+  → figma_generate_jsx     生成组件（React/Vue × Tailwind/UnoCSS/CSS Modules；自动推导 TS Props）
+  → figma_download_assets  下载图片/SVG（按构建器落位 public/<场景>/ 或 src/assets/）
 ```
 
 ### 方式 B：CLI 命令行（不依赖 AI）
@@ -109,14 +109,20 @@ figma-dev metadata "<figma-url>"
 # ③ 设计规范预检（可选）
 figma-dev lint "<figma-url>"
 
-# ④ 生成组件（React 默认；可用 --framework vue）
+# ④ 生成组件（React 默认；--framework vue 生成 Vue3）
+#    v1.4.18 起 --style 支持 tailwind | unocss | css-modules
 figma-dev jsx "<figma-url>" --name HeroSection --scene landing-page --framework react --style tailwind
+# UnoCSS 归因模式：追加 --attributify；CSS Modules：自动产出 HeroSection.module.css
+figma-dev jsx "<figma-url>" --name HeroSection --style unocss --attributify
+figma-dev jsx "<figma-url>" --name HeroSection --style css-modules
 
-# ⑤ 下载资源到 public/landing-page/
+# ⑤ 下载资源（v1.4.18 起按构建器自动落位 public/ 或 src/assets/，可用 --bundler 覆盖）
 figma-dev assets "<figma-url>" --scene landing-page --scale 2
 
 # ⑥ 同步设计 Tokens → Tailwind @theme CSS
 figma-dev sync "<figma-url>" --format oklch --output ./src/styles/figma
+#    v1.4.18 新增：W3C DTCG 标准 Tokens（design-tokens.tokens.json）
+figma-dev sync "<figma-url>" --output-format dtcg --output ./src/styles/figma
 
 # ⑦ 框架无关结构化 JSON（供 Vue/Svelte/HTML 等消费）
 figma-dev structured "<figma-url>"
@@ -135,10 +141,10 @@ figma-dev structured "<figma-url>"
 | `figma-dev token set/get/list/delete/default` | Token 安全管理 |
 | `figma-dev info <url>` / `metadata <url>` | 文件信息 / 高层概览 |
 | `figma-dev lint <url>` | 代码还原质量预检 |
-| `figma-dev jsx <url>` | 生成 React/Vue+Tailwind 组件 |
+| `figma-dev jsx <url>` | 生成 React/Vue 组件（`--style tailwind\|unocss\|css-modules`、`--attributify`、自动 TS Props/import 整理，v1.4.18） |
 | `figma-dev structured <url>` | 输出框架无关 JSON 结构 |
-| `figma-dev assets <url>` | 下载图片/SVG 到项目 |
-| `figma-dev sync <url>` | 同步 Tokens → 主题 CSS |
+| `figma-dev assets <url>` | 下载图片/SVG 到项目（按构建器落位，v1.4.18） |
+| `figma-dev sync <url>` | 同步 Tokens → 主题 CSS / JSON / W3C DTCG（`--output-format dtcg`，v1.4.18） |
 | `figma-dev cache status/clear` | 查看 / 清理本地缓存 |
 | `figma-dev lang set zh-CN|en-US` / `lang switch` | 切换中 / 英文界面 |
 | `figma-dev tutorial` | 打开使用教程 |

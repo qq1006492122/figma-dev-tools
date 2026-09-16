@@ -1,13 +1,13 @@
 ---
 name: 'figma-dev-tools'
 description:
-  'Figma 设计到代码增强工具集 v1.4.17 -
+  'Figma 设计到代码增强工具集 v1.4.18 -
   20个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div
   soup、上下文爆炸、hex写死、资源路径处理、深层嵌套截断、层级混乱等问题。支持Trae/VS
   Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。'
 ---
 
-# Figma Dev Tools v1.4.17 - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.4.18 - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 
@@ -675,6 +675,34 @@ import { publicCdnUrl } from '@/lib/utils';
 ---
 
 ## 📋 更新日志
+
+### v1.4.18（多框架多样式地基 + P0 收尾）
+
+**🎴 样式方案可插拔架构**
+
+- 新增 `src/services/style-renderers/`：types/registry/factory + tailwind/unocss/css-modules 渲染器，11 个方案描述符
+- React/Vue 双管线支持 Tailwind、UnoCSS（preset-wind + attributify 归因模式 `--attributify` / MCP `unocssAttributify`）、CSS Modules
+- CSS Modules：25 属性规范序提取、同名声明共享类名、碰撞去重、`composes` 最大严格子集、旁路 `*.module.css`（React `styles['x']`、Vue `<style module src>`）
+
+**🧩 Component Properties → TS Props**
+
+- 新增 `props-type-generator.ts`：TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP 四类属性全覆盖
+- React：带 JSDoc 的 `XxxProps`（继承 `React.HTMLAttributes<HTMLElement>`，含 `@default` 与可交换 key）；无属性不输出空 interface
+- Vue3：`interface Props` + `withDefaults(defineProps<Props>(), {...})`（TS/JS 双模，Component 类型按需导入）
+
+**🪙 W3C DTCG Tokens**
+
+- 新增 `dtcg-token-formatter.ts`（纯函数）：color/dimension(px|rem)/shadow/typography 嵌套组映射，空分类省略
+- 内置结构校验器（叶子 `$type`+`$value` 白名单配对、错误带完整路径）
+- MCP `figma_generate_styles` outputFormat 增 `dtcg`；`figma_sync_to_project` 与 CLI `sync --output-format` 增 `dtcg/all`（直写 `.tokens.json`）
+
+**🏢 企业网络与工程化**
+
+- `FIGMA_CA_CERT_PATH` 自定义 CA（PEM 校验，API 与 OCR 远程下载共用 tls-agent）
+- 构建器检测（Vite/Webpack/Next.js/Remix）与资源路径五形态修正，CLI `--bundler` 可覆盖
+- React/Vue 产物 Prettier 前 import 语句级自动整理（补齐/裁剪/`import type` 规范化，幂等）
+- 全部 29 条 CLI 帮助路径提供中英示例，`-l` 当次切换（`I18n.useLanguage`）
+- 三层测试基建：单元/冒烟/压测；makeLargeTree（21845 节点）夹具、MCP stdio harness、CLI help 双语言快照；全量 27 文件 375 全绿、audit 0 漏洞
 
 ### v1.4.17（并发可靠性 + SSRF 加固 + 更新链路硬化）
 

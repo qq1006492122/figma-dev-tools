@@ -1,0 +1,111 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`T4 React 生成器：构建器感知图片引用 > bundler=nextjs 产物快照 1`] = `
+"import React from 'react';
+
+import { cn } from '@/lib/utils';
+
+export const HeroBanner: React.FC<React.HTMLAttributes<HTMLElement>> = ({ className, ...rest }) => {
+  return (
+    <img
+      className={cn('w-80 h-[180px] object-cover', className)}
+      data-figma-id="10:1"
+      data-figma-name="hero-image"
+      {...rest}
+      src={'/portal/edu/hero-banner.png'}
+      alt="hero-image"
+      loading="eager"
+      decoding="async"
+      width={320}
+      height={180}
+      fetchPriority="high"
+    />
+  );
+};
+
+export default HeroBanner;
+"
+`;
+
+exports[`T4 React 生成器：构建器感知图片引用 > bundler=none 产物快照 1`] = `
+"import React from 'react';
+
+import { cn } from '@/lib/utils';
+import { publicCdnUrl } from '@/lib/asset-path';
+
+export const HeroBanner: React.FC<React.HTMLAttributes<HTMLElement>> = ({ className, ...rest }) => {
+  return (
+    <img
+      className={cn('w-80 h-[180px] object-cover', className)}
+      data-figma-id="10:1"
+      data-figma-name="hero-image"
+      {...rest}
+      src={publicCdnUrl('/portal/edu/hero-banner.png')}
+      alt="hero-image"
+      loading="eager"
+      decoding="async"
+      width={320}
+      height={180}
+      fetchPriority="high"
+    />
+  );
+};
+
+export default HeroBanner;
+"
+`;
+
+exports[`T4 React 生成器：构建器感知图片引用 > bundler=vite 产物快照 1`] = `
+"import React from 'react';
+
+import heroBannerPng from '@/assets/portal/edu/hero-banner.png';
+import { cn } from '@/lib/utils';
+
+export const HeroBanner: React.FC<React.HTMLAttributes<HTMLElement>> = ({ className, ...rest }) => {
+  return (
+    <img
+      className={cn('w-80 h-[180px] object-cover', className)}
+      data-figma-id="10:1"
+      data-figma-name="hero-image"
+      {...rest}
+      src={heroBannerPng}
+      alt="hero-image"
+      loading="eager"
+      decoding="async"
+      width={320}
+      height={180}
+      fetchPriority="high"
+    />
+  );
+};
+
+export default HeroBanner;
+"
+`;
+
+exports[`T4 React 生成器：构建器感知图片引用 > bundler=webpack 产物快照 1`] = `
+"import React from 'react';
+
+import { cn } from '@/lib/utils';
+
+export const HeroBanner: React.FC<React.HTMLAttributes<HTMLElement>> = ({ className, ...rest }) => {
+  return (
+    <img
+      className={cn('w-80 h-[180px] object-cover', className)}
+      data-figma-id="10:1"
+      data-figma-name="hero-image"
+      {...rest}
+      src={require('@/assets/portal/edu/hero-banner.png')}
+      alt="hero-image"
+      loading="eager"
+      decoding="async"
+      width={320}
+      height={180}
+      fetchPriority="high"
+    />
+  );
+};
+
+export default HeroBanner;
+"
+`;

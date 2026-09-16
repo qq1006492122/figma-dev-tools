@@ -13,6 +13,8 @@ import * as path from 'node:path';
 
 import * as prettier from 'prettier';
 
+import { organizeFrameworkImports } from './import-organizer.js';
+
 /**
  * 格式化选项
  */
@@ -23,6 +25,11 @@ export interface FormatCodeOptions {
   projectRoot?: string;
   /** 是否在格式化失败时静默返回原始代码（默认 true） */
   silent?: boolean;
+  /**
+   * 是否在 Prettier 之前自动整理 React/Vue 框架导入（v1.4.18，T5）。
+   * 默认 true；仅 .tsx/.jsx（React）与 .vue（Vue，仅 script 块）产物生效。
+   */
+  organizeImports?: boolean;
 }
 
 /**
@@ -36,7 +43,7 @@ export interface FormatCodeOptions {
  * @returns 格式化后的代码字符串（失败时返回原始代码）
  */
 export async function formatCode(code: string, options: FormatCodeOptions = {}): Promise<string> {
-  const { filePath, projectRoot = process.cwd(), silent = true } = options;
+  const { filePath, projectRoot = process.cwd(), silent = true, organizeImports = true } = options;
 
   try {
     const ext = filePath ? path.extname(filePath).toLowerCase() : '.tsx';
@@ -50,6 +57,17 @@ export async function formatCode(code: string, options: FormatCodeOptions = {}):
     else if (ext === '.html') parser = 'html';
     else if (ext === '.vue') parser = 'vue';
     else if (ext === '.svelte') parser = 'babel' as prettier.BuiltInParserName;
+
+    // v1.4.18（T5）：Prettier 之前先做框架导入权威整理（纯函数、幂等）。
+    // React 仅作用于组件产物扩展名；.ts/.js 工具文件保守不动以免误删。
+    let organizedCode = code;
+    if (organizeImports) {
+      if (ext === '.tsx' || ext === '.jsx') {
+        organizedCode = organizeFrameworkImports(organizedCode, { framework: 'react' });
+      } else if (ext === '.vue') {
+        organizedCode = organizeFrameworkImports(organizedCode, { framework: 'vue' });
+      }
+    }
 
     const configPath = await findPrettierConfig(projectRoot);
 
@@ -79,7 +97,7 @@ export async function formatCode(code: string, options: FormatCodeOptions = {}):
       parser,
     };
 
-    return await prettier.format(code, prettierOptions);
+    return await prettier.format(organizedCode, prettierOptions);
   } catch (error) {
     if (!silent) {
       console.warn(

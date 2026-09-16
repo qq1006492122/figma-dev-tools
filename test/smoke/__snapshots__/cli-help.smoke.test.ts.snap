@@ -1,0 +1,836 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`TR-6.1 en-US 全命令 --help > aggregate English help snapshot 1`] = `
+{
+  "(root)": "Usage: figma-dev [options] [command]
+
+Figma Dev Tools - Bridge between Figma designs and code
+
+Options:
+  -V, --version                           output the version number
+  -t, --token <token>                     Figma Access Token
+  -o, --output <dir>                      Output directory (default: "./src/styles/figma")
+  --no-backup                             Do not create backup files
+  -l, --lang <lang>                       Display language (zh-CN/en-US)
+  -v, --ver                               Show version number
+  --update                                Check and update to the latest version
+  -h, --help                              display help for command
+
+Commands:
+  lang                                    Switch display language
+  validate                                Validate if Figma Access Token is valid
+  token                                   Securely manage Figma Access Token
+  info <url-or-filekey>                   View Figma file information
+  sync [options] <url-or-filekey>         Sync design Tokens to local project
+  component [options] <url-or-figma-url>  Generate React component code from Figma node
+  screenshot [options] <url-or-filekey>   Get node screenshot
+  metadata [options] <url-or-filekey>     Get high-level structural overview of design node (avoids context explosion)
+  lint [options] <url-or-filekey>         Check Figma design code restore quality (pre-check before code generation)
+  structured [options] <url-or-filekey>   Get framework-agnostic structured design data (for Vue/Svelte/HTML etc.)
+  jsx [options] <url-or-filekey>          Generate React/Vue + Tailwind/UnoCSS component code in one click (vX.Y.Z enhanced)
+  assets [options] <url-or-filekey>       Download design assets into the project asset directory (since vX.Y.Z placed by bundler: public/ or src/assets/)
+  tutorial|help [options]                 Open Figma Dev Tools tutorial and documentation
+  mcp                                     Start MCP server (stdio mode)
+  wizard|init [options]                   Interactive setup wizard (recommended for first-time use)
+  gui                                     Launch GUI visual configuration panel
+  cache                                   Manage local cache
+  privacy                                 Show the privacy pledge
+Examples:
+  $ figma-dev wizard                        # Interactive first-time setup
+  $ figma-dev sync "https://figma.com/design/xxx" -o ./src/styles
+  $ figma-dev jsx <design-url> --node 1:2 --style tailwind
+  $ figma-dev -l zh-CN --help               # Show help in Chinese for this run
+
+Shell Autocompletion:
+  Install completion script (run once):
+    figma-dev completion >> ~/.zshrc     # Zsh
+    figma-dev completion >> ~/.bashrc    # Bash
+    figma-dev completion | Out-String | Invoke-Expression  # PowerShell
+
+  Restart terminal after installation to use Tab autocompletion.
+
+",
+  "assets": "Usage: figma-dev assets [options] <url-or-filekey>
+
+Download design assets into the project asset directory (since vX.Y.Z placed
+by bundler: public/ or src/assets/)
+
+Options:
+  -n, --node <nodeId>    Node ID (can specify multiple, comma-separated)
+  --nodes <nodeIds>      Node ID list (comma-separated)
+  --scene <scene>        Scene name (e.g. health, edu, ai-innovation-class)
+                         (default: "default")
+  --project-root <dir>   Project root (auto-detected)
+  --scale <scale>        Scale (1-4) (default: "2")
+  --svg-format <format>  Vector export format (svg/png) (default: "svg")
+  --bundler <bundler>    Target project bundler (vX.Y.Z): auto (default,
+                         auto-detect) | vite | webpack | nextjs | remix | none
+                         (legacy publicCdnUrl) (default: "auto")
+  -h, --help             display help for command
+Examples:
+  $ figma-dev assets <design-url> -o ./public/assets
+  $ figma-dev assets <fileKey> --node 1:2 --format svg --bundler vite
+",
+  "cache": "Usage: figma-dev cache [options] [command]
+
+Manage local cache
+
+Options:
+  -h, --help             display help for command
+
+Commands:
+  status|stats           Show cache statistics
+  clear|clean [options]  Clear all cached data
+  help [command]         display help for command
+Examples:
+  $ figma-dev cache status
+  $ figma-dev cache clear --force
+",
+  "cache clear": "Usage: figma-dev cache clear|clean [options]
+
+Clear all cached data
+
+Options:
+  -f, --force  Force clear without confirmation
+  -h, --help   display help for command
+Examples:
+  $ figma-dev cache clear                   # Ask before clearing
+  $ figma-dev cache clear --force           # Clear without confirmation
+",
+  "cache status": "Usage: figma-dev cache status|stats [options]
+
+Show cache statistics
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev cache status
+  $ figma-dev cache stats                   # Alias of status
+",
+  "component": "Usage: figma-dev component [options] <url-or-figma-url>
+
+Generate React component code from Figma node
+
+Options:
+  -n, --name <name>    Component name
+  -N, --node <nodeId>  Specify node ID
+  --js                 Generate JavaScript code (default TypeScript)
+  --style <format>     Style format (tailwind/css-modules/inline-styles,
+                       default tailwind) (default: "tailwind")
+  --no-children        Do not include children
+  --output <dir>       Output directory
+  -h, --help           display help for command
+Examples:
+  $ figma-dev component <design-url> --node 1:2 -o ./src/components
+  $ figma-dev component <url> --typescript --style css-modules
+",
+  "gui": "Usage: figma-dev gui [options]
+
+Launch GUI visual configuration panel
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev gui                           # Launch the visual setup UI
+  $ figma-dev gui --port 5180
+",
+  "info": "Usage: figma-dev info [options] <url-or-filekey>
+
+View Figma file information
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev info "https://www.figma.com/design/abc/MyApp"
+  $ figma-dev info abc:def --node 1:2
+",
+  "jsx": "Usage: figma-dev jsx [options] <url-or-filekey>
+
+Generate React/Vue + Tailwind/UnoCSS component code in one click (vX.Y.Z
+enhanced)
+
+Options:
+  -n, --node <nodeId>      Specify node ID
+  --name <name>            Component name
+  --scene <scene>          Scene name (for public/portal/<scene>/ asset path)
+  --depth <depth>          Max node tree depth (default: "15")
+  --output <file>          Output to file (default to console)
+  --framework <framework>  Target framework: react (default) | vue (default:
+                           "react")
+  --style <styleFormat>    Style format (default: tailwind). Available:
+                           tailwind (Tailwind CSS), unocss (UnoCSS),
+                           css-modules (CSS Modules), inline-styles (Inline
+                           styles); Planned: styled (vX.Y.Z), emotion
+                           (vX.Y.Z), less (vX.Y.Z), sass (vX.Y.Z),
+                           vanilla-extract (vX.Y.Z), panda (vX.Y.Z),
+                           css-variables (vX.Y.Z) (default: "tailwind")
+  --attributify            UnoCSS attributify mode (vX.Y.Z, use with --style
+                           unocss only; emits utilities as element attributes;
+                           off by default = wind mode) (default: false)
+  --bundler <bundler>      Target project bundler (vX.Y.Z): auto (default,
+                           auto-detect) | vite | webpack | nextjs | remix |
+                           none (legacy publicCdnUrl) (default: "auto")
+  --skip-lint              Skip design lint warnings
+  --inline-svg             内联渲染 SVG 图标节点（vX.Y.Z 新增，默认开启） (default: true)
+  -h, --help               display help for command
+Examples:
+  $ figma-dev jsx <design-url> --node 1:2 -o Button.tsx
+  $ figma-dev jsx <url> --style unocss --unocss-attributify
+  $ figma-dev jsx <url> --style css-modules --framework vue --typescript
+",
+  "lang": "Usage: figma-dev lang [options] [command]
+
+Switch display language
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  set <language>  Set display language
+  list|ls         List all supported languages
+  switch          Interactively switch language
+  help [command]  display help for command
+Examples:
+  $ figma-dev lang set en-US                # Persist English as the language
+  $ figma-dev lang list                     # List all available languages
+  $ figma-dev lang switch                   # Pick a language interactively
+",
+  "lang list": "Usage: figma-dev lang list|ls [options]
+
+List all supported languages
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev lang list
+  $ figma-dev lang ls                       # Alias of list
+",
+  "lang set": "Usage: figma-dev lang set [options] <language>
+
+Set display language
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev lang set en-US
+  $ figma-dev lang set zh-CN
+",
+  "lang switch": "Usage: figma-dev lang switch [options]
+
+Interactively switch language
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev lang switch                   # Arrow keys to pick, Enter to confirm
+",
+  "lint": "Usage: figma-dev lint [options] <url-or-filekey>
+
+Check Figma design code restore quality (pre-check before code generation)
+
+Options:
+  -n, --node <nodeId>  Specify node ID
+  -d, --depth <depth>  Check depth (default: "15")
+  --format <format>    输出格式 (markdown/json) (default: "markdown")
+  --output <file>      Output to file (default to console)
+  -h, --help           display help for command
+Examples:
+  $ figma-dev lint <design-url>
+  $ figma-dev lint <fileKey> --node 1:2 --json
+",
+  "mcp": "Usage: figma-dev mcp [options]
+
+Start MCP server (stdio mode)
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev mcp                           # Start MCP server over stdio (IDE/Agent)
+  $ figma-dev mcp --help
+",
+  "metadata": "Usage: figma-dev metadata [options] <url-or-filekey>
+
+Get high-level structural overview of design node (avoids context explosion)
+
+Options:
+  -n, --node <nodeId>  Specify node ID
+  -d, --depth <depth>  Overview depth (default: "1")
+  -h, --help           display help for command
+Examples:
+  $ figma-dev metadata <design-url>
+  $ figma-dev metadata <fileKey> --node 1:2
+",
+  "privacy": "Usage: figma-dev privacy [options]
+
+Show the privacy pledge
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev privacy                       # Privacy pledge and .gitignore advice
+",
+  "screenshot": "Usage: figma-dev screenshot [options] <url-or-filekey>
+
+Get node screenshot
+
+Options:
+  -n, --node <nodeId>  Specify node ID
+  --format <format>    Image format (png/jpg/svg) (default: "png")
+  --scale <scale>      Scale (1-4) (default: "2")
+  --download <dir>     Download to specified directory
+  -h, --help           display help for command
+Examples:
+  $ figma-dev screenshot <design-url> --node 1:2 -o shot.png
+  $ figma-dev screenshot <url> --scale 2 --format jpg
+",
+  "structured": "Usage: figma-dev structured [options] <url-or-filekey>
+
+Get framework-agnostic structured design data (for Vue/Svelte/HTML etc.)
+
+Options:
+  -n, --node <nodeId>  Specify node ID
+  --depth <depth>      Max node tree depth (default: "15")
+  --format <format>    Output format (pretty/json) (default: "pretty")
+  --output <file>      Output to file (default to console)
+  -h, --help           display help for command
+Examples:
+  $ figma-dev structured <design-url>
+  $ figma-dev structured <fileKey> --node 1:2 --depth 3
+",
+  "sync": "Usage: figma-dev sync [options] <url-or-filekey>
+
+Sync design Tokens to local project
+
+Options:
+  -n, --node <nodeId>       Specify node ID
+  --format <format>         Color format (hex/rgb/oklch/hsl) (default: "oklch")
+  --spacing-unit <unit>     Spacing unit (px/rem) (default: "px")
+  --prefix <prefix>         Token name prefix
+  --output-format <format>  Output format (css/tailwind/json/dtcg/all)
+                            (default: "all")
+  --file-name <name>        Output file name
+  -h, --help                display help for command
+Examples:
+  $ figma-dev sync <design-url> -o ./src/styles/figma
+  $ figma-dev sync <fileKey> --output-format dtcg
+  $ figma-dev sync <fileKey> --format hex --spacing-unit rem --prefix portal
+",
+  "token": "Usage: figma-dev token [options] [command]
+
+Securely manage Figma Access Token
+
+Options:
+  -h, --help                  display help for command
+
+Commands:
+  set [options] [name]        Save Token to system keychain/encrypted storage
+                              (default name: default)
+  get [options] [name]        View saved Token (views default by default)
+  list|ls                     List all saved Tokens
+  delete|rm [options] <name>  Delete specified Token
+  default <name>              Set default Token to use
+  help [command]              display help for command
+Examples:
+  $ figma-dev token set personal -t figd_xxxxx
+  $ figma-dev token list
+  $ figma-dev token default personal
+",
+  "token default": "Usage: figma-dev token default [options] <name>
+
+Set default Token to use
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev token default personal
+  $ figma-dev token default work
+",
+  "token delete": "Usage: figma-dev token delete|rm [options] <name>
+
+Delete specified Token
+
+Options:
+  -f, --force  Skip confirmation and delete directly
+  -h, --help   display help for command
+Examples:
+  $ figma-dev token delete work
+  $ figma-dev token delete ci --force       # Skip confirmation
+",
+  "token get": "Usage: figma-dev token get [options] [name]
+
+View saved Token (views default by default)
+
+Options:
+  --show-full  Show full Token (masked by default)
+  -h, --help   display help for command
+Examples:
+  $ figma-dev token get
+  $ figma-dev token get work                # Show a named token (masked)
+",
+  "token list": "Usage: figma-dev token list|ls [options]
+
+List all saved Tokens
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev token list                    # List all saved tokens
+",
+  "token set": "Usage: figma-dev token set [options] [name]
+
+Save Token to system keychain/encrypted storage (default name: default)
+
+Options:
+  -t, --token <token>  Provide Token directly (no interactive input)
+  -n, --note <note>    Token note/description
+  -h, --help           display help for command
+Examples:
+  $ figma-dev token set                     # Interactive entry (default name)
+  $ figma-dev token set work -t figd_xxxxx -n "Work account"
+  $ figma-dev token set ci --token $FIGMA_ACCESS_TOKEN
+",
+  "tutorial": "Usage: figma-dev tutorial|help [options]
+
+Open Figma Dev Tools tutorial and documentation
+
+Options:
+  --no-browser  Only show links, do not open browser
+  -h, --help    display help for command
+Examples:
+  $ figma-dev tutorial                      # Open the getting-started guide
+",
+  "validate": "Usage: figma-dev validate [options]
+
+Validate if Figma Access Token is valid
+
+Options:
+  -h, --help  display help for command
+Examples:
+  $ figma-dev validate                      # Validate the saved default token
+  $ figma-dev validate -t figd_xxxxx        # Validate a specific token
+",
+  "wizard": "Usage: figma-dev wizard|init [options]
+
+Interactive setup wizard (recommended for first-time use)
+
+Options:
+  --gui       Launch GUI setup wizard (browser interface)
+  -h, --help  display help for command
+Examples:
+  $ figma-dev wizard                        # Recommended for first-time use
+",
+}
+`;
+
+exports[`TR-6.1 zh-CN 全命令 --help > 全部中文 help 聚合快照 1`] = `
+{
+  "(root)": "Usage: figma-dev [options] [command]
+
+Figma 开发工具 - 设计稿与代码的桥接工具
+
+Options:
+  -V, --version                           output the version number
+  -t, --token <token>                     Figma Access Token
+  -o, --output <dir>                      输出目录 (default: "./src/styles/figma")
+  --no-backup                             不创建备份文件
+  -l, --lang <lang>                       显示语言 (zh-CN/en-US)
+  -v, --ver                               显示版本号
+  --update                                检查并更新到最新版本
+  -h, --help                              display help for command
+
+Commands:
+  lang                                    切换显示语言
+  validate                                验证 Figma Access Token 是否有效
+  token                                   安全管理 Figma Access Token
+  info <url-or-filekey>                   查看 Figma 文件信息
+  sync [options] <url-or-filekey>         同步设计 Tokens 到本地项目
+  component [options] <url-or-figma-url>  从 Figma 节点生成 React 组件代码
+  screenshot [options] <url-or-filekey>   获取节点截图
+  metadata [options] <url-or-filekey>     获取设计节点高层结构概览（避免上下文爆炸）
+  lint [options] <url-or-filekey>         检查 Figma 设计稿的代码还原质量（代码生成前预检）
+  structured [options] <url-or-filekey>   获取框架无关的结构化设计数据（适用于 Vue/Svelte/HTML 等任意框架）
+  jsx [options] <url-or-filekey>          一键生成 React/Vue + Tailwind/UnoCSS 组件代码（vX.Y.Z 增强版）
+  assets [options] <url-or-filekey>       下载设计资源到项目资源目录（vX.Y.Z 起按构建器落位 public/ 或 src/assets/）
+  tutorial|help [options]                 打开 Figma Dev Tools 教程和文档
+  mcp                                     启动 MCP 服务器 (stdio 模式)
+  wizard|init [options]                   交互式配置向导（推荐首次使用时运行）
+  gui                                     启动 GUI 可视化配置面板
+  cache                                   管理本地缓存
+  privacy                                 查看隐私承诺声明
+示例:
+  $ figma-dev wizard                        # 交互式初始化配置
+  $ figma-dev sync "https://figma.com/design/xxx" -o ./src/styles
+  $ figma-dev jsx <文件链接> --node 1:2 --style tailwind
+  $ figma-dev -l en-US --help               # 临时切换为英文帮助
+
+Shell 自动补全:
+  安装补全脚本（执行一次即可）:
+    figma-dev completion >> ~/.zshrc     # Zsh
+    figma-dev completion >> ~/.bashrc    # Bash
+    figma-dev completion | Out-String | Invoke-Expression  # PowerShell
+
+  安装后重启终端即可使用 Tab 键自动补全命令和选项。
+
+",
+  "assets": "Usage: figma-dev assets [options] <url-or-filekey>
+
+下载设计资源到项目资源目录（vX.Y.Z 起按构建器落位 public/ 或 src/assets/）
+
+Options:
+  -n, --node <nodeId>    节点 ID（可指定多个，逗号分隔）
+  --nodes <nodeIds>      节点 ID 列表（逗号分隔）
+  --scene <scene>        场景名称（如 health、edu、ai-innovation-class） (default:
+                         "default")
+  --project-root <dir>   项目根目录（自动检测）
+  --scale <scale>        缩放比例 (1-4) (default: "2")
+  --svg-format <format>  矢量导出格式 (svg/png) (default: "svg")
+  --bundler <bundler>    目标项目构建器（vX.Y.Z）: auto (默认，自动检测) | vite | webpack |
+                         nextjs | remix | none（旧版 publicCdnUrl） (default:
+                         "auto")
+  -h, --help             display help for command
+示例:
+  $ figma-dev assets <设计稿链接> -o ./public/assets
+  $ figma-dev assets <fileKey> --node 1:2 --format svg --bundler vite
+",
+  "cache": "Usage: figma-dev cache [options] [command]
+
+管理本地缓存
+
+Options:
+  -h, --help             display help for command
+
+Commands:
+  status|stats           查看缓存统计信息
+  clear|clean [options]  清空所有缓存
+  help [command]         display help for command
+示例:
+  $ figma-dev cache status
+  $ figma-dev cache clear --force
+",
+  "cache clear": "Usage: figma-dev cache clear|clean [options]
+
+清空所有缓存
+
+Options:
+  -f, --force  强制清空，不确认
+  -h, --help   display help for command
+示例:
+  $ figma-dev cache clear                   # 清空前确认
+  $ figma-dev cache clear --force           # 直接清空不确认
+",
+  "cache status": "Usage: figma-dev cache status|stats [options]
+
+查看缓存统计信息
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev cache status
+  $ figma-dev cache stats                   # status 的简写
+",
+  "component": "Usage: figma-dev component [options] <url-or-figma-url>
+
+从 Figma 节点生成 React 组件代码
+
+Options:
+  -n, --name <name>    组件名称
+  -N, --node <nodeId>  指定节点 ID
+  --js                 生成 JavaScript 代码 (默认 TypeScript)
+  --style <format>     样式格式（tailwind/css-modules/inline-styles，默认 tailwind）
+                       (default: "tailwind")
+  --no-children        不包含子元素
+  --output <dir>       输出目录
+  -h, --help           display help for command
+示例:
+  $ figma-dev component <设计稿链接> --node 1:2 -o ./src/components
+  $ figma-dev component <链接> --typescript --style css-modules
+",
+  "gui": "Usage: figma-dev gui [options]
+
+启动 GUI 可视化配置面板
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev gui                           # 启动可视化配置界面
+  $ figma-dev gui --port 5180
+",
+  "info": "Usage: figma-dev info [options] <url-or-filekey>
+
+查看 Figma 文件信息
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev info "https://www.figma.com/design/abc/MyApp"
+  $ figma-dev info abc:def --node 1:2
+",
+  "jsx": "Usage: figma-dev jsx [options] <url-or-filekey>
+
+一键生成 React/Vue + Tailwind/UnoCSS 组件代码（vX.Y.Z 增强版）
+
+Options:
+  -n, --node <nodeId>      指定节点 ID
+  --name <name>            组件名称
+  --scene <scene>          场景名（用于 public/portal/<scene>/ 资源路径）
+  --depth <depth>          最大节点树深度 (default: "15")
+  --output <file>          输出到文件（默认输出到控制台）
+  --framework <framework>  目标框架: react (默认) | vue (default: "react")
+  --style <styleFormat>    样式方案（默认 tailwind）。可用：tailwind (Tailwind CSS)、unocss
+                           (UnoCSS)、css-modules (CSS Modules)、inline-styles
+                           (内联样式)；计划中：styled（vX.Y.Z）、emotion（vX.Y.Z）、less（vX.Y.Z）、sass（vX.Y.Z）、vanilla-extract（vX.Y.Z）、panda（vX.Y.Z）、css-variables（vX.Y.Z）
+                           (default: "tailwind")
+  --attributify            UnoCSS attributify 模式（vX.Y.Z新增，仅配合 --style
+                           unocss；原子类以元素属性输出，默认关闭=wind 模式） (default: false)
+  --bundler <bundler>      目标项目构建器（vX.Y.Z）: auto (默认，自动检测) | vite | webpack |
+                           nextjs | remix | none（旧版 publicCdnUrl） (default:
+                           "auto")
+  --skip-lint              跳过设计规范检查提示
+  --inline-svg             内联渲染 SVG 图标节点（vX.Y.Z 新增，默认开启） (default: true)
+  -h, --help               display help for command
+示例:
+  $ figma-dev jsx <设计稿链接> --node 1:2 -o Button.tsx
+  $ figma-dev jsx <链接> --style unocss --unocss-attributify
+  $ figma-dev jsx <链接> --style css-modules --framework vue --typescript
+",
+  "lang": "Usage: figma-dev lang [options] [command]
+
+切换显示语言
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  set <language>  设置显示语言
+  list|ls         列出所有支持的语言
+  switch          交互式切换语言
+  help [command]  display help for command
+示例:
+  $ figma-dev lang set zh-CN                # 持久切换为中文
+  $ figma-dev lang list                     # 查看全部可用语言
+  $ figma-dev lang switch                   # 交互式选择语言
+",
+  "lang list": "Usage: figma-dev lang list|ls [options]
+
+列出所有支持的语言
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev lang list
+  $ figma-dev lang ls                       # list 的简写
+",
+  "lang set": "Usage: figma-dev lang set [options] <language>
+
+设置显示语言
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev lang set zh-CN
+  $ figma-dev lang set en-US
+",
+  "lang switch": "Usage: figma-dev lang switch [options]
+
+交互式切换语言
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev lang switch                   # 方向键选择，回车确认
+",
+  "lint": "Usage: figma-dev lint [options] <url-or-filekey>
+
+检查 Figma 设计稿的代码还原质量（代码生成前预检）
+
+Options:
+  -n, --node <nodeId>  指定节点 ID
+  -d, --depth <depth>  检查深度 (default: "15")
+  --format <format>    输出格式 (markdown/json) (default: "markdown")
+  --output <file>      输出到文件（默认输出到控制台）
+  -h, --help           display help for command
+示例:
+  $ figma-dev lint <设计稿链接>
+  $ figma-dev lint <fileKey> --node 1:2 --json
+",
+  "mcp": "Usage: figma-dev mcp [options]
+
+启动 MCP 服务器 (stdio 模式)
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev mcp                           # stdio 启动 MCP 服务器（供 IDE/Agent 接入）
+  $ figma-dev mcp --help
+",
+  "metadata": "Usage: figma-dev metadata [options] <url-or-filekey>
+
+获取设计节点高层结构概览（避免上下文爆炸）
+
+Options:
+  -n, --node <nodeId>  指定节点 ID
+  -d, --depth <depth>  概览深度 (default: "1")
+  -h, --help           display help for command
+示例:
+  $ figma-dev metadata <设计稿链接>
+  $ figma-dev metadata <fileKey> --node 1:2
+",
+  "privacy": "Usage: figma-dev privacy [options]
+
+查看隐私承诺声明
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev privacy                       # 查看隐私承诺与 .gitignore 建议
+",
+  "screenshot": "Usage: figma-dev screenshot [options] <url-or-filekey>
+
+获取节点截图
+
+Options:
+  -n, --node <nodeId>  指定节点 ID
+  --format <format>    图片格式 (png/jpg/svg) (default: "png")
+  --scale <scale>      缩放比例 (1-4) (default: "2")
+  --download <dir>     下载到指定目录
+  -h, --help           display help for command
+示例:
+  $ figma-dev screenshot <设计稿链接> --node 1:2 -o shot.png
+  $ figma-dev screenshot <链接> --scale 2 --format jpg
+",
+  "structured": "Usage: figma-dev structured [options] <url-or-filekey>
+
+获取框架无关的结构化设计数据（适用于 Vue/Svelte/HTML 等任意框架）
+
+Options:
+  -n, --node <nodeId>  指定节点 ID
+  --depth <depth>      最大节点树深度 (default: "15")
+  --format <format>    输出格式 (pretty/json) (default: "pretty")
+  --output <file>      输出到文件（默认输出到控制台）
+  -h, --help           display help for command
+示例:
+  $ figma-dev structured <设计稿链接>
+  $ figma-dev structured <fileKey> --node 1:2 --depth 3
+",
+  "sync": "Usage: figma-dev sync [options] <url-or-filekey>
+
+同步设计 Tokens 到本地项目
+
+Options:
+  -n, --node <nodeId>       指定节点 ID
+  --format <format>         颜色格式 (hex/rgb/oklch/hsl) (default: "oklch")
+  --spacing-unit <unit>     间距单位 (px/rem) (default: "px")
+  --prefix <prefix>         Token 名称前缀
+  --output-format <format>  输出格式 (css/tailwind/json/dtcg/all) (default: "all")
+  --file-name <name>        输出文件名
+  -h, --help                display help for command
+示例:
+  $ figma-dev sync <设计稿链接> -o ./src/styles/figma
+  $ figma-dev sync <fileKey> --output-format dtcg
+  $ figma-dev sync <fileKey> --format hex --spacing-unit rem --prefix portal
+",
+  "token": "Usage: figma-dev token [options] [command]
+
+安全管理 Figma Access Token
+
+Options:
+  -h, --help                  display help for command
+
+Commands:
+  set [options] [name]        保存 Token 到系统密钥链/加密存储（默认名称: default）
+  get [options] [name]        查看已保存的 Token（默认查看 default）
+  list|ls                     列出所有已保存的 Token
+  delete|rm [options] <name>  删除指定 Token
+  default <name>              设置默认使用的 Token
+  help [command]              display help for command
+示例:
+  $ figma-dev token set personal -t figd_xxxxx
+  $ figma-dev token list
+  $ figma-dev token default personal
+",
+  "token default": "Usage: figma-dev token default [options] <name>
+
+设置默认使用的 Token
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev token default personal
+  $ figma-dev token default work
+",
+  "token delete": "Usage: figma-dev token delete|rm [options] <name>
+
+删除指定 Token
+
+Options:
+  -f, --force  跳过确认直接删除
+  -h, --help   display help for command
+示例:
+  $ figma-dev token delete work
+  $ figma-dev token delete ci --force       # 跳过确认
+",
+  "token get": "Usage: figma-dev token get [options] [name]
+
+查看已保存的 Token（默认查看 default）
+
+Options:
+  --show-full  显示完整 Token（默认仅显示掩码）
+  -h, --help   display help for command
+示例:
+  $ figma-dev token get
+  $ figma-dev token get work                # 查看指定名称的 Token（脱敏）
+",
+  "token list": "Usage: figma-dev token list|ls [options]
+
+列出所有已保存的 Token
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev token list                    # 列出全部已保存 Token
+",
+  "token set": "Usage: figma-dev token set [options] [name]
+
+保存 Token 到系统密钥链/加密存储（默认名称: default）
+
+Options:
+  -t, --token <token>  直接提供 Token（不使用交互式输入）
+  -n, --note <note>    Token 备注/描述
+  -h, --help           display help for command
+示例:
+  $ figma-dev token set                     # 交互式录入（默认名）
+  $ figma-dev token set work -t figd_xxxxx -n "工作账号"
+  $ figma-dev token set ci --token $FIGMA_ACCESS_TOKEN
+",
+  "tutorial": "Usage: figma-dev tutorial|help [options]
+
+打开 Figma Dev Tools 教程和文档
+
+Options:
+  --no-browser  仅显示链接，不打开浏览器
+  -h, --help    display help for command
+示例:
+  $ figma-dev tutorial                      # 查看入门教程文档
+",
+  "validate": "Usage: figma-dev validate [options]
+
+验证 Figma Access Token 是否有效
+
+Options:
+  -h, --help  display help for command
+示例:
+  $ figma-dev validate                      # 校验已保存的默认 Token
+  $ figma-dev validate -t figd_xxxxx        # 校验指定 Token
+",
+  "wizard": "Usage: figma-dev wizard|init [options]
+
+交互式配置向导（推荐首次使用时运行）
+
+Options:
+  --gui       启动 GUI 配置向导（浏览器界面）
+  -h, --help  display help for command
+示例:
+  $ figma-dev wizard                        # 首次使用推荐运行
+",
+}
+`;

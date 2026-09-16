@@ -47,6 +47,16 @@ import { optimize as svgoOptimize } from 'svgo';
 import type { FigmaExportFormat } from '../types.js';
 import type { ProcessedAsset, ProcessedNode } from '../types/nodes.js';
 import type { FigmaClient } from './figma-client.js';
+import {
+  getAssetRootDir,
+  normalizeAssetUrlPath,
+  planAssetReference,
+  resolveAssetPrefix,
+  sanitizeAssetFileName,
+  toAssetVarName,
+  type BundlerKind,
+  type PlannedAssetReference,
+} from './asset-paths.js';
 
 // ============ 类型定义 ============
 
@@ -66,6 +76,12 @@ export interface AssetDownloaderOptions {
   skipExisting?: boolean;
   /** 是否使用 SVGO 优化 SVG 输出（移除冗余属性、压缩体积），默认 true */
   optimizeSvg?: boolean;
+  /**
+   * 目标项目构建器（v1.4.18 新增，T4）：
+   * 决定资源落位目录（public 或 src/assets）与引用代码形态；
+   * 默认 'none'，行为与 1.4.17 完全一致。
+   */
+  bundler?: BundlerKind;
 }
 
 /**
@@ -93,41 +109,19 @@ export interface DownloadResult {
   asset: ProcessedAsset;
   /** 本地文件路径（相对于 public 目录） */
   localPath: string;
-  /** publicCdnUrl() 调用代码字符串 */
+  /** publicCdnUrl() 调用代码字符串（bundler 非 none 时为裸 public 路径） */
   cdnUrl: string;
   /** 可直接在代码中使用的 import/引用代码 */
   importCode: string;
+  /** 构建器感知的权威引用规划（v1.4.18 新增；仅成功结果存在，以 React 引号风格规划） */
+  reference?: PlannedAssetReference;
   /** 是否下载成功 */
   success: boolean;
   /** 失败时的错误信息 */
   error?: string;
 }
 
-// ============ 文件名清理工具函数 ============
-
-/**
- * 清理文件名（移除 Figma 特殊字符和非法文件名字符）
- *
- * 处理步骤：
- * 1. 首尾去空白
- * 2. 将路径分隔符、引号、尖括号、空白字符等替换为下划线
- * 3. 移除非字母数字、非中文、非点号/连字符的字符
- * 4. 合并连续下划线
- * 5. 去除首尾下划线
- * 6. 转换为小写（避免大小写敏感文件系统的问题）
- *
- * @param name - 原始名称
- * @returns 安全的文件名（小写 kebab-case 风格）
- */
-function sanitizeFileName(name: string): string {
-  return name
-    .trim()
-    .replace(/[\\/:*?"<>|\s]+/g, '_')
-    .replace(/[^\w\u4e00-\u9fa5.-]/g, '')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '')
-    .toLowerCase();
-}
+// ============ 文件名/导出格式工具函数 ============
 
 /**
  * 根据节点类型和内容推断导出格式
@@ -191,6 +185,9 @@ export class AssetDownloader {
     this._options = {
       ...DEFAULT_OPTIONS,
       ...options,
+      // 显式兜底：spread 无法清除 options.bundler === undefined 的覆盖，
+      // 否则 planAssetReference 会因 switch 未命中在运行时返回 undefined
+      bundler: options.bundler ?? 'none',
       projectRoot: path.resolve(options.projectRoot),
     } as Required<AssetDownloaderOptions>;
   }
@@ -198,46 +195,52 @@ export class AssetDownloader {
   // ============ 路径生成私有方法 ============
 
   /**
-   * 获取 public 资源目录的完整绝对路径
-   *
-   * 目录结构：`{projectRoot}/public/{assetPrefix}`
-   * 若未指定 assetPrefix，则使用 `portal/<sanitizedSceneName>`。
+   * 解析资源子目录前缀（显式 assetPrefix 优先，否则 portal/<场景名>）
    *
    * @param sceneName - 场景名称（用于构建默认子路径）
-   * @returns public 目录的绝对路径
+   * @returns POSIX 目录前缀（无前导/尾随斜杠）
    */
-  private _getPublicDir(sceneName: string): string {
-    const prefix = this._options.assetPrefix || `portal/${sanitizeFileName(sceneName)}`;
-    return path.join(this._options.projectRoot, 'public', prefix);
+  private _getPrefix(sceneName: string): string {
+    return resolveAssetPrefix(this._options.assetPrefix, sceneName);
   }
 
   /**
-   * 生成 publicCdnUrl() 调用代码
+   * 获取资源落位目录的完整绝对路径（v1.4.18：构建器感知）
    *
-   * 生成的代码可直接嵌入 TSX/JSX 中作为图片 src 使用。
+   * - none/nextjs/remix：`{projectRoot}/public/{prefix}`
+   * - vite/webpack：`{projectRoot}/src/assets/{prefix}`
    *
-   * @param sceneName - 场景名称
-   * @param fileName - 文件名（含扩展名）
-   * @returns publicCdnUrl 调用代码字符串
+   * @param sceneName - 场景名称（用于构建默认子路径）
+   * @returns 资源目录绝对路径
    */
-  private _generateCdnCode(sceneName: string, fileName: string): string {
-    const prefix = this._options.assetPrefix || `portal/${sanitizeFileName(sceneName)}`;
-    const urlPath = `/${prefix}/${fileName}`;
-    return `publicCdnUrl('${urlPath}')`;
+  private _getAssetDir(sceneName: string): string {
+    return path.join(this._options.projectRoot, getAssetRootDir(this._options.bundler), this._getPrefix(sceneName));
   }
 
   /**
-   * 生成相对于 public 目录的资源路径
-   *
-   * 用于构建 `public/...` 路径引用。
+   * 生成资源根相对 URL 路径（/ 开头）
    *
    * @param sceneName - 场景名称
    * @param fileName - 文件名（含扩展名）
-   * @returns 以 / 开头的 public 相对路径
+   * @returns 以 / 开头的资源根相对路径
    */
-  private _generateLocalPath(sceneName: string, fileName: string): string {
-    const prefix = this._options.assetPrefix || `portal/${sanitizeFileName(sceneName)}`;
-    return `/${prefix}/${fileName}`;
+  private _generateUrlPath(sceneName: string, fileName: string): string {
+    return `/${this._getPrefix(sceneName)}/${fileName}`;
+  }
+
+  /**
+   * 按当前构建器规划资源引用（供下载报告与 MCP 结果展示；
+   * 代码生成器以相同契约重新规划）
+   *
+   * @param urlPath - 资源根相对 URL 路径
+   * @returns 引用规划
+   */
+  private _planReference(urlPath: string): PlannedAssetReference {
+    return planAssetReference({
+      bundler: this._options.bundler,
+      urlPath: normalizeAssetUrlPath(urlPath),
+      varName: toAssetVarName(urlPath),
+    });
   }
 
   // ============ 批量下载公开方法 ============
@@ -263,11 +266,11 @@ export class AssetDownloader {
       return [];
     }
 
-    const publicDir = this._getPublicDir(sceneName);
+    const assetDir = this._getAssetDir(sceneName);
 
     // ============ 确保目录存在 ============
     // recursive: true 允许创建多级目录，已存在时不报错
-    fs.mkdirSync(publicDir, { recursive: true });
+    fs.mkdirSync(assetDir, { recursive: true });
 
     // ============ 按格式分组节点 ID ============
     // Figma Images API 支持按格式批量获取 URL，同格式节点可一次请求
@@ -295,13 +298,13 @@ export class AssetDownloader {
 
     // ============ 分批下载 PNG/JPG 资源 ============
     if (pngNodeIds.length > 0) {
-      const pngResults = await this._downloadImageBatch(fileKey, sceneName, pngNodeIds, assetMap, publicDir, 'png');
+      const pngResults = await this._downloadImageBatch(fileKey, sceneName, pngNodeIds, assetMap, assetDir, 'png');
       results.push(...pngResults);
     }
 
     // ============ 分批下载 SVG 资源 ============
     if (svgNodeIds.length > 0) {
-      const svgResults = await this._downloadImageBatch(fileKey, sceneName, svgNodeIds, assetMap, publicDir, 'svg');
+      const svgResults = await this._downloadImageBatch(fileKey, sceneName, svgNodeIds, assetMap, assetDir, 'svg');
       results.push(...svgResults);
     }
 
@@ -326,7 +329,7 @@ export class AssetDownloader {
    * @param sceneName - 场景名称
    * @param nodeIds - 待下载的节点 ID 列表（同格式）
    * @param assetMap - 节点 ID → ProcessedAsset 映射
-   * @param publicDir - public 目录绝对路径
+   * @param assetDir - 资源落位目录绝对路径
    * @param format - 导出格式参数（Figma API 使用小写）
    * @returns 该批次所有节点的下载结果
    */
@@ -335,7 +338,7 @@ export class AssetDownloader {
     sceneName: string,
     nodeIds: string[],
     assetMap: Map<string, ProcessedAsset>,
-    publicDir: string,
+    assetDir: string,
     format: ExportFormatParam,
   ): Promise<DownloadResult[]> {
     const results: DownloadResult[] = [];
@@ -373,22 +376,25 @@ export class AssetDownloader {
 
           // ============ 生成文件名和路径 ============
           // nodeId 中的冒号和连字符替换为下划线，避免文件系统问题
-          const baseName = sanitizeFileName(asset.name || `asset_${nodeId.replace(/[:-]/g, '_')}`);
+          const baseName = sanitizeAssetFileName(asset.name || `asset_${nodeId.replace(/[:-]/g, '_')}`);
           const ext = format === 'jpg' ? 'jpg' : format;
           const fileName = `${baseName}.${ext}`;
-          const filePath = path.join(publicDir, fileName);
+          const filePath = path.join(assetDir, fileName);
 
           // ============ 检查文件是否已存在 ============
           if (this._options.skipExisting && fs.existsSync(filePath)) {
-            const localPath = this._generateLocalPath(sceneName, fileName);
-            const cdnUrl = this._generateCdnCode(sceneName, fileName);
+            const localPath = this._generateUrlPath(sceneName, fileName);
+            const reference = this._planReference(localPath);
+            // none 时保持 1.4.17 的 publicCdnUrl() 调用串；其他构建器写裸路径
+            const cdnUrl = this._options.bundler === 'none' ? reference.expression : localPath;
             asset.localPath = localPath;
             asset.cdnUrl = cdnUrl;
             results.push({
               asset,
               localPath,
               cdnUrl,
-              importCode: cdnUrl,
+              importCode: reference.expression,
+              reference,
               success: true,
             });
             continue;
@@ -429,8 +435,10 @@ export class AssetDownloader {
             }
             fs.writeFileSync(filePath, finalBuffer);
 
-            const localPath = this._generateLocalPath(sceneName, fileName);
-            const cdnUrl = this._generateCdnCode(sceneName, fileName);
+            const localPath = this._generateUrlPath(sceneName, fileName);
+            const reference = this._planReference(localPath);
+            // none 时保持 1.4.17 的 publicCdnUrl() 调用串；其他构建器写裸路径
+            const cdnUrl = this._options.bundler === 'none' ? reference.expression : localPath;
             asset.localPath = localPath;
             asset.cdnUrl = cdnUrl;
 
@@ -438,7 +446,8 @@ export class AssetDownloader {
               asset,
               localPath,
               cdnUrl,
-              importCode: cdnUrl,
+              importCode: reference.expression,
+              reference,
               success: true,
             });
           } catch (downloadErr) {
@@ -537,10 +546,13 @@ export class AssetDownloader {
     if (successResults.length > 0) {
       lines.push('### 成功下载的资产');
       lines.push('');
-      lines.push('| 名称 | 类型 | 本地路径 | CDN 引用 |');
+      lines.push('| 名称 | 类型 | 本地路径 | 代码引用 |');
       lines.push('|------|------|----------|----------|');
       for (const r of successResults) {
-        lines.push(`| ${r.asset.name} | ${r.asset.type} | public${r.localPath} | \`${r.importCode}\` |`);
+        // 落位目录随构建器变化（public 或 src/assets）；localPath 末段为文件名
+        const baseDir = r.reference?.assetDir ?? 'public';
+        const fileName = r.localPath.split('/').pop() ?? r.localPath;
+        lines.push(`| ${r.asset.name} | ${r.asset.type} | ${baseDir}/${fileName} | \`${r.importCode}\` |`);
       }
       lines.push('');
     }
@@ -560,11 +572,31 @@ export class AssetDownloader {
     lines.push('### 使用示例');
     lines.push('');
     lines.push('```tsx');
-    lines.push(`import { publicCdnUrl } from '@/core/config';`);
-    lines.push('');
+    // 仅当存在 public-cdn 形态引用时才输出 publicCdnUrl 导入（none 构建器）
+    if (successResults.some((r) => r.reference?.kind === 'public-cdn')) {
+      lines.push(`import { publicCdnUrl } from '@/core/config';`);
+      lines.push('');
+    }
+    // ESM import 形态（vite）：先去重输出 import 语句
+    const esmImports = new Set<string>();
+    for (const r of successResults) {
+      for (const imp of r.reference?.imports ?? []) {
+        esmImports.add(imp);
+      }
+    }
+    for (const imp of esmImports) {
+      lines.push(imp);
+    }
+    if (esmImports.size > 0) {
+      lines.push('');
+    }
     for (const r of successResults.slice(0, 3)) {
+      // ESM 形态变量已由 import 定义，不再重复声明常量
+      if (r.reference?.kind === 'esm-import') {
+        continue;
+      }
       // 文件名转为 SCREAMING_SNAKE_CASE 作为常量名
-      const varName = sanitizeFileName(r.asset.name).replace(/-/g, '_').toUpperCase();
+      const varName = sanitizeAssetFileName(r.asset.name).replace(/-/g, '_').toUpperCase();
       lines.push(`const ${varName}_URL = ${r.importCode};`);
     }
     lines.push('```');

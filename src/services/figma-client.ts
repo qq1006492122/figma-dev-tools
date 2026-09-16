@@ -13,8 +13,6 @@
 
 // ============ 依赖导入 ============
 
-import type { Agent as HttpsAgent } from 'node:https';
-
 import {
   create as axiosCreate,
   type AxiosInstance,
@@ -22,7 +20,6 @@ import {
   type AxiosRequestConfig,
   type InternalAxiosRequestConfig,
 } from 'axios';
-import { HttpsProxyAgent } from 'https-proxy-agent';
 
 import type {
   FigmaFileResponse,
@@ -35,6 +32,7 @@ import type {
 import { FigmaApiError, type ErrorCode } from '../utils/errors.js';
 import { getI18n } from '../i18n/index.js';
 import { FigmaCache } from './cache.js';
+import { buildRequestAgent, loadCustomCaConfig } from './tls-agent.js';
 
 // ============ 类型定义 ============
 
@@ -318,15 +316,6 @@ export class FigmaClient {
     } catch {
       return false;
     }
-  }
-
-  /**
-   * 创建代理 Agent
-   */
-  private _createProxyAgent(proxyConfig: ProxyConfig): HttpsAgent {
-    const auth = proxyConfig.username && proxyConfig.password ? `${proxyConfig.username}:${proxyConfig.password}@` : '';
-    const proxyUrl = `${proxyConfig.protocol || 'https'}://${auth}${proxyConfig.host}:${proxyConfig.port}`;
-    return new HttpsProxyAgent(proxyUrl);
   }
 
   /**
@@ -731,9 +720,15 @@ export class FigmaClient {
       throw new Error(labels.httpsRequired);
     }
 
-    // 代理配置
+    // 代理配置 + 自定义 CA（ssl.caCertPath 或 FIGMA_CA_CERT_PATH）统一在 tls-agent 装配
     const proxyConfig = config.proxy === false ? false : config.proxy || this._detectProxy();
-    const httpsAgent = proxyConfig ? this._createProxyAgent(proxyConfig) : undefined;
+    // 显式 ssl.caCertPath 优先于环境变量；文件缺失/非 PEM 在此处快速抛出 i18n 错误
+    const caConfig = loadCustomCaConfig({ certPath: config.ssl?.caCertPath });
+    const httpsAgent = buildRequestAgent({
+      proxyConfig,
+      caConfig,
+      rejectUnauthorized: config.ssl?.rejectUnauthorized,
+    });
 
     // Axios 实例配置
     // Figma API 认证：

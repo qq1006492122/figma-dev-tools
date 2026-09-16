@@ -446,6 +446,8 @@ export interface StructuredNode {
   componentKey?: string;
   /** Component 名称 */
   componentName?: string;
+  /** Component Properties（v1.4.18 T10，COMPONENT 定义或 INSTANCE 当前值归一化） */
+  componentProperties?: ProcessedComponentProperty[];
   /** 资源引用（图片/图标节点） */
   asset?: ProcessedAsset;
   /** 子节点列表 */
@@ -454,6 +456,30 @@ export interface StructuredNode {
   figmaId: string;
   /** 扩展字段 */
   [key: string]: unknown;
+}
+
+/**
+ * 规范化的 Component Property（v1.4.18 T10）。
+ *
+ * 由 node-processor 从 COMPONENT 的 componentPropertyDefinitions
+ * 或 INSTANCE 的 componentProperties 归一化而来，供 props-type-generator
+ * 推导 React/Vue 组件 Props 类型。
+ */
+export interface ProcessedComponentProperty {
+  /** Figma 属性原始名（INSTANCE 的 #nodeId 后缀已剥离） */
+  readonly name: string;
+  /** 清洗后的合法 TS 标识符（camelCase，组件内唯一） */
+  readonly propName: string;
+  /** Figma 属性四分类 */
+  readonly type: 'BOOLEAN' | 'INSTANCE_SWAP' | 'TEXT' | 'VARIANT';
+  /** 是否必填（无默认值的 VARIANT 为 true；其余 Figma 属性均有默认值） */
+  readonly required: boolean;
+  /** 默认值（TEXT=字符串、BOOLEAN=布尔、VARIANT=默认变体名；无默认值或缺省） */
+  readonly defaultValue?: string | boolean;
+  /** VARIANT 全部可选值（来自定义；INSTANCE 场景可能缺省） */
+  readonly variantOptions?: readonly string[];
+  /** INSTANCE_SWAP 可交换目标 key 列表 */
+  readonly preferredComponentKeys?: readonly string[];
 }
 
 /**
@@ -522,6 +548,8 @@ export interface ProcessedNode {
   componentKey?: string;
   /** Component 名称 */
   componentName?: string;
+  /** Component Properties（v1.4.18 T10，COMPONENT 定义或 INSTANCE 当前值归一化） */
+  componentProperties?: ProcessedComponentProperty[];
 
   /** 资源引用（图片/图标节点） */
   asset?: ProcessedAsset;

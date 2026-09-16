@@ -1,4 +1,4 @@
-# figma-dev-tools v1.4.17 开发指南
+# figma-dev-tools v1.4.18 开发指南
 
 ## 项目概述
 
@@ -19,9 +19,23 @@ UnoCSS 代码生成，提供 GUI 配置向导、XSS 安全防护、智能层级�
 | `npm run dev`        | 开发模式（监听文件变化） |
 | `npm run build`      | TypeScript 编译          |
 | `npm run cli`        | 运行 CLI 命令            |
-| `npm test`           | 运行测试                 |
+| `npm test`           | 运行测试（含冒烟，v1.4.18 起三层体系） |
 | `npm run test:watch` | 监听模式运行测试         |
+| `npm run test:smoke` | 只跑发布级冒烟（`test/smoke/`，需先 build） |
+| `npm run test:perf`  | 压测脚本（`test/perf/run-bench.mjs`，本机基线，无 CI 硬指标） |
 | `npm start`          | 运行编译后的代码         |
+
+### 三层测试体系（v1.4.18 建立）
+
+| 层级 | 目录 | 内容 | 运行方式 |
+| ---- | ---- | ---- | -------- |
+| 单元测试 | `test/services/` 等 | 纯函数/服务级，夹具工厂 `test/fixtures/`（nodes.ts 含 makeLargeTree：branch=4/depth=7 = 21845 节点） | `npx vitest run <file>` |
+| 冒烟测试 | `test/smoke/` | 发布级回归：MCP stdio harness（真实 `dist/index.js mcp`）、CLI 子进程 `--help` 双语言快照（29 帮助路径） | `npm run test:smoke`（先 `npm run build`） |
+| 压测 | `test/perf/` | 大树/批处理性能基线脚本，仅出脚本与本机基线，不设 CI 硬门槛 | `npm run test:perf` |
+
+- 快照首次不会自动写入，需 `npx vitest run <file> -u`，写入后必须人工 Read 审查 diff。
+- v1.4.18 发布基线：单测 24 文件 323 用例；冒烟 4 文件 68 用例；默认聚合 27 文件 375 全绿。
+- 工具数基线：`test/smoke/mcp-tools.smoke.test.ts` 的 `BASELINE_TOOL_NAMES` 是 20 个工具的**严格有序数组**，新增/改名工具必须同步更新（v1.4.19→22，v1.4.20→23）。
 
 ## 项目结构
 
@@ -63,7 +77,22 @@ figma-dev-tools/
 │   │   ├── tokens-extractor.ts  # Token 提取
 │   │   ├── token-matcher.ts     # Token 匹配
 │   │   ├── design-context.ts    # 设计上下文（v1.4.0：添加fileKey字段支持SVG渲染）
-│   │   └── file-writer.ts       # 文件写入
+│   │   ├── file-writer.ts       # 文件写入（v1.4.18：writeDtcgTokens，build→validate→写盘）
+│   │   ├── props-type-generator.ts # v1.4.18新增：Component Properties→React interface/Vue3 Props
+│   │   ├── dtcg-token-formatter.ts # v1.4.18新增：W3C DTCG Tokens 构建/序列化/结构校验（纯函数零依赖）
+│   │   ├── import-organizer.ts  # v1.4.18新增：import 语句级整理（react/vue 双解析，幂等）
+│   │   ├── bundler-detector.ts  # v1.4.18新增：Vite/Webpack/Next.js/Remix 构建器检测
+│   │   ├── asset-paths.ts       # v1.4.18新增：五形态资源落位路径修正
+│   │   ├── ca-aware-downloader.ts # v1.4.18新增：自定义 CA 感知下载（FIGMA_CA_CERT_PATH）
+│   │   ├── tls-agent.ts         # v1.4.18新增：PEM 校验 + 额外 CA 的 https.Agent
+│   │   └── style-renderers/     # v1.4.18新增：样式方案可插拔架构
+│   │       ├── types.ts         #   StyleRenderer 接口 / StyleSidecarFile / 格式联合类型
+│   │       ├── registry.ts      #   11 描述符注册表、assertStyleFormatSupported、help 文本
+│   │       ├── factory.ts       #   createStyleRenderer(format,{framework,unocssMode})
+│   │       ├── tailwind-renderer.ts
+│   │       ├── unocss-renderer.ts # preset-wind + Attributify 归因渲染器
+│   │       ├── css-modules-renderer.ts # 声明提取/共享类/碰撞去重/composes/sidecar
+│   │       └── index.ts         #   桶文件
 │   ├── types/             # TypeScript 类型定义
 │   │   └── nodes.ts
 │   ├── utils/             # 工具函数（v1.4.0 新增标注）
@@ -74,6 +103,12 @@ figma-dev-tools/
 │   │   └── security.ts          # v1.4.0新增：XSS安全防护工具
 │   └── types.ts           # Figma API 类型
 ├── dist/                  # TypeScript 编译输出
+├── test/                  # 测试（v1.4.18 三层体系）
+│   ├── services/          # 单元测试（样式管线/DTCG/Props/CA/资源落位等）
+│   ├── fixtures/          # 夹具数据（nodes.ts：makeLargeTree 等；page.ts）
+│   ├── helpers/           # 测试辅助（optional-deps 等）
+│   ├── smoke/             # 冒烟（mcp-harness stdio、mcp-tools、cli、cli-help 双语言快照）
+│   └── perf/              # 压测脚本（run-bench.mjs，本机基线，v1.4.20 落地）
 ├── install.mjs            # 安装脚本
 ├── uninstall.mjs          # 卸载脚本
 ├── mcp-standalone.mjs     # MCP 独立运行脚本
@@ -147,32 +182,42 @@ npm test          # 确保测试通过
 
 ### 7. 发布流程
 
-1. 确保所有检查通过：`npm run build && npm test`
-2. 确认版本号正确
+1. 确保所有检查通过：
+   ```bash
+   npm run build
+   npm test                 # 含冒烟；或分层执行：npx vitest run + npm run test:smoke
+   npm audit --omit=dev     # 0 漏洞
+   npm pack --dry-run       # 确认清单无 test/、.trae/、specs/、src/ 等白名单外内容
+   ```
+2. 确认版本号正确（package.json / package-lock.json / 8 份文档版本历史一致）
 3. 确认没有临时文件
 4. git add/commit/push
-5. npm publish --access public
+5. npm publish --access public（发布动作需人工确认，不得自动执行）
 
-## MCP 工具列表（19 个）
+## MCP 工具列表（v1.4.18：20 个，注册顺序以冒烟基线为准）
 
-| 工具名                        | 说明                                    |
-| ----------------------------- | --------------------------------------- |
-| figma_parse_url               | 解析 Figma URL 得到 fileKey/nodeId      |
-| figma_get_file                | 获取 Figma 文件信息                     |
-| figma_get_node                | 获取节点信息                            |
-| figma_get_metadata            | 获取节点元数据概览（渐进式上下文）      |
-| figma_get_design_context      | 获取节点设计上下文详情                  |
-| figma_get_structured_data     | 获取框架无关结构化数据                  |
-| figma_lint_design             | 代码还原质量预检                        |
-| figma_generate_jsx            | 生成增强版 JSX/Vue 组件（推荐）         |
-| figma_generate_component      | 生成 React 组件（旧版兼容）             |
-| figma_download_assets         | 下载图片/SVG 资源（SVGO 优化）          |
-| figma_create_icon_sprite      | 生成 SVG Sprite                         |
-| figma_get_screenshot          | 获取节点截图                            |
-| figma_sync_tokens             | 同步设计 Tokens 到项目文件              |
-| figma_dev_fallback_status     | 检测付费墙兜底服务可用性（v1.4.4 新增） |
-| figma_dev_fallback_capture    | 浏览器兜底截图（v1.4.4 新增）           |
-| figma_verify_fidelity         | 还原度像素 diff 校验（v1.4.4 新增）     |
-| figma_get_cache_status        | 缓存状态查询（v1.4.4 新增）             |
-| figma_clear_cache             | 清除缓存（v1.4.4 新增）                 |
-| figma_get_i18n_status         | i18n 状态查询（v1.4.4 新增）            |
+| # | 工具名 | 说明 |
+| - | ------ | ---- |
+| 1 | figma_parse_url | 解析 Figma URL 得到 fileKey/nodeId |
+| 2 | figma_get_file | 获取 Figma 文件信息 |
+| 3 | figma_extract_tokens | 提取设计 Tokens（Variables+Styles） |
+| 4 | figma_generate_component | 生成 React 组件（旧版管线兼容） |
+| 5 | figma_get_screenshot | 获取节点截图 |
+| 6 | figma_generate_styles | Tokens → CSS Variables / Tailwind v4 / JSON / **DTCG（v1.4.18）** |
+| 7 | figma_sync_to_project | Tokens 落盘到项目（css/tailwind/json/**dtcg**/all，自动备份） |
+| 8 | figma_validate_token | 校验 Figma Token |
+| 9 | figma_get_metadata | 高层结构概览（渐进式上下文） |
+| 10 | figma_get_design_context | 精简设计上下文详情 |
+| 11 | figma_download_assets | 下载图片/SVG（SVGO；v1.4.18 按构建器落位） |
+| 12 | figma_create_icon_sprite | 生成 SVG Sprite |
+| 13 | figma_list_components | 列出文件 Components/ComponentSets |
+| 14 | figma_lint_design | 代码还原质量预检 |
+| 15 | figma_generate_jsx | 生成 React/Vue 组件（推荐；v1.4.18 多样式 + TS Props） |
+| 16 | figma_get_structured_data | 框架无关结构化数据 |
+| 17 | figma_dev_fallback_status | 付费墙兜底服务状态 |
+| 18 | figma_dev_fallback_capture | 浏览器兜底截图 |
+| 19 | figma_verify_fidelity | 还原度像素 diff 校验 |
+| 20 | figma_ocr_extract | OCR 文本提取（原生 JSON + tesseract.js 兜底） |
+
+> 规划：v1.4.19 增至 22 个（figma_generate_vue、figma_batch_generate）；v1.4.20 增至 23 个（figma_generate_weapp）。
+> 该名单的唯一真源是 `test/smoke/mcp-tools.smoke.test.ts` 的 `BASELINE_TOOL_NAMES`（严格有序，含数量断言），改动必须同步。

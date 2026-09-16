@@ -392,6 +392,48 @@ export interface FigmaNodeStyles {
 }
 
 /**
+ * Component Property 类型（Figma REST API 四分类，v1.4.18 T10）。
+ *
+ * - TEXT：文本属性，值为字符串；
+ * - BOOLEAN：布尔开关（通常用于显隐/状态切换）；
+ * - VARIANT：枚举变体，定义中含全部 variantOptions；
+ * - INSTANCE_SWAP：可替换组件实例。
+ */
+export type FigmaComponentPropertyType = 'BOOLEAN' | 'INSTANCE_SWAP' | 'TEXT' | 'VARIANT';
+
+/** INSTANCE_SWAP 可交换目标偏好 */
+export interface FigmaComponentPreferredValue {
+  /** 目标类型：单个组件或整组组件集 */
+  readonly type: 'COMPONENT' | 'COMPONENT_SET';
+  /** 目标 Component/ComponentSet key */
+  readonly key: string;
+}
+
+/** Component Property 定义（COMPONENT / COMPONENT_SET 节点） */
+export interface FigmaComponentPropertyDefinition {
+  /** 属性类型 */
+  readonly type: FigmaComponentPropertyType;
+  /** 默认值（TEXT 为字符串、BOOLEAN 为布尔、VARIANT 为默认变体名；INSTANCE_SWAP 可能为空串） */
+  readonly defaultValue: string | boolean;
+  /** VARIANT 全部可选值（仅 VARIANT 存在） */
+  readonly variantOptions?: readonly string[];
+  /** INSTANCE_SWAP 可交换目标列表（仅 INSTANCE_SWAP 存在） */
+  readonly preferredValues?: readonly FigmaComponentPreferredValue[];
+}
+
+/** Component Property 实例值（INSTANCE 节点） */
+export interface FigmaComponentProperty {
+  /** 属性类型 */
+  readonly type: FigmaComponentPropertyType;
+  /** 当前值（INSTANCE_SWAP 时为被交换组件 id 或空串） */
+  readonly value: string | boolean;
+  /** INSTANCE_SWAP 被交换到的目标节点 id（仅交换后存在） */
+  readonly target?: string;
+  /** 是否相对主组件被覆盖 */
+  readonly overridden?: boolean;
+}
+
+/**
  * Figma 节点基础属性
  *
  * 这是 Figma REST API 中所有节点类型共有的基础属性。
@@ -469,6 +511,19 @@ export interface FigmaNode {
   readonly componentId?: string;
   /** 关联的 Component Set ID（COMPONENT 节点） */
   readonly componentSetId?: string;
+  /**
+   * Component Properties 定义（COMPONENT / COMPONENT_SET 节点，v1.4.18 T10）。
+   *
+   * 键为属性在 Figma 中的原始名；VARIANT 含 variantOptions；
+   * INSTANCE_SWAP 含 preferredValues 可交换组件/组件集 key 列表。
+   */
+  readonly componentPropertyDefinitions?: Readonly<Record<string, FigmaComponentPropertyDefinition>>;
+  /**
+   * Component Properties 当前值（INSTANCE 节点，v1.4.18 T10）。
+   *
+   * 键通常带 `#nodeId` 后缀（如 `Label#12:3`），归一化时剥离。
+   */
+  readonly componentProperties?: Readonly<Record<string, FigmaComponentProperty>>;
   /** 节点描述 */
   readonly description?: string;
   /** Component Key（COMPONENT/COMPONENT_SET 节点） */
@@ -929,9 +984,25 @@ export type CodeOutputFormat = 'react' | 'vue' | 'html' | 'tailwind-config' | 'c
 export type Framework = 'react' | 'vue';
 
 /**
- * 样式格式选项
+ * 样式格式选项（spec FR-05，v1.4.18 T7 扩展为 11 值可插拔联合）
+ *
+ * 落地状态见 src/services/style-renderers/registry.ts 单一数据源：
+ * - available（v1.4.18）：tailwind / unocss / css-modules / inline-styles
+ * - planned v1.4.19：styled / emotion / less / sass / vanilla-extract / panda
+ * - planned v1.5.0：css-variables（组件级渲染）
  */
-export type StyleFormat = 'tailwind' | 'css-modules' | 'inline-styles' | 'css-variables';
+export type StyleFormat =
+  | 'tailwind'
+  | 'unocss'
+  | 'css-modules'
+  | 'styled'
+  | 'emotion'
+  | 'less'
+  | 'sass'
+  | 'vanilla-extract'
+  | 'panda'
+  | 'inline-styles'
+  | 'css-variables';
 
 /**
  * 颜色输出格式
@@ -1077,6 +1148,31 @@ export interface CodeGenResult {
   readonly warnings: readonly string[];
   /** 增强报告 */
   readonly reports: EnhancementReports;
+  /**
+   * 样式方案配置建议（v1.4.18 T8 新增）
+   *
+   * UnoCSS（wind/attributify）时非空：uno.config.ts 示例、虚拟模块入口、图标预设、TS shim 等；
+   * 仅作为生成结果的指引文本返回，工具不会向用户项目写入任何配置文件。
+   */
+  readonly styleHints?: ReadonlyArray<{
+    /** 建议标题 */
+    readonly title: string;
+    /** 建议内容（配置/代码片段） */
+    readonly code: string;
+  }>;
+  /**
+   * 同名旁路样式文件（v1.4.18 T9 新增，仅 styleFormat='css-modules' 时存在）
+   *
+   * React：组件经 `import styles from './X.module.css'` 以 styles.x 引用；
+   * Vue：SFC 经 `<style module src="./X.module.css">` 外置，模板以 $style.x 引用。
+   * 工具只描述文件内容，由调用方决定落盘或展示，不直接写入用户项目目录。
+   */
+  readonly styleSidecar?: {
+    /** 文件名（不含目录，与组件同目录，如 'Card.module.css'） */
+    readonly fileName: string;
+    /** 文件完整内容 */
+    readonly content: string;
+  };
 }
 
 // ============================================================

@@ -1,7 +1,7 @@
-# ⚡ figma-dev-tools Quick Start Guide v1.4.17
+# ⚡ figma-dev-tools Quick Start Guide v1.4.18
 
 > [中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md) / English
-> From install to your first Figma → React/Vue component in ~5 minutes. This is the merged & simplified version of the former `INTEGRATION_GUIDE` / `QUICKSTART` / landing overview, aligned with the actual v1.4.17 implementation.
+> From install to your first Figma → React/Vue component in ~5 minutes. This is the merged & simplified version of the former `INTEGRATION_GUIDE` / `QUICKSTART` / landing overview, aligned with the actual v1.4.18 implementation.
 
 ---
 
@@ -93,8 +93,8 @@ The AI runs the standard pipeline automatically:
 figma_parse_url parse the link
   → figma_get_metadata     page structure overview (avoids context explosion)
   → figma_get_screenshot   visual reference
-  → figma_generate_jsx     generate the component (React/Vue + Tailwind)
-  → figma_download_assets  download images/SVG to public/<scene>/
+  → figma_generate_jsx     generate the component (React/Vue × Tailwind/UnoCSS/CSS Modules; auto TS Props)
+  → figma_download_assets  download images/SVG (placed by bundler into public/<scene>/ or src/assets/)
 ```
 
 ### Way B: CLI (no AI needed)
@@ -109,14 +109,20 @@ figma-dev metadata "<figma-url>"
 # ③ Design lint (optional)
 figma-dev lint "<figma-url>"
 
-# ④ Generate a component (React default; use --framework vue for Vue)
+# ④ Generate a component (React default; --framework vue for Vue 3)
+#    Since v1.4.18 --style accepts tailwind | unocss | css-modules
 figma-dev jsx "<figma-url>" --name HeroSection --scene landing-page --framework react --style tailwind
+# UnoCSS attributify: add --attributify; CSS Modules: emits HeroSection.module.css sidecar
+figma-dev jsx "<figma-url>" --name HeroSection --style unocss --attributify
+figma-dev jsx "<figma-url>" --name HeroSection --style css-modules
 
-# ⑤ Download assets to public/landing-page/
+# ⑤ Download assets (since v1.4.18 placed by bundler into public/ or src/assets/; override with --bundler)
 figma-dev assets "<figma-url>" --scene landing-page --scale 2
 
 # ⑥ Sync design tokens → Tailwind @theme CSS
 figma-dev sync "<figma-url>" --format oklch --output ./src/styles/figma
+#    v1.4.18 new: W3C DTCG standard tokens (design-tokens.tokens.json)
+figma-dev sync "<figma-url>" --output-format dtcg --output ./src/styles/figma
 
 # ⑦ Framework-agnostic structured JSON (for Vue/Svelte/HTML, etc.)
 figma-dev structured "<figma-url>"
@@ -135,10 +141,10 @@ figma-dev structured "<figma-url>"
 | `figma-dev token set/get/list/delete/default` | Token management |
 | `figma-dev info <url>` / `metadata <url>` | File info / high-level overview |
 | `figma-dev lint <url>` | Code-fidelity pre-check |
-| `figma-dev jsx <url>` | Generate React/Vue + Tailwind component |
+| `figma-dev jsx <url>` | Generate React/Vue component (`--style tailwind\|unocss\|css-modules`, `--attributify`, auto TS Props/import organizing, v1.4.18) |
 | `figma-dev structured <url>` | Output framework-agnostic JSON |
-| `figma-dev assets <url>` | Download images/SVG to the project |
-| `figma-dev sync <url>` | Sync tokens → theme CSS |
+| `figma-dev assets <url>` | Download images/SVG to the project (placed by bundler, v1.4.18) |
+| `figma-dev sync <url>` | Sync tokens → theme CSS / JSON / W3C DTCG (`--output-format dtcg`, v1.4.18) |
 | `figma-dev cache status/clear` | View / clear local cache |
 | `figma-dev lang set zh-CN|en-US` / `lang switch` | Switch UI language |
 | `figma-dev tutorial` | Open the tutorial |

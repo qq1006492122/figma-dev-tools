@@ -1,0 +1,48 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`asset-paths：TR-4.2 五构建器资源引用快照（同一含图节点） > bundler = nextjs 1`] = `
+{
+  "assetDir": "public/portal/edu",
+  "expression": "'/portal/edu/hero-banner.png'",
+  "imports": [],
+  "kind": "public-absolute",
+}
+`;
+
+exports[`asset-paths：TR-4.2 五构建器资源引用快照（同一含图节点） > bundler = none 1`] = `
+{
+  "assetDir": "public/portal/edu",
+  "expression": "publicCdnUrl('/portal/edu/hero-banner.png')",
+  "imports": [],
+  "kind": "public-cdn",
+}
+`;
+
+exports[`asset-paths：TR-4.2 五构建器资源引用快照（同一含图节点） > bundler = remix 1`] = `
+{
+  "assetDir": "public/portal/edu",
+  "expression": "'/portal/edu/hero-banner.png'",
+  "imports": [],
+  "kind": "public-absolute",
+}
+`;
+
+exports[`asset-paths：TR-4.2 五构建器资源引用快照（同一含图节点） > bundler = vite 1`] = `
+{
+  "assetDir": "src/assets/portal/edu",
+  "expression": "heroBannerPng",
+  "imports": [
+    "import heroBannerPng from '@/assets/portal/edu/hero-banner.png';",
+  ],
+  "kind": "esm-import",
+}
+`;
+
+exports[`asset-paths：TR-4.2 五构建器资源引用快照（同一含图节点） > bundler = webpack 1`] = `
+{
+  "assetDir": "src/assets/portal/edu",
+  "expression": "require('@/assets/portal/edu/hero-banner.png')",
+  "imports": [],
+  "kind": "require",
+}
+`;

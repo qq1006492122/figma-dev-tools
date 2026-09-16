@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.17
+# 🎨 Figma Dev Tools v1.4.18
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
@@ -71,6 +71,7 @@ const service = new BrowserFallbackService({
 
 | 版本    | 主题                    | 核心内容                                                                                                   |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.18 | 多框架多样式地基 + P0 收尾 | 1) 样式方案可插拔架构（`style-renderers` 注册表/工厂，11 个方案描述符）；2) UnoCSS React/Vue 双管线深化（preset-wind + attributify 归因模式，`--attributify`/MCP `unocssAttributify`）；3) CSS Modules 完整支持（声明规范序提取、同名类共享、碰撞去重、`composes` 最大严格子集、React `styles['x']`/Vue `<style module>` 旁路产物）；4) Figma Component Properties → TS Props 自动推导（React interface 继承 HTMLAttributes、Vue3 `defineProps<Props>()` + `withDefaults`，四类属性 TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP 全覆盖）；5) W3C DTCG Design Tokens 输出（`outputFormat:'dtcg'`/`sync --output-format dtcg`，含结构校验器）；6) 自定义 CA（`FIGMA_CA_CERT_PATH`，API 与 OCR 下载同时生效）；7) 构建器检测与资源路径自动修正（Vite/Webpack/Next.js/Remix 五形态）；8) React/Vue 导入自动整理（Prettier 前语句级整理，幂等）；9) 全部 CLI 命令 `--help` 中英双语示例（29 路径快照冒烟）；10) 冒烟/全量/压测三层测试基建（makeLargeTree 2 万节点 fixture、MCP stdio harness）。全量 27 文件 375 用例（单测 323 + 冒烟 68）全绿、`npm audit` 0 漏洞 |
 | v1.4.17 | MCP 并发可靠性 + OCR SSRF 加固 + 更新链路双校验 | 1) BrowserPool 增加 `poolKey` 快照与幂等 `release`，修复并发请求串池/重复释放；2) OCR 远程图片 SSRF 补齐 RFC2544 `198.19.0.0/16` 保留段拦截、DNS 多 A 记录任一为内网即拒绝、`redirect:'error'` 禁止跳转，并以可注入接缝补齐 DNS rebinding/redirect 单测（代码注明残留 TOCTOU 风险）；3) `--update`/GUI 备用复制先解析并钉住最新稳定版本（弃用浮动 `@latest`），来源 tgz 与落盘 package.json 双重严格版本校验，校验失败不再谎报成功；4) CLI/GUI 升级临时目录统一 try/finally 必清理，失败提示全面 i18n（zh-CN/en-US 新增 5 键）并补 `update.hint`；5) GUI 仅监听 127.0.0.1 并加 Origin 白名单与 OPTIONS 预检；6) McpServer 握手版本改为运行时读取 package.json，杜绝版本号漂移；测试 134→152 全绿 |
 | v1.4.16 | npm 版本占位发布 | 版本号占用发布，代码与 v1.4.15 一致，无功能变更；版本历史文档自本版起补齐 |
 | v1.4.15 | `--update` EBUSY 备用复制加固 | 修复 v1.4.14 的 `figma-dev --update` 在 Windows Git Bash/MINGW64 下 EBUSY 后 robocopy 也失败：1) 统一用 `npm.cmd` / `cmd.exe` 避免 MSYS npm 返回 `/c/Users/...` 风格路径；2) robocopy `/MIR` 改 `/E`（只覆盖不删除，Trae 进程锁住的文件删不动会导致整体失败）+ 加 `/XF *.ps1`；3) 所有 `execFileSync` 补 `shell: true` 跨 shell 兼容；4) gui-server.ts EBUSY fallback 同步修复；5) 新增 `update.restartHint` i18n 键 |
@@ -114,6 +115,11 @@ const service = new BrowserFallbackService({
 | 🔄 **8+ 编辑器支持**            | Trae、VS Code、Cursor、Windsurf、Claude Desktop、Zed、Cline、Roo Code 一键安装（GUI 自动检测）                     | v1 (gui v1.3.0) |
 | 🚀 **零配置启动**                | 支持 `npx -y figma-dev-tools --figma-api-key=xxx` 直接运行，无需提前安装配置                                      | v1.2            |
 | 🔍 **OCR 文本提取**              | **⭐ v1.4.14 新：原生节点 JSON 优先提取（零依赖、100% 准确）+ tesseract.js 图片 OCR 兜底（chi_sim+eng 中英文、PSM/OEM 可调、SSRF 防护远程图片）** | **v1.4.14**     |
+| 🎴 **样式方案可插拔**            | **⭐ v1.4.18 新：样式渲染器注册表/工厂架构；React/Vue 均支持 Tailwind、UnoCSS（含 attributify 归因模式）、CSS Modules（自动产出 `.module.css` 旁路文件）** | **v1.4.18**     |
+| 🧩 **Component Properties → TS Props** | **⭐ v1.4.18 新：自动读取 Figma 组件属性（文本/布尔/变体/实例交换），React 生成带 JSDoc 的 Props interface，Vue3 生成 `defineProps<Props>()` + `withDefaults`** | **v1.4.18**     |
+| 🪙 **W3C DTCG Tokens**           | **⭐ v1.4.18 新：`figma_generate_styles`/`figma_sync_to_project` 支持标准 DTCG（`$type`/`$value`）JSON，color/dimension/shadow/typography 全类型映射并内置结构校验** | **v1.4.18**     |
+| 🏢 **企业网络适配**              | **⭐ v1.4.18 新：`FIGMA_CA_CERT_PATH` 自定义 CA 根证书（私有根 CA/HTTPS 解密代理）；构建器自动检测（Vite/Webpack/Next.js/Remix），资源按 `public/` 或 `src/assets/` 正确落位** | **v1.4.18**     |
+| 📐 **导入自动整理 + Help 示例**  | **⭐ v1.4.18 新：React/Vue 产物在 Prettier 前自动整理 import（补齐缺失、移除未用、幂等）；全部 CLI 命令 `--help` 提供中英双语示例，`-l` 当次切换** | **v1.4.18**     |
 
 ---
 
@@ -377,13 +383,13 @@ npx figma-dev token list    # 列出已保存 Token
 | 7   | `figma_get_screenshot`      | 获取节点高清截图                                                                      | `fileKey/nodeId/scale`                   | v1          |
 | 8   | `figma_get_structured_data` | **⭐ 框架无关结构化数据**（id/name/role/type/size/layout/styles/text/asset/children） | `fileKey/nodeId/maxDepth`                | v1.1.0      |
 | 9   | `figma_lint_design`         | **⭐ v1.3.2 新：代码还原质量预检**                                                    | `fileKey/nodeId/maxDepth`                | **v1.3.2**  |
-| 10  | `figma_generate_jsx`        | **⭐ 一键生成 React/Vue+Tailwind TSX**（含 Flex 修复/a11y/设计系统/响应式，v1.4.0 新增 Vue 3/UnoCSS） | `fileKey/nodeId/componentName/sceneName` | v1.4.0 增强 |
+| 10  | `figma_generate_jsx`        | **⭐ 一键生成 React/Vue 组件**（Flex/a11y/设计系统/响应式；v1.4.18 新增 CSS Modules、UnoCSS attributify、TS Props 推导） | `fileKey/nodeId/componentName/sceneName/framework/styleFormat/unocssAttributify/typescript` | v1.4.18 增强 |
 | 11  | `figma_generate_component`  | 基础组件生成（旧版，推荐 generate_jsx）                                               | `fileKey/nodeId/styleFormat`             | v1          |
-| 12  | `figma_download_assets`     | **下载资源到 public/<场景>/ + SVGO 优化 + publicCdnUrl**                              | `fileKey/sceneName/assetNodeIds`         | v1.2         |
+| 12  | `figma_download_assets`     | **下载资源到 public/<场景>/ + SVGO 优化 + publicCdnUrl；v1.4.18 按构建器落位（src/assets 等五形态）** | `fileKey/sceneName/assetNodeIds/bundler` | v1.4.18 增强 |
 | 13  | `figma_create_icon_sprite`  | **⭐ v1.3.2 新：生成 SVG Sprite 雪碧图**                                              | `svgDir/outputPath/typesPath`            | **v1.3.2**  |
 | 14  | `figma_extract_tokens`      | 提取设计 Tokens（Variables+Styles）                                                   | `fileKey/colorFormat`                    | v1          |
-| 15  | `figma_generate_styles`     | 生成 CSS Variables / Tailwind v4 @theme                                               | `tokens/outputFormat`                    | v1          |
-| 16  | `figma_sync_to_project`     | 写入 tokens 到项目文件（自动备份）                                                    | `tokens/outputDir/format`                | v1          |
+| 15  | `figma_generate_styles`     | 生成 CSS Variables / Tailwind v4 @theme / 原始 JSON / **W3C DTCG（v1.4.18）**          | `tokens/outputFormat`（css-variables/tailwind-v4/json/dtcg） | **v1.4.18** 增强 |
+| 16  | `figma_sync_to_project`     | 写入 tokens 到项目文件（自动备份；v1.4.18 新增 dtcg/all 直写 `.tokens.json`）         | `tokens/outputDir/format`（css/tailwind/json/dtcg/all） | **v1.4.18** 增强 |
 | 17  | `figma_dev_fallback_status` | **⭐ v1.4.4 新：查询付费墙兜底系统状态**（Playwright 可用性、配置、兜底优先级）       | 无                                       | **v1.4.4**  |
 | 18  | `figma_dev_fallback_capture`| **⭐ v1.4.4 新：触发浏览器兜底截图**（付费墙时截图 + Dev Mode CSS + 视觉近似模式）    | `figmaUrl/devicePixelRatio/framework`    | **v1.4.4**  |
 | 19  | `figma_verify_fidelity`     | **⭐ v1.4.4 新：还原度校验**（像素 diff + 差异热力图 + 量化评分 0-100%）              | `figmaUrl/codeContent/threshold`         | **v1.4.4**  |
@@ -413,7 +419,7 @@ npx figma-dev token list    # 列出已保存 Token
 
 **依赖说明：** tesseract.js 为可选依赖（仅走图片 OCR 时需要），未安装时给出安装提示。远程图片 URL 有 SSRF 防护（拒绝私网地址）。
 
-#### `figma_generate_jsx`（v1.4.0 增强版，最常用）
+#### `figma_generate_jsx`（v1.4.18 增强版，最常用）
 
 ```typescript
 {
@@ -424,14 +430,24 @@ npx figma-dev token list    # 列出已保存 Token
   sceneName?: string;          // 场景名（用于资源路径，如 landing-page）
   maxDepth?: number;           // 节点树最大遍历深度，默认 15（1-30）
   framework?: 'react' | 'vue'; // 目标框架，默认 react（v1.4.0 新增 vue）
-  styleFormat?: 'tailwind' | 'unocss'; // 样式方案，默认 tailwind（v1.4.0 新增 unocss）
+  // v1.4.18：样式方案可插拔，react/vue 均支持 tailwind | unocss | css-modules
+  styleFormat?: 'tailwind' | 'unocss' | 'css-modules';
+  unocssAttributify?: boolean; // v1.4.18：UnoCSS 归因模式（text="sm center" 形态），仅 styleFormat=unocss 生效
+  typescript?: boolean;        // 是否生成 TypeScript（Vue 产物可选 TS/JS），默认 true
   skipEnhancements?: boolean;  // 是否跳过 v1.2.0 增强（Flex/a11y/设计系统/响应式）
   skipLintCheck?: boolean;     // 是否跳过设计规范检查提示
   accessToken?: string;        // 可选，优先用环境变量
 }
 ```
 
-**v1.4.0 增强输出：**
+**v1.4.18 新增输出行为：**
+
+- 🎴 **多样式管线**：`styleFormat:'css-modules'` 时在组件旁路产出 `X.module.css`（React 用 `styles['class']`、Vue 用 `<style module src="./X.module.css">`）；`unocss` + `unocssAttributify:true` 输出归因式属性；选择不支持的 框架×样式 组合会返回明确的错误提示（`UnsupportedStyleFormatError`，zod 内预检）
+- 🧩 **TS Props 自动推导**：读取组件 Component Properties（TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP），React 组件声明带 JSDoc 的 `XxxProps`（含 `@default`/可交换 key 说明），Vue3 输出 `interface Props` + `withDefaults(defineProps<Props>(), {...})`；无属性组件不输出空 interface
+- 🧹 **导入自动整理**：Prettier 格式化前自动补齐实际使用的 import、移除未使用 import（含语句级 `import type`），结果幂等
+- 🖼️ 资源引用路径按目标构建器修正（Vite/Webpack/Next.js/Remix 自动检测，可通过 CLI `--bundler` 覆盖）
+
+**历史增强输出（v1.4.0+）：**
 
 - 完整 React + TypeScript + Tailwind TSX 代码（Prettier 格式化）
 - 🔧 **Flex 修复报告**：列出自动修复的布局问题（图标变形、文本截断等）
@@ -443,6 +459,24 @@ npx figma-dev token list    # 列出已保存 Token
 - 🧩 可复用组件提示
 - 节点精简统计
 - ✅ 设计规范评分提示（低于 80 分建议先修复）
+
+#### `figma_generate_styles` / `figma_sync_to_project`（v1.4.18 新增 W3C DTCG）
+
+- `figma_generate_styles` 的 `outputFormat`：`css-variables` | `tailwind-v4` | `json` | **`dtcg`**
+- `figma_sync_to_project` 的 `format`：`css` | `tailwind` | `json` | **`dtcg`** | `all`（`all` 在原有产物外额外写入 `design-tokens.tokens.json`）
+- DTCG 映射规则：颜色→`$type:'color'`；间距/圆角→`dimension`（px/rem）；阴影→`shadow`（含 inset 判定）；字体样式→`typography` 嵌套组（font-family/font-size/font-weight/line-height/letter-spacing）；空分类整体省略；写入前执行结构校验，任何非法节点都会在错误信息中给出完整路径（如 `color.primary-500`）
+
+### 🧭 框架 × 样式支持矩阵（v1.4.18）
+
+| 样式方案 | React | Vue 3 | 说明 |
+| --- | --- | --- | --- |
+| Tailwind（tailwind-v4 映射） | ✅ | ✅ | 默认方案；React 经 `cn()`（clsx + tailwind-merge）合流 |
+| UnoCSS preset-wind | ✅ | ✅ | 工具类与 Tailwind 同构 |
+| UnoCSS attributify（归因模式） | ✅ | ✅ | `--attributify` / MCP `unocssAttributify`；产出使用提示（hints） |
+| CSS Modules | ✅ | ✅ | 旁路 `*.module.css`；语义类名、共享声明合并、碰撞去重、`composes` 子集复用 |
+| inline-styles（旧管线） | ✅ | — | 仅 React 旧管线保留 |
+
+> styled-components / Emotion / Less / Sass / vanilla-extract / Panda CSS 计划于 v1.4.19 接入；Vue2 Options API、微信/uni-app/Taro 小程序计划于 v1.4.19/v1.4.20 接入。
 
 #### `figma_lint_design`（v1.3.2 新，代码还原质量预检）
 
@@ -592,10 +626,10 @@ npx figma-dev-tools -l zh-CN <command>
 | `figma-dev lint <url>`       | **✅ 设计规范预检**                                  | `--node <id>` `--depth <n>` `--format md/json` `--output <file>`      | **v1.3.2** |
 | `figma-dev metadata <url>`   | 获取元数据概览                                       | `--node <id>` `--depth <n>`                                           | v1.1.0      |
 | `figma-dev structured <url>` | **获取框架无关结构化数据**                           | `--node <id>` `--depth <n>` `--format pretty/json` `--output <file>`  | v1.1.0     |
-| `figma-dev jsx <url>`        | **生成增强版 JSX/Vue 组件**（Flex/a11y/设计系统/响应式，v1.4.0 新增 Vue 3/UnoCSS） | `--name <ComponentName>` `--scene <name>` `--depth <n>` `--framework react|vue` `--style tailwind|unocss` `--skip-lint` `--inline-svg` | v1.4.0     |
+| `figma-dev jsx <url>`        | **生成 React/Vue 组件**（Flex/a11y/设计系统/响应式；v1.4.18 新增 css-modules、`--attributify`、TS Props 推导、import 整理） | `--name <ComponentName>` `--scene <name>` `--depth <n>` `--framework react|vue` `--style tailwind|unocss|css-modules` `--attributify` `--typescript/--no-typescript` `--bundler auto|vite|webpack|nextjs|remix|none` `--skip-lint` `--inline-svg` | **v1.4.18** |
 | `figma-dev component <url>`  | 生成基础组件                                         | `--name <name>` `--node <id>` `--js` `--style tailwind` `--no-children` `--output <dir>` | v1         |
-| `figma-dev assets <url>`     | 下载资源（SVGO 优化）                                | `--node <id>` `--nodes <id1,id2>` `--scene <name>` `--scale <n>` `--svg-format svg|png` `--project-root <dir>` | v1.1.0      |
-| `figma-dev sync <url>`       | 同步 Tokens                                          | `--node <id>` `--format oklch` `--spacing-unit px|rem` `--prefix <name>` `--output-format all` `--file-name <name>` | v1         |
+| `figma-dev assets <url>`     | 下载资源（SVGO 优化；v1.4.18 按构建器落位 public/ 或 src/assets/） | `--node <id>` `--nodes <id1,id2>` `--scene <name>` `--scale <n>` `--svg-format svg|png` `--bundler auto|vite|webpack|nextjs|remix|none` `--project-root <dir>` | **v1.4.18** |
+| `figma-dev sync <url>`       | 同步 Tokens（v1.4.18 新增 dtcg/all）                 | `--node <id>` `--format oklch` `--spacing-unit px|rem` `--prefix <name>` `--output-format css|tailwind|json|dtcg|all` `--file-name <name>` | **v1.4.18** |
 | `figma-dev screenshot <url>` | 获取截图                                             | `--node <id>` `--format png` `--scale 2` `--download <dir>`            | v1         |
 | `figma-dev mcp`              | 启动 MCP 服务器（stdio）                             | -                                                                     | v1         |
 | `figma-dev tutorial`         | 查看教程文档（别名 `help`，自动打开浏览器）           | `--no-browser`                                                        | v1.3.0     |
@@ -631,6 +665,29 @@ figma-dev jsx "https://www.figma.com/design/xxx/yyy?node-id=23-11032" \
   --name HeroSection \
   --scene landing-page \
   --depth 8
+
+# 🎴 v1.4.18 新：UnoCSS + attributify 归因模式（React/Vue 均可）
+figma-dev jsx "https://www.figma.com/design/xxx/yyy?node-id=23-11032" \
+  --name HeroSection --framework vue --style unocss --attributify
+
+# 🎴 v1.4.18 新：CSS Modules（自动产出 HeroSection.module.css 旁路文件）
+figma-dev jsx "https://www.figma.com/design/xxx/yyy?node-id=23-11032" \
+  --name HeroSection --style css-modules
+
+# 🪙 v1.4.18 新：同步 W3C DTCG Tokens（design-tokens.tokens.json）
+figma-dev sync "https://www.figma.com/design/xxx/yyy" --output-format dtcg
+
+# 🏢 v1.4.18 新：企业内网自定义 CA（也可写入 .env / MCP env）
+$env:FIGMA_CA_CERT_PATH="C:\certs\corporate-root-ca.pem"   # PowerShell
+export FIGMA_CA_CERT_PATH=/etc/ssl/corp-ca.pem              # bash/zsh
+
+# 🌐 v1.4.18 新：资源按指定构建器落位（默认 auto 自动检测）
+figma-dev assets "https://www.figma.com/design/xxx/yyy?node-id=23-11032" \
+  --scene landing-page --bundler webpack
+
+# ❓ v1.4.18 新：任何命令的 --help 均带中英示例（-l 当次切换语言）
+figma-dev jsx --help
+figma-dev -l en-US sync --help
 
 # 获取框架无关结构化数据（JSON 格式输出到文件）
 figma-dev structured "https://www.figma.com/design/xxx/yyy?node-id=23-11032" \
@@ -758,6 +815,10 @@ FIGMA_DEFAULT_LANG=zh-CN
 
 # v1.3.0 新增：GUI 默认端口（默认 54321）
 FIGMA_GUI_PORT=54321
+
+# v1.4.18 新增：自定义 CA 根证书（PEM，企业私有根 CA / HTTPS 解密代理场景）
+# Figma API 与 OCR 远程图片下载均生效；文件须存在且含 BEGIN CERTIFICATE 标记
+FIGMA_CA_CERT_PATH=/path/to/corporate-root-ca.pem
 ```
 
 ### MCP 配置优先级
@@ -793,7 +854,7 @@ Token 读取优先级：
                             │ HTTP (GUI) / stdio (MCP)
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      figma-dev-tools MCP Server v1.4.17                           │
+│                      figma-dev-tools MCP Server v1.4.18                           │
 │     🖥️ GUI | 🌍 i18n | ♿ a11y | 🔧 Flex Fix | 📱 Responsive | 🔒 XSS | 🗂️ Hierarchy │
 │                                                                                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────────────────────┐ │

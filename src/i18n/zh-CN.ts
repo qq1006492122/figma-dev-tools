@@ -77,7 +77,107 @@ export const zhCN = {
       description: '生成 Shell 自动补全脚本',
     },
 
+    // v1.4.18 T6：全部命令的 --help 示例段（中英双键）
+    helpExamples: {
+      root: `示例:
+  $ figma-dev wizard                        # 交互式初始化配置
+  $ figma-dev sync "https://figma.com/design/xxx" -o ./src/styles
+  $ figma-dev jsx <文件链接> --node 1:2 --style tailwind
+  $ figma-dev -l en-US --help               # 临时切换为英文帮助`,
+      lang: `示例:
+  $ figma-dev lang set zh-CN                # 持久切换为中文
+  $ figma-dev lang list                     # 查看全部可用语言
+  $ figma-dev lang switch                   # 交互式选择语言`,
+      langSet: `示例:
+  $ figma-dev lang set zh-CN
+  $ figma-dev lang set en-US`,
+      langList: `示例:
+  $ figma-dev lang list
+  $ figma-dev lang ls                       # list 的简写`,
+      langSwitch: `示例:
+  $ figma-dev lang switch                   # 方向键选择，回车确认`,
+      validate: `示例:
+  $ figma-dev validate                      # 校验已保存的默认 Token
+  $ figma-dev validate -t figd_xxxxx        # 校验指定 Token`,
+      token: `示例:
+  $ figma-dev token set personal -t figd_xxxxx
+  $ figma-dev token list
+  $ figma-dev token default personal`,
+      tokenSet: `示例:
+  $ figma-dev token set                     # 交互式录入（默认名）
+  $ figma-dev token set work -t figd_xxxxx -n "工作账号"
+  $ figma-dev token set ci --token $FIGMA_ACCESS_TOKEN`,
+      tokenGet: `示例:
+  $ figma-dev token get
+  $ figma-dev token get work                # 查看指定名称的 Token（脱敏）`,
+      tokenList: `示例:
+  $ figma-dev token list                    # 列出全部已保存 Token`,
+      tokenDelete: `示例:
+  $ figma-dev token delete work
+  $ figma-dev token delete ci --force       # 跳过确认`,
+      tokenDefault: `示例:
+  $ figma-dev token default personal
+  $ figma-dev token default work`,
+      info: `示例:
+  $ figma-dev info "https://www.figma.com/design/abc/MyApp"
+  $ figma-dev info abc:def --node 1:2`,
+      sync: `示例:
+  $ figma-dev sync <设计稿链接> -o ./src/styles/figma
+  $ figma-dev sync <fileKey> --output-format dtcg
+  $ figma-dev sync <fileKey> --format hex --spacing-unit rem --prefix portal`,
+      component: `示例:
+  $ figma-dev component <设计稿链接> --node 1:2 -o ./src/components
+  $ figma-dev component <链接> --typescript --style css-modules`,
+      screenshot: `示例:
+  $ figma-dev screenshot <设计稿链接> --node 1:2 -o shot.png
+  $ figma-dev screenshot <链接> --scale 2 --format jpg`,
+      metadata: `示例:
+  $ figma-dev metadata <设计稿链接>
+  $ figma-dev metadata <fileKey> --node 1:2`,
+      lint: `示例:
+  $ figma-dev lint <设计稿链接>
+  $ figma-dev lint <fileKey> --node 1:2 --json`,
+      structured: `示例:
+  $ figma-dev structured <设计稿链接>
+  $ figma-dev structured <fileKey> --node 1:2 --depth 3`,
+      jsx: `示例:
+  $ figma-dev jsx <设计稿链接> --node 1:2 -o Button.tsx
+  $ figma-dev jsx <链接> --style unocss --unocss-attributify
+  $ figma-dev jsx <链接> --style css-modules --framework vue --typescript`,
+      assets: `示例:
+  $ figma-dev assets <设计稿链接> -o ./public/assets
+  $ figma-dev assets <fileKey> --node 1:2 --format svg --bundler vite`,
+      tutorial: `示例:
+  $ figma-dev tutorial                      # 查看入门教程文档`,
+      mcp: `示例:
+  $ figma-dev mcp                           # stdio 启动 MCP 服务器（供 IDE/Agent 接入）
+  $ figma-dev mcp --help`,
+      wizard: `示例:
+  $ figma-dev wizard                        # 首次使用推荐运行`,
+      gui: `示例:
+  $ figma-dev gui                           # 启动可视化配置界面
+  $ figma-dev gui --port 5180`,
+      cache: `示例:
+  $ figma-dev cache status
+  $ figma-dev cache clear --force`,
+      cacheStatus: `示例:
+  $ figma-dev cache status
+  $ figma-dev cache stats                   # status 的简写`,
+      cacheClear: `示例:
+  $ figma-dev cache clear                   # 清空前确认
+  $ figma-dev cache clear --force           # 直接清空不确认`,
+      privacy: `示例:
+  $ figma-dev privacy                       # 查看隐私承诺与 .gitignore 建议`,
+    },
+
     commands: {
+      cache: {
+        description: '管理本地缓存',
+        status: '查看缓存统计信息',
+        clear: '清空所有缓存',
+        force: '强制清空，不确认',
+        privacy: '查看隐私承诺声明',
+      },
       wizard: {
         description: '交互式配置向导（推荐首次使用时运行）',
         title: '🎨 Figma Dev Tools 配置向导',
@@ -230,7 +330,7 @@ export const zhCN = {
         format: '颜色格式 (hex/rgb/oklch/hsl)',
         spacingUnit: '间距单位 (px/rem)',
         prefix: 'Token 名称前缀',
-        outputFormat: '输出格式 (css/tailwind/json/all)',
+        outputFormat: '输出格式 (css/tailwind/json/dtcg/all)',
         fileName: '输出文件名',
         syncing: '正在从 Figma 同步设计 Tokens...',
         file: '文件',
@@ -250,7 +350,7 @@ export const zhCN = {
         description: '从 Figma 节点生成 React 组件代码',
         name: '组件名称',
         js: '生成 JavaScript 代码 (默认 TypeScript)',
-        style: '样式格式 (tailwind/css-modules/inline)',
+        style: '样式格式（tailwind/css-modules/inline-styles，默认 tailwind）',
         noChildren: '不包含子元素',
         output: '输出目录',
         noNodeId: '错误: 请提供节点 ID (在 Figma URL 中 ?node-id= 参数)',
@@ -315,7 +415,8 @@ export const zhCN = {
         description: '一键生成 React/Vue + Tailwind/UnoCSS 组件代码（v1.4.0 增强版）',
         scene: '场景名（用于 public/portal/<scene>/ 资源路径）',
         framework: '目标框架: react (默认) | vue',
-        style: '样式方案: tailwind (默认) | unocss',
+        bundler:
+          '目标项目构建器（v1.4.18）: auto (默认，自动检测) | vite | webpack | nextjs | remix | none（旧版 publicCdnUrl）',
         skipLint: '跳过设计规范检查提示',
         noNodeId: '错误: 请提供节点 ID (URL 中 ?node-id= 参数或 --node 选项)',
         generating: '正在生成组件代码 (v1.4.0 增强管线)...',
@@ -331,17 +432,27 @@ export const zhCN = {
         usedTimes: '使用',
         times: '次',
         codeSaved: '✅ 代码已写入',
+        // v1.4.18 T8：UnoCSS attributify 模式开关与配置指引
+        attributify:
+          'UnoCSS attributify 模式（v1.4.18新增，仅配合 --style unocss；原子类以元素属性输出，默认关闭=wind 模式）',
+        attributifyIgnored:
+          '--attributify 仅在 --style unocss 时生效，本次已忽略该参数（继续使用 wind 原子类）。',
+        styleHintsSuffix: '配置指引（请按需手动落地，工具不会修改你的项目文件）',
+        moduleCssSaved: '同名 CSS Modules 文件已保存',
+        moduleCssPreview: '同名 CSS Modules 文件（请保存为与组件同目录）',
         failed: '生成组件代码失败',
         lintWarning: '⚠️  代码还原质量提示',
       },
 
       assets: {
-        description: '下载设计资源到 public/portal/<scene>/ 目录',
+        description: '下载设计资源到项目资源目录（v1.4.18 起按构建器落位 public/ 或 src/assets/）',
         node: '节点 ID（可指定多个，逗号分隔）',
         nodes: '节点 ID 列表（逗号分隔）',
         scene: '场景名称（如 health、edu、ai-innovation-class）',
         projectRoot: '项目根目录（自动检测）',
         svgFormat: '矢量导出格式 (svg/png)',
+        bundler:
+          '目标项目构建器（v1.4.18）: auto (默认，自动检测) | vite | webpack | nextjs | remix | none（旧版 publicCdnUrl）',
         noNodeId: '错误: 请提供节点 ID (--node 或 --nodes)',
         downloading: '正在下载设计资源...',
         sceneName: '场景',
@@ -504,6 +615,21 @@ export const zhCN = {
         staleCacheWarning: (hours: number) =>
           `实时请求失败，已回退到本地陈旧缓存（约 ${hours} 小时前），生成结果可能不是最新设计稿。`,
         httpsRequired: 'Figma API Base URL 必须使用 HTTPS（本地调试除外）',
+        // v1.4.18 自定义 CA（FIGMA_CA_CERT_PATH）相关错误
+        caCertPathMissing: (certPath: string) =>
+          `自定义 CA 证书文件不存在：${certPath}（环境变量 FIGMA_CA_CERT_PATH）。请检查证书路径是否正确。`,
+        caCertReadFailed: (certPath: string, reason: string) =>
+          `读取自定义 CA 证书失败：${certPath}（${reason}）。请检查文件权限与路径。`,
+        caCertInvalid: (certPath: string) =>
+          `自定义 CA 证书内容无效：${certPath}。文件必须为 PEM 格式（包含 BEGIN CERTIFICATE 标记）。`,
+        invalidBundlerChoice: (choice: string) =>
+          `无效的构建器参数："${choice}"。可选值：auto、vite、webpack、nextjs、remix、none。`,
+        unknownStyleFormat: (format: string, choices: string) =>
+          `未知的样式方案："${format}"。可选值：${choices}。`,
+        styleFormatPlanned: (format: string, version: string, supported: string) =>
+          `样式方案 "${format}" 当前版本暂不支持，计划于 v${version} 启用；当前可用：${supported}。`,
+        styleFormatNotInPipeline: (format: string, supported: string) =>
+          `样式方案 "${format}" 暂不支持当前生成管线；该管线可用：${supported}。`,
         networkError:
           'Figma API 请求失败：网络连接错误或请求超时。请检查网络设置、HTTP_PROXY/HTTPS_PROXY 环境变量或代理配置。',
         networkErrorWithMessage: (msg: string) => `Figma API 请求失败：${msg}`,

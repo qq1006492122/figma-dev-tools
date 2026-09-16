@@ -200,6 +200,23 @@ export class I18n {
   }
 
   /**
+   * 仅在内存中切换语言（**不写入配置**）。
+   *
+   * 用于 CLI `-l, --lang` 单次运行覆盖：命令定义前即完成切换，
+   * 使 `--help` 文案随参数语言渲染；不支持的语言码返回 false 且保持现状。
+   *
+   * @param language - 目标语言代码
+   * @returns 是否切换成功
+   */
+  useLanguage(language: string): boolean {
+    const messages = messagesMap[language as Language];
+    if (!messages) return false;
+    this._language = language as Language;
+    this._messages = messages;
+    return true;
+  }
+
+  /**
    * 获取翻译消息（支持嵌套键路径）
    *
    * @param key - 消息键路径，使用点号分隔，如 'cli.commands.wizard.title'
