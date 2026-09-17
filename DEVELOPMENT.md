@@ -1,10 +1,20 @@
-# figma-dev-tools v1.4.18 开发指南
+# figma-dev-tools v1.4.19 开发指南
 
 ## 项目概述
 
 figma-dev-tools 是一个 Figma 设计稿转代码的 MCP 工具，支持 React + Tailwind CSS
-/ Vue +
-UnoCSS 代码生成，提供 GUI 配置向导、XSS 安全防护、智能层级修复、SVG 内联渲染、动画检测等完整工具链。
+/ Vue（Vue3 `<script setup>` / Vue2 Options API）代码生成与整页批量生成，
+提供 GUI 配置向导、XSS 安全防护、智能层级修复、SVG 内联渲染、动画检测等完整工具链。
+
+## v1.4.19 变更摘要（批次二 T13–T23）
+
+1. **样式渲染器（T14–T17）**：`style-renderers/` 新增 styled / emotion / less / sass / vanilla-extract / panda 六套渲染器并接入 React/Vue 增强新管线（连同 css-modules 深化即「七样式」工作）；`NEW_PIPELINE_FRAMEWORK_SUPPORT` 框架闸门 + zod/注册表双重校验，不支持的组合触网前失败。
+2. **Vue 一级支持（T18）**：新增 MCP 工具 `figma_generate_vue`（工具总数 20→22）、CLI `figma-dev vue`、Vue2 Options API（`defineComponent` + PropType/validator），模板/样式旁路与 React 同保真度。
+3. **组件库映射深化（T19）**：内置 shadcn/ui、Ant Design、Element Plus 映射；项目根 `.figma-dev/components.json` 自定义规则（随包 `components.schema.json` draft-07 校验，非法文件 i18n 提示后忽略）。
+4. **批量生成（T20）**：MCP `figma_batch_generate` + CLI `figma-dev batch`；`services/block-splitter.ts`（Header/Hero/Features/Section/Sticky/Footer 语义区块）、`services/batch-generator.ts`（barrel + 依赖图），复用单组件增强管线。
+5. **智能推断 T21（`services/smart-inferrer.ts`）**：Grid/吸顶/固定/绝对定位、图标（Lucide/Iconify）、暗色表面、hover/pressed/spinner 动效四类；MCP `inference` 四开关、CLI `--no-smart-grid/icons/dark/motion`；仅建议不改写。
+6. **智能推断 T22**：`interaction-inferrer.ts` 扩展 form-validation / carousel-swipe / accordion-toggle（15 值 InteractionType 联合）；新增纯树分析 `services/semantic-inferrer.ts`（重复等宽子项→TS interface+mock+`.map()`/`v-for`，Frame 序号节点→PascalCase 命名）；经 React/Vue/Batch 三管线在头注释与 `structuredContent.reports` 留痕。
+7. 全量单测 39 文件 493 用例 + 冒烟 4 文件 73 用例全绿；`npm run build` 通过。
 
 ## 环境要求
 
@@ -34,8 +44,8 @@ UnoCSS 代码生成，提供 GUI 配置向导、XSS 安全防护、智能层级�
 | 压测 | `test/perf/` | 大树/批处理性能基线脚本，仅出脚本与本机基线，不设 CI 硬门槛 | `npm run test:perf` |
 
 - 快照首次不会自动写入，需 `npx vitest run <file> -u`，写入后必须人工 Read 审查 diff。
-- v1.4.18 发布基线：单测 24 文件 323 用例；冒烟 4 文件 68 用例；默认聚合 27 文件 375 全绿。
-- 工具数基线：`test/smoke/mcp-tools.smoke.test.ts` 的 `BASELINE_TOOL_NAMES` 是 20 个工具的**严格有序数组**，新增/改名工具必须同步更新（v1.4.19→22，v1.4.20→23）。
+- v1.4.19 发布基线：单测 39 文件 493 用例；冒烟 4 文件 73 用例；全绿。
+- 工具数基线：`test/smoke/mcp-tools.smoke.test.ts` 的 `BASELINE_TOOL_NAMES` 是 22 个工具的**严格有序数组**，新增/改名工具必须同步更新（v1.4.20 规划 23 个：figma_generate_weapp）。
 
 ## 项目结构
 
@@ -44,7 +54,7 @@ figma-dev-tools/
 ├── bin/                    # CLI 入口
 │   └── figma-dev.js
 ├── src/
-│   ├── index.ts           # MCP 服务器入口（20 个 MCP 工具）
+│   ├── index.ts           # MCP 服务器入口（v1.4.19：22 个 MCP 工具）
 │   ├── cli/               # CLI 命令实现
 │   │   └── index.ts
 │   ├── i18n/              # 国际化（zh-CN/en-US）
@@ -56,7 +66,7 @@ figma-dev-tools/
 │   │   ├── node-processor.ts    # 节点处理（v1.4.0：层级修复+三重边界保护）
 │   │   ├── tailwind-mapper.ts   # Figma → Tailwind 映射
 │   │   ├── code-generator.ts    # React 代码生成（v1.4.0：XSS防护+import分组排序+交互推断+语义标签+Props泛型）
-│   │   ├── vue-generator.ts     # Vue 3 SFC 代码生成（v1.4.0：XSS防护+SVG内联渲染集成）
+│   │   ├── vue-generator.ts     # Vue 3 SFC 代码生成（v1.4.0：XSS防护+SVG内联；v1.4.19：Vue2 Options API + 智能建议）
 │   │   ├── code-formatter.ts    # Prettier 格式化
 │   │   ├── flex-fixer.ts        # Flex 布局自动修复
 │   │   ├── a11y-enhancer.ts     # 无障碍增强
@@ -69,7 +79,7 @@ figma-dev-tools/
 │   │   ├── animation-detector.ts # v1.4.0新增：动画动效检测（基础框架）
 │   │   ├── hierarchy-fixer.ts   # v1.4.0新增：智能层级修复
 │   │   ├── component-mapper.ts  # v1.4.0新增：组件库映射（shadcn/ui等检测）
-│   │   ├── interaction-inferrer.ts # v1.4.0新增：交互逻辑推断（按钮/表单/Tab/弹窗等状态自动推断）
+│   │   ├── interaction-inferrer.ts # v1.4.0新增：交互逻辑推断；v1.4.19 T22 扩展 form-validation/carousel-swipe/accordion-toggle（15 值联合）
 │   │   ├── watch-mode.ts        # v1.4.0新增：Watch 模式（轮询 Figma 变更自动重新生成代码）
 │   │   ├── cache.ts             # v1.4.0新增：AES加密本地缓存
 │   │   ├── gui-server.ts        # GUI配置向导服务器
@@ -85,13 +95,21 @@ figma-dev-tools/
 │   │   ├── asset-paths.ts       # v1.4.18新增：五形态资源落位路径修正
 │   │   ├── ca-aware-downloader.ts # v1.4.18新增：自定义 CA 感知下载（FIGMA_CA_CERT_PATH）
 │   │   ├── tls-agent.ts         # v1.4.18新增：PEM 校验 + 额外 CA 的 https.Agent
-│   │   └── style-renderers/     # v1.4.18新增：样式方案可插拔架构
+│   │   ├── smart-inferrer.ts    # v1.4.19 T21：Grid/图标/暗色/动效四类智能推断（四开关，仅建议）
+│   │   ├── semantic-inferrer.ts # v1.4.19 T22：纯树分析——列表数据结构/语义命名建议（不触网不改写节点）
+│   │   ├── block-splitter.ts    # v1.4.19 T20：页面语义区块拆分（header/hero/features/section/sticky/footer）
+│   │   ├── batch-generator.ts   # v1.4.19 T20：逐块生成 + index barrel + 文件依赖图（React/Vue）
+│   │   └── style-renderers/     # v1.4.18新增：样式方案可插拔架构（v1.4.19 共 9 套新管线渲染器）
 │   │       ├── types.ts         #   StyleRenderer 接口 / StyleSidecarFile / 格式联合类型
-│   │       ├── registry.ts      #   11 描述符注册表、assertStyleFormatSupported、help 文本
+│   │       ├── registry.ts      #   11 描述符注册表、assertStyleFormatSupported、框架矩阵、help 文本
 │   │       ├── factory.ts       #   createStyleRenderer(format,{framework,unocssMode})
 │   │       ├── tailwind-renderer.ts
 │   │       ├── unocss-renderer.ts # preset-wind + Attributify 归因渲染器
 │   │       ├── css-modules-renderer.ts # 声明提取/共享类/碰撞去重/composes/sidecar
+│   │       ├── styled-components-renderer.ts / emotion-renderer.ts   # v1.4.19 T14（React 专属）
+│   │       ├── preprocessor-renderer.ts  # v1.4.19 T15：Less/Sass 共用（React/Vue）
+│   │       ├── vanilla-extract-renderer.ts / panda-renderer.ts # v1.4.19 T16–T17（React 专属）
+│   │       ├── shared.ts        #   渲染器共享工具（v1.4.19）
 │   │       └── index.ts         #   桶文件
 │   ├── types/             # TypeScript 类型定义
 │   │   └── nodes.ts
@@ -194,7 +212,7 @@ npm test          # 确保测试通过
 4. git add/commit/push
 5. npm publish --access public（发布动作需人工确认，不得自动执行）
 
-## MCP 工具列表（v1.4.18：20 个，注册顺序以冒烟基线为准）
+## MCP 工具列表（v1.4.19：22 个，注册顺序以冒烟基线为准）
 
 | # | 工具名 | 说明 |
 | - | ------ | ---- |
@@ -202,7 +220,7 @@ npm test          # 确保测试通过
 | 2 | figma_get_file | 获取 Figma 文件信息 |
 | 3 | figma_extract_tokens | 提取设计 Tokens（Variables+Styles） |
 | 4 | figma_generate_component | 生成 React 组件（旧版管线兼容） |
-| 5 | figma_get_screenshot | 获取节点截图 |
+| 5 | figma_get_screenshot | 节点截图 |
 | 6 | figma_generate_styles | Tokens → CSS Variables / Tailwind v4 / JSON / **DTCG（v1.4.18）** |
 | 7 | figma_sync_to_project | Tokens 落盘到项目（css/tailwind/json/**dtcg**/all，自动备份） |
 | 8 | figma_validate_token | 校验 Figma Token |
@@ -212,12 +230,14 @@ npm test          # 确保测试通过
 | 12 | figma_create_icon_sprite | 生成 SVG Sprite |
 | 13 | figma_list_components | 列出文件 Components/ComponentSets |
 | 14 | figma_lint_design | 代码还原质量预检 |
-| 15 | figma_generate_jsx | 生成 React/Vue 组件（推荐；v1.4.18 多样式 + TS Props） |
-| 16 | figma_get_structured_data | 框架无关结构化数据 |
-| 17 | figma_dev_fallback_status | 付费墙兜底服务状态 |
-| 18 | figma_dev_fallback_capture | 浏览器兜底截图 |
-| 19 | figma_verify_fidelity | 还原度像素 diff 校验 |
-| 20 | figma_ocr_extract | OCR 文本提取（原生 JSON + tesseract.js 兜底） |
+| 15 | figma_generate_jsx | 生成 React TSX（推荐；v1.4.19 九样式 + TS Props + 智能推断） |
+| 16 | figma_generate_vue | **v1.4.19 新增：Vue SFC（Vue3 setup / Vue2 Options API）** |
+| 17 | figma_batch_generate | **v1.4.19 新增：整页语义区块批量生成 + barrel** |
+| 18 | figma_get_structured_data | 框架无关结构化数据 |
+| 19 | figma_dev_fallback_status | 付费墙兜底服务状态 |
+| 20 | figma_dev_fallback_capture | 浏览器兜底截图 |
+| 21 | figma_verify_fidelity | 还原度像素 diff 校验 |
+| 22 | figma_ocr_extract | OCR 文本提取（原生 JSON + tesseract.js 兜底） |
 
-> 规划：v1.4.19 增至 22 个（figma_generate_vue、figma_batch_generate）；v1.4.20 增至 23 个（figma_generate_weapp）。
+> 规划：v1.4.20 增至 23 个（figma_generate_weapp，微信/uni-app/Taro 小程序）。
 > 该名单的唯一真源是 `test/smoke/mcp-tools.smoke.test.ts` 的 `BASELINE_TOOL_NAMES`（严格有序，含数量断言），改动必须同步。

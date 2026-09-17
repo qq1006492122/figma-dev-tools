@@ -144,6 +144,14 @@ export const zhCN = {
   $ figma-dev jsx <设计稿链接> --node 1:2 -o Button.tsx
   $ figma-dev jsx <链接> --style unocss --unocss-attributify
   $ figma-dev jsx <链接> --style css-modules --framework vue --typescript`,
+      vue: `示例:
+  $ figma-dev vue <设计稿链接> --node 1:2 -o Button.vue        # 默认 Vue 3 <script setup>
+  $ figma-dev vue <链接> --vue-version 2 --style less          # Vue 2 Options API + Less
+  $ figma-dev vue <链接> --style css-modules                   # Vue3 + CSS Modules`,
+      batch: `示例:
+  $ figma-dev batch <整页链接> --out ./src/components/landing  # 自动拆分 header/hero/... 多文件
+  $ figma-dev batch <链接> --nodes 1:10,1:11 --framework vue   # 仅生成指定区块（Vue SFC）
+  $ figma-dev batch <链接> --prefix Landing --style css-modules`,
       assets: `示例:
   $ figma-dev assets <设计稿链接> -o ./public/assets
   $ figma-dev assets <fileKey> --node 1:2 --format svg --bundler vite`,
@@ -440,8 +448,30 @@ export const zhCN = {
         styleHintsSuffix: '配置指引（请按需手动落地，工具不会修改你的项目文件）',
         moduleCssSaved: '同名 CSS Modules 文件已保存',
         moduleCssPreview: '同名 CSS Modules 文件（请保存为与组件同目录）',
+        // v1.4.19 T16：泛化到 less/sass 的同名旁路样式文件文案
+        sidecarSaved: '✅ 同名旁路样式文件已保存',
+        sidecarPreview: '同名旁路样式文件（请保存为与组件同目录）',
         failed: '生成组件代码失败',
         lintWarning: '⚠️  代码还原质量提示',
+      },
+
+      // v1.4.19 T18：figma-dev vue 一级命令（Vue 2 Options API / Vue 3 script setup）
+      vue: {
+        description: '一键生成 Vue 2/3 SFC 组件（.vue 单文件，v1.4.19 新增）',
+        vueVersion: 'Vue 大版本: 2 (Options API) | 3 (默认，<script setup>)',
+        invalidVersion: '错误: --vue-version 仅支持 2 或 3',
+      },
+
+      // v1.4.19 T20：整页批量生成
+      batch: {
+        description: '整页区块拆分并批量生成多文件组件（含 index.ts barrel 与依赖图，v1.4.19 新增）',
+        nodes: '逗号分隔的区块节点 ID（省略则自动拆分整页）',
+        out: '多文件输出目录（默认 ./figma-generated）',
+        prefix: '所有区块组件名统一前缀（ASCII，如 Landing）',
+        noRootNode: '错误: 批量生成需要页面/Frame 根节点（URL node-id 或 -n/--node）',
+        emptySelection: '错误: 未在节点树中找到任何指定区块节点，批量生成终止（未写入文件）',
+        completed: (blocks: number, files: number) =>
+          `批量生成完成：${blocks} 个区块，${files} 个文件（含 index.ts barrel）`,
       },
 
       assets: {
@@ -630,6 +660,8 @@ export const zhCN = {
           `样式方案 "${format}" 当前版本暂不支持，计划于 v${version} 启用；当前可用：${supported}。`,
         styleFormatNotInPipeline: (format: string, supported: string) =>
           `样式方案 "${format}" 暂不支持当前生成管线；该管线可用：${supported}。`,
+        styleFormatFrameworkUnsupported: (format: string, framework: string, supportedFrameworks: string) =>
+          `样式方案 "${format}" 不支持 ${framework} 框架（不会静默降级）；该方案支持的框架：${supportedFrameworks}。`,
         networkError:
           'Figma API 请求失败：网络连接错误或请求超时。请检查网络设置、HTTP_PROXY/HTTPS_PROXY 环境变量或代理配置。',
         networkErrorWithMessage: (msg: string) => `Figma API 请求失败：${msg}`,
@@ -802,6 +834,23 @@ export const zhCN = {
       lg: 'lg: (1024px+)',
       xl: 'xl: (1280px+)',
     },
+  },
+  // v1.4.19 T19：组件库映射器（自定义 .figma-dev/components.json）
+  componentMapper: {
+    customConfigInvalid: (detail: string) =>
+      `错误: .figma-dev/components.json 格式无效（${detail}），已忽略全部自定义组件映射并降级为内建映射，代码生成继续进行。`,
+  },
+
+  // ========== v1.4.19 T20 批量生成（figma_batch_generate / batch 命令） ==========
+  batchGenerate: {
+    emptySelection:
+      '批量生成需要至少一个区块：请提供页面/Frame 节点（自动拆分）或通过 nodeIds 指定区块节点（当前选择为空或全部未在节点树中命中）。',
+    // 以下为报告文案键（CLI 日志与 MCP Markdown 共用）
+    title: '批量生成',
+    blocksHeading: '区块拆分结果',
+    filesHeading: '产物文件树',
+    graphHeading: '依赖图',
+    savedPrefix: '批量产物已写入目录',
   },
   gui: {
     title: 'GUI 配置向导',

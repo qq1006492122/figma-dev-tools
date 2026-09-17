@@ -61,7 +61,7 @@
 
 // ============ 依赖导入 ============
 
-import type { FigmaNode, CodeGenOptions, GeneratedComponent } from '../types.js';
+import type { FigmaNode, CodeGenOptions, GeneratedComponent, SmartInferenceSwitches } from '../types.js';
 import type { ProcessedNode, DesignContext } from '../types/nodes.js';
 import { cn } from '../utils/cn.js';
 import { convertFigmaColor } from '../utils/color.js';
@@ -73,6 +73,12 @@ import type { FigmaClient } from './figma-client.js';
 import { createFlexFixer, type FlexFixResult } from './flex-fixer.js';
 import { createInteractionInferrer, type InteractionInferrerResult } from './interaction-inferrer.js';
 import { createResponsiveInferrer, type ResponsiveResult } from './responsive-inferrer.js';
+import {
+  createSemanticInferrer,
+  formatSemanticComments,
+  type SemanticInferenceResult,
+} from './semantic-inferrer.js';
+import { createSmartInferrer, type SmartInferenceResult } from './smart-inferrer.js';
 import { SvgInlineRenderer, isVectorNode, type InlineSvgResult } from './svg-inline-renderer.js';
 import {
   assertStyleFormatSupported,
@@ -139,6 +145,10 @@ interface ProcessedNodeContext {
   fileKey: string;
   /** SVG 内联渲染器实例 */
   svgRenderer: SvgInlineRenderer;
+  /** 当前组件名（v1.4.19 T14：styled 根包装命名） */
+  componentName: string;
+  /** 父级节点在样式渲染器中注册的类名/标识符（v1.4.19 T16：Less/Sass 嵌套归属） */
+  parentStyleIdentifier?: string;
 }
 
 /**
@@ -157,6 +167,10 @@ export interface EnhancementReports {
   responsive?: ResponsiveResult;
   /** 交互逻辑推断报告（v1.4.0 新增） */
   interaction?: InteractionInferrerResult;
+  /** 智能推断报告（v1.4.19 T21：布局/图标/主题/动效） */
+  smartInference?: SmartInferenceResult;
+  /** 语义推断报告（v1.4.19 T22：列表数据化 + 语义命名） */
+  semantic?: SemanticInferenceResult;
 }
 
 // ============ 常量定义 ============
@@ -176,6 +190,7 @@ const DEFAULT_CODE_GEN_OPTIONS: Required<CodeGenOptions> = {
   includeProps: true,
   includeChildren: true,
   skipEnhancements: false,
+  inference: {},
 };
 
 // ============ CodeGenerator 类 ============
@@ -435,6 +450,8 @@ export class CodeGenerator {
       sceneName?: string;
       /** 是否跳过增强器（flex-fixer/a11y/design-system/responsive），默认 false */
       skipEnhancements?: boolean;
+      /** v1.4.19 T21：智能推断分项开关（缺省全开，skipEnhancements 为总闸） */
+      inference?: SmartInferenceSwitches;
     } = {},
   ): Promise<{
     /** 组件名 */
@@ -460,7 +477,8 @@ export class CodeGenerator {
     // v1.4.18（T7/T8）：样式方案走注册表校验 + 渲染器工厂；
     // 新管线仅 tailwind/unocss，planned/其他管线值显式抛错而非静默错配
     const effectiveStyleFormat = options.styleFormat ?? 'tailwind';
-    assertStyleFormatSupported(effectiveStyleFormat, STYLE_FORMATS_NEW_PIPELINE);
+    // v1.4.19 T14–T17：追加框架矩阵校验（styled/emotion/vanilla-extract/panda 仅 React，显式报错不降级）
+    assertStyleFormatSupported(effectiveStyleFormat, STYLE_FORMATS_NEW_PIPELINE, undefined, 'react');
     const unocssMode: UnocssMode = options.unocssMode ?? 'wind';
     const styleRenderer = createStyleRenderer(effectiveStyleFormat, { framework: 'react', unocssMode });
     const imports = new Set<string>(['import React from "react";']);
@@ -497,6 +515,15 @@ export class CodeGenerator {
       const interactionInferrer = createInteractionInferrer();
       reports.interaction = interactionInferrer.infer(context.node);
 
+      // 智能推断（v1.4.19 T21：布局/图标/主题/动效，只建议不改写显式样式）
+      reports.smartInference = createSmartInferrer().infer(context.node, {
+        framework: 'react',
+        switches: options.inference,
+      });
+
+      // 语义推断（v1.4.19 T22：列表数据化 + 语义命名，仅输出示例/建议）
+      reports.semantic = createSemanticInferrer().infer(context.node, { framework: 'react' });
+
       // 添加 useState 等 React hooks import
       if (reports.interaction.requiredReactImports.length > 0) {
         // 检查是否已有 useState import
@@ -523,6 +550,7 @@ export class CodeGenerator {
       componentMap: context.componentsUsed,
       fileKey: context.fileKey,
       svgRenderer: this._svgRenderer,
+      componentName,
     });
 
     // 检测是否需要 publicCdnUrl import
@@ -530,13 +558,15 @@ export class CodeGenerator {
       needsPublicCdnUrl = true;
     }
 
-    // ============ v1.4.18 T9：CSS Modules 同名 .module.css 旁路文件 ============
-    // 整棵树渲染完成后从渲染器聚合声明（含 composes 复用关系）；
-    // 主组件仅 import styles 并以 styles.x 引用，工具不直接写用户项目目录。
-    const styleSidecar =
-      effectiveStyleFormat === 'css-modules' && styleRenderer.buildSidecar
-        ? styleRenderer.buildSidecar(componentName)
-        : undefined;
+    // ============ 样式旁路文件（v1.4.18 T9 css-modules；v1.4.19 T16 less/sass、T17 vanilla-extract） ============
+    // 整棵树渲染完成后从渲染器聚合声明；主文件 import styles 引用，工具不直接写用户项目目录。
+    const styleSidecar = styleRenderer.buildSidecar ? styleRenderer.buildSidecar(componentName) : undefined;
+
+    // ============ v1.4.19 T14/T15/T17：同文件样式前导段（styled/emotion/panda） ============
+    const stylePreamble = styleRenderer.buildPreamble ? styleRenderer.buildPreamble(componentName) : undefined;
+    if (stylePreamble) {
+      for (const statement of stylePreamble.imports) imports.add(statement);
+    }
 
     // ============ 组装完整 TSX 文件 ============
     const propsName = `${componentName}Props`;
@@ -549,9 +579,9 @@ export class CodeGenerator {
     // 注意：组内不按字母排序，保持逻辑引入顺序
     const allImports = new Set(imports);
     allImports.add('import { cn } from "@/lib/utils";');
-    // v1.4.18 T9：CSS Modules 同名旁路文件（相对路径归入 external 分组）
+    // 样式旁路文件引用：缺省 CSS Modules 默认导入；vanilla-extract 等方案用 reactImport 覆盖
     if (styleSidecar) {
-      allImports.add(`import styles from "./${styleSidecar.fileName}";`);
+      allImports.add(styleSidecar.reactImport ?? `import styles from "./${styleSidecar.fileName}";`);
     }
     if (needsPublicCdnUrl) {
       allImports.add('import { publicCdnUrl } from "@/lib/asset-path";');
@@ -597,6 +627,11 @@ export class CodeGenerator {
     lines.push('');
     if (propsInterface) {
       lines.push(...propsInterface.split('\n'));
+      lines.push('');
+    }
+    // v1.4.19 T14/T15/T17：styled/emotion/panda 同文件样式定义注入于组件声明之前
+    if (stylePreamble) {
+      lines.push(...stylePreamble.code.split('\n'));
       lines.push('');
     }
     const fcGeneric = propsInterface ? propsName : 'React.HTMLAttributes<HTMLElement>';
@@ -693,6 +728,9 @@ export class CodeGenerator {
       reports.designSystem ||
       reports.responsive ||
       reports.interaction ||
+      (reports.smartInference !== undefined && reports.smartInference.suggestions.length > 0) ||
+      (reports.semantic !== undefined &&
+        (reports.semantic.counts.dataStructures > 0 || reports.semantic.counts.nameSuggestions > 0)) ||
       warnings.length > 0;
 
     if (!hasContent) return comments;
@@ -745,6 +783,33 @@ export class CodeGenerator {
       if (reports.interaction.interactions.some((i) => i.codeHint)) {
         comments.push(' *    ⚠️  Check TODO comments for event handler wiring');
       }
+    }
+
+    // v1.4.19 T21：智能推断建议（仅注释建议，不改写显式样式）
+    if (reports.smartInference && reports.smartInference.suggestions.length > 0) {
+      const counts = reports.smartInference.counts;
+      comments.push(
+        ` * 🧠 Smart inference (v1.4.19, advisory): layout ${counts.grid}, ` +
+          `icons ${counts.icon}, dark-mode ${counts['dark-mode']}, motion ${counts.motion}`,
+      );
+      for (const suggestion of reports.smartInference.suggestions.slice(0, 8)) {
+        const tail = suggestion.utilityClass ? ` → ${suggestion.utilityClass}` : '';
+        const line = `[${suggestion.category}] ${suggestion.nodeName}: ${suggestion.message}${tail}`;
+        comments.push(` *    - ${line.length > 100 ? line.slice(0, 97) + '...' : line}`);
+        if (suggestion.codeHint) {
+          comments.push(` *      ↳ ${suggestion.codeHint}`);
+        }
+      }
+      if (reports.smartInference.suggestions.length > 8) {
+        comments.push(
+          ` *    ... and ${reports.smartInference.suggestions.length - 8} more (see result.reports.smartInference)`,
+        );
+      }
+    }
+
+    // v1.4.19 T22：语义推断（列表数据化示例 + 语义命名建议，仅注释，不自动应用）
+    if (reports.semantic) {
+      comments.push(...formatSemanticComments(reports.semantic, 'jsdoc'));
     }
 
     // 添加人工复核警告
@@ -829,11 +894,16 @@ export class CodeGenerator {
       // SVG 渲染失败时，回退到普通 span 占位
     }
 
-    // ============ 5. 样式映射（注册表渲染器：tailwind/unocss 原子类） ============
-    const tw = styleRenderer.renderNode(node);
+    // ============ 5. 样式映射（注册表渲染器：原子类/语义类/styled 组件/css 常量） ============
+    const tw = styleRenderer.renderNode(node, {
+      framework: 'react',
+      componentName: ctx.componentName,
+      isRoot: ctx.isRoot,
+      parentIdentifier: ctx.parentStyleIdentifier,
+    });
     ctx.extensions.push(...tw.extensionsNeeded);
 
-    // 收集 Tailwind 映射警告（去重后添加到上下文）
+    // 收集样式映射警告（去重后添加到上下文）
     if (tw.warnings && tw.warnings.length > 0) {
       for (const w of tw.warnings) {
         const warningWithNode = `[${node.name || node.figmaId}] ${w}`;
@@ -843,19 +913,23 @@ export class CodeGenerator {
       }
     }
 
-    // 合并 Flex 修复类名（由 flex-fixer 添加到 node._flexFixes）；
-    // v1.4.18 T8：attributify 模式下安全 token 同时分流为元素属性（mergeStyleWithExtraTokens 内部分区）
-    // v1.4.18 T9：CSS Modules 已在渲染器内产出完整原生 flex 声明，
-    //             flexFixes 是 Tailwind 原子类补丁，合入反而会引入未声明的工具类，故跳过
-    const isCssModulesFormat = styleRenderer.id === 'css-modules';
+    // v1.4.19 T14–T17：仅原子类渲染器（tailwind/unocss）合并 flex-fixer 原子补丁；
+    // css-module 绑定（css-modules/less/sass/vanilla-extract）输出原生声明，
+    // styled 组件/emotion css prop/panda 常量各成体系，合入未声明工具类均属污染，故跳过
+    const isAtomicStyle = styleRenderer.id === 'tailwind' || styleRenderer.id === 'unocss';
+    const isCssModuleBinding = styleRenderer.classBinding === 'css-module';
     const finalStyle =
-      !isCssModulesFormat && node._flexFixes && Array.isArray(node._flexFixes) && node._flexFixes.length > 0
+      isAtomicStyle && node._flexFixes && Array.isArray(node._flexFixes) && node._flexFixes.length > 0
         ? mergeStyleWithExtraTokens(tw, node._flexFixes as string[])
         : tw;
     const finalClassName = finalStyle.className;
+    /** styled-components 等方案：以样式组件标识符替换原生标签 */
+    const elementIdentifier = finalStyle.elementIdentifier;
+    // v1.4.19 T16：向子节点传递当前样式归属（Less/Sass 渲染器据此做选择器嵌套；其他渲染器忽略）
+    nextCtx.parentStyleIdentifier = (elementIdentifier ?? finalClassName) || undefined;
 
     // ============ 6. 语义标签选择（优先使用 a11y-enhancer 推荐的标签） ============
-    let tag = this._selectSemanticTag(node);
+    let semanticTag = this._selectSemanticTag(node);
     const a11yEnhancements = node._a11y as
       | {
           semanticTag?: string;
@@ -869,29 +943,50 @@ export class CodeGenerator {
       | undefined;
 
     if (a11yEnhancements?.semanticTag) {
-      tag = a11yEnhancements.semanticTag;
+      semanticTag = a11yEnhancements.semanticTag;
     }
 
-    // ============ 7. 判断是否为自闭合标签 ============
-    const selfClosing = ['img', 'input', 'br', 'hr'].includes(tag);
+    // 输出标签：styled 方案替换为样式组件标识符，其余为语义 HTML 标签
+    const tag = elementIdentifier ?? semanticTag;
+
+    // ============ 7. 判断是否为自闭合标签（样式组件标识符永不自闭合） ============
+    const selfClosing = !elementIdentifier && ['img', 'input', 'br', 'hr'].includes(semanticTag);
 
     // ============ 8. 构建 props ============
     const props: string[] = [];
 
     // className：根节点合并外部传入的 className，其他节点直接使用
-    if (ctx.isRoot) {
+    if (elementIdentifier) {
+      // v1.4.19 T14：styled 组件自带样式；根节点仍透传外部 className（styled 自动转发到底层标签）
+      if (ctx.isRoot) props.push('className={className}');
+    } else if (ctx.isRoot) {
       // attributify 全属性化节点可能无回退 class，仅透传外部 className
       if (!finalClassName) {
         props.push('className={className}');
-      } else if (isCssModulesFormat) {
-        // v1.4.18 T9：CSS Modules 以 styles['local-name'] 引用（本地名为 kebab-case，必须方括号访问）
+      } else if (isCssModuleBinding) {
+        // T9/T16/T17：styles['local-name'] 引用（本地名可能含连字符，统一方括号访问）
         props.push(`className={cn(styles['${finalClassName}'], className)}`);
+      } else if (finalStyle.classNameIsExpression) {
+        // T17 Panda：css() 返回字符串常量，按表达式合入
+        props.push(`className={cn(${finalClassName}, className)}`);
       } else {
         props.push(`className={cn("${finalClassName}", className)}`);
       }
     } else if (finalClassName) {
-      // T9：模块本地类必须经 styles 间接引用（方括号 + 花括号）；原子类沿用静态字符串
-      props.push(isCssModulesFormat ? `className={styles['${finalClassName}']}` : `className="${finalClassName}"`);
+      if (isCssModuleBinding) {
+        props.push(`className={styles['${finalClassName}']}`);
+      } else if (finalStyle.classNameIsExpression) {
+        props.push(`className={${finalClassName}}`);
+      } else {
+        props.push(`className="${finalClassName}"`);
+      }
+    }
+
+    // v1.4.19 T15：Emotion css prop 等原样属性片段
+    if (finalStyle.extraProps) {
+      for (const extra of finalStyle.extraProps) {
+        props.push(extra);
+      }
     }
 
     // UnoCSS attributify（v1.4.18 T8）：安全原子类以无值属性输出（JSX 统一空串值，兼容 React 透传）
@@ -941,16 +1036,26 @@ export class CodeGenerator {
     }
 
     // ============ 10. 图片节点特殊处理（增强版 v1.4.0） ============
-    if (tag === 'img') {
-      // object-cover 类（如果 flex-fixer 没加的话）
-      const hasObjectFit = finalClassName.includes('object-');
-      const imgClassName = hasObjectFit ? finalClassName : cn(finalClassName, 'object-cover');
+    if (semanticTag === 'img') {
+      // object-fit 处理：
+      // - 原子类（tailwind/unocss）：追加 object-cover 工具类（历史行为）；
+      // - v1.4.19 非原子方案：不修改样式绑定，补内联 object-fit 兜底（styled/VE/Panda 等）
       const classIdx = props.findIndex((p) => p.startsWith('className='));
-      if (classIdx >= 0) {
-        if (ctx.isRoot) {
-          props[classIdx] = `className={cn("${imgClassName}", className)}`;
-        } else {
-          props[classIdx] = `className="${imgClassName}"`;
+      if (elementIdentifier || isCssModuleBinding || finalStyle.classNameIsExpression) {
+        if (!props.some((p) => p.startsWith('style='))) {
+          props.push('style={{ objectFit: "cover" }}');
+        }
+      } else {
+        const hasObjectFit = finalClassName.includes('object-');
+        const imgClassName = hasObjectFit ? finalClassName : cn(finalClassName, 'object-cover');
+        if (classIdx >= 0) {
+          if (ctx.isRoot) {
+            props[classIdx] = `className={cn("${imgClassName}", className)}`;
+          } else {
+            props[classIdx] = `className="${imgClassName}"`;
+          }
+        } else if (ctx.isRoot) {
+          props.push('className={className}');
         }
       }
 
@@ -1023,8 +1128,8 @@ export class CodeGenerator {
       return `${indent}<${tag} ${props.join(' ')} />`;
     }
 
-    // ============ 11. 输入框特殊处理 ============
-    if (tag === 'input') {
+    // ============ 11. 输入框特殊处理（按语义标签判断，styled.input 同样补 type） ============
+    if (semanticTag === 'input') {
       const inputType =
         a11yEnhancements && 'inputType' in a11yEnhancements
           ? (a11yEnhancements as { inputType?: string }).inputType
@@ -1041,14 +1146,14 @@ export class CodeGenerator {
     }
 
     // ============ 13. 按钮节点 → 添加 type="button" 防止表单默认提交 ============
-    if (tag === 'button' || a11yEnhancements?.isButton) {
+    if (semanticTag === 'button' || a11yEnhancements?.isButton) {
       if (!props.some((p) => p.startsWith('type='))) {
         props.unshift('type="button"');
       }
     }
 
     // ============ 14. 链接节点 → 添加安全属性 ============
-    if (tag === 'a') {
+    if (semanticTag === 'a') {
       // 如果没有 href，使用 # 占位并添加注释
       if (!props.some((p) => p.startsWith('href='))) {
         props.push('href="#"');

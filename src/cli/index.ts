@@ -28,6 +28,7 @@ import {
   buildStyleFormatHelp,
   STYLE_FORMATS_LEGACY_REACT,
   STYLE_FORMATS_NEW_PIPELINE,
+  type Framework,
   type StyleFormat,
 } from '../services/style-renderers/index.js';
 import { createFigmaCache } from '../services/cache.js';
@@ -40,6 +41,9 @@ import { createFileWriter } from '../services/file-writer.js';
 import { createTokenStore } from '../services/token-store.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
 import { createVueGenerator } from '../services/vue-generator.js';
+// v1.4.19 T20：整页批量生成
+import { createBatchGenerator } from '../services/batch-generator.js';
+import { selectBlocksByIds, splitPageIntoBlocks } from '../services/block-splitter.js';
 import {
   canUseFallbackPackage,
   compareStableVersions,
@@ -47,7 +51,7 @@ import {
   getUpdateExitCode,
   isValidStableVersion,
 } from './update-utils.js';
-import type { CodeGenResult, TailwindExtension, PendingAsset } from '../types.js';
+import type { CodeGenResult, SmartInferenceSwitches, TailwindExtension, PendingAsset } from '../types.js';
 import type {
   ProcessedAsset,
   ProcessedFill,
@@ -199,22 +203,24 @@ async function resolveCliBundler(choice: string | undefined, projectRoot: string
 }
 
 /**
- * 解析并校验 CLI --style 参数（v1.4.18，T7）。
+ * 解析并校验 CLI --style 参数（v1.4.18 T7；v1.4.19 T14–T17 增框架矩阵入参）。
  *
- * 注册表是样式方案的单一数据源：未知值/计划中值/其他管线值均抛 i18n 错误，
+ * 注册表是样式方案的单一数据源：未知值/计划中值/其他管线值/框架不支持均抛 i18n 错误，
  * 错误文本同时给出当前管线支持的方案，避免静默错配。
  *
  * @param choice - 用户传入的 --style 字符串（缺省 tailwind）
  * @param supportedInPipeline - 当前管线支持的方案集合（新管线/legacy）
+ * @param framework - 目标框架（传入时追加框架矩阵校验）
  * @returns 校验通过的 StyleFormat
  */
 function resolveCliStyleFormat<T extends StyleFormat>(
   choice: string | undefined,
   supportedInPipeline: readonly T[],
+  framework?: Framework,
 ): T {
   const value = (choice ?? 'tailwind').toLowerCase();
   // 已由注册表断言 membership，窄化为该管线的字面量联合（供 legacy 窄类型入参）
-  return assertStyleFormatSupported(value, supportedInPipeline, i18n.getLanguage()) as T;
+  return assertStyleFormatSupported(value, supportedInPipeline, i18n.getLanguage(), framework) as T;
 }
 
 // ============= 命令: 语言设置 (v1.2.0 新增) =============
@@ -1241,293 +1247,589 @@ program
   )
   .option('--skip-lint', i18n.t('cli.commands.jsx.skipLint') as string)
   .option('--inline-svg', '内联渲染 SVG 图标节点（v1.4.0 新增，默认开启）', true)
-  .action(async (target, cmdOptions) => {
-    const opts = program.opts();
-    const { fileKey, nodeId: urlNodeId } = parseTarget(target);
-    const nodeId = cmdOptions.node || urlNodeId;
-    // 默认深度提高到 15 层，支持深层嵌套节点（v1.4.0 优化）
-    const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 15;
-    const framework = cmdOptions.framework === 'vue' ? 'vue' : 'react';
+  .option(
+    '--no-smart-grid',
+    '关闭 T21 布局推断（Grid/sticky/fixed/absolute，默认开）/ Disable grid inference (v1.4.19)',
+  )
+  .option('--no-smart-icons', '关闭 T21 图标识别建议（默认开）/ Disable icon inference (v1.4.19)')
+  .option('--no-smart-dark', '关闭 T21 深色模式策略建议（默认开）/ Disable dark-mode inference (v1.4.19)')
+  .option('--no-smart-motion', '关闭 T21 交互动效建议（默认开）/ Disable motion inference (v1.4.19)')
+  .action((target, rawOptions) =>
+    runGenerateCommand(target, rawOptions as GenerateCommandOptions, program.opts(), {
+      framework: rawOptions.framework === 'vue' ? 'vue' : 'react',
+      vueVersion: 3,
+    }),
+  );
 
-    if (!nodeId) {
-      console.error(chalk.red(i18n.t('cli.commands.jsx.noNodeId') as string));
+// ============= 命令: 一键生成 Vue 2/3 SFC (v1.4.19 T18) =============
+
+program
+  .command('vue <url-or-filekey>')
+  .description(i18n.t('cli.commands.vue.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('--name <name>', i18n.t('cli.commands.component.name') as string)
+  .option('--scene <scene>', i18n.t('cli.commands.jsx.scene') as string)
+  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
+  .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
+  .option('--style <styleFormat>', buildStyleFormatHelp(i18n.getLanguage()), 'tailwind')
+  .option(
+    '--attributify',
+    i18n.t('cli.commands.jsx.attributify') as string,
+    false,
+  )
+  .option(
+    '--bundler <bundler>',
+    i18n.t('cli.commands.jsx.bundler') as string,
+    'auto',
+  )
+  .option(
+    '--vue-version <version>',
+    i18n.t('cli.commands.vue.vueVersion') as string,
+    '3',
+  )
+  .option('--skip-lint', i18n.t('cli.commands.jsx.skipLint') as string)
+  .option('--inline-svg', '内联渲染 SVG 图标节点（v1.4.0 新增，默认开启）', true)
+  .option(
+    '--no-smart-grid',
+    '关闭 T21 布局推断（Grid/sticky/fixed/absolute，默认开）/ Disable grid inference (v1.4.19)',
+  )
+  .option('--no-smart-icons', '关闭 T21 图标识别建议（默认开）/ Disable icon inference (v1.4.19)')
+  .option('--no-smart-dark', '关闭 T21 深色模式策略建议（默认开）/ Disable dark-mode inference (v1.4.19)')
+  .option('--no-smart-motion', '关闭 T21 交互动效建议（默认开）/ Disable motion inference (v1.4.19)')
+  .action((target, rawOptions) => {
+    const cmdOptions = rawOptions as GenerateCommandOptions;
+    // 非法 --vue-version 在任何网络请求前快速失败（i18n 错误提示）
+    const rawVersion = cmdOptions.vueVersion ?? '3';
+    if (rawVersion !== '2' && rawVersion !== '3') {
+      console.error(chalk.red(i18n.t('cli.commands.vue.invalidVersion') as string));
+      process.exit(1);
+    }
+    return runGenerateCommand(target, cmdOptions, program.opts(), {
+      framework: 'vue',
+      vueVersion: rawVersion === '2' ? 2 : 3,
+    });
+  });
+
+// ============= 命令: 整页批量生成 (v1.4.19 T20) =============
+
+program
+  .command('batch <url-or-filekey>')
+  .description(i18n.t('cli.commands.batch.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('--nodes <ids>', i18n.t('cli.commands.batch.nodes') as string)
+  .option('--out <dir>', i18n.t('cli.commands.batch.out') as string, 'figma-generated')
+  .option('--prefix <prefix>', i18n.t('cli.commands.batch.prefix') as string)
+  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
+  .option('--framework <framework>', i18n.t('cli.commands.jsx.framework') as string, 'react')
+  .option('--style <styleFormat>', buildStyleFormatHelp(i18n.getLanguage()), 'tailwind')
+  .option('--attributify', i18n.t('cli.commands.jsx.attributify') as string, false)
+  .option('--bundler <bundler>', i18n.t('cli.commands.jsx.bundler') as string, 'auto')
+  .option('--vue-version <version>', i18n.t('cli.commands.vue.vueVersion') as string, '3')
+  .option(
+    '--no-smart-grid',
+    '关闭 T21 布局推断（Grid/sticky/fixed/absolute，默认开）/ Disable grid inference (v1.4.19)',
+  )
+  .option('--no-smart-icons', '关闭 T21 图标识别建议（默认开）/ Disable icon inference (v1.4.19)')
+  .option('--no-smart-dark', '关闭 T21 深色模式策略建议（默认开）/ Disable dark-mode inference (v1.4.19)')
+  .option('--no-smart-motion', '关闭 T21 交互动效建议（默认开）/ Disable motion inference (v1.4.19)')
+  .action((target, rawOptions) => {
+    const cmdOptions = rawOptions as BatchCommandOptions;
+    const rawVersion = cmdOptions.vueVersion ?? '3';
+    // 非法 --vue-version 触网前失败（与 vue 命令一致）
+    if (rawVersion !== '2' && rawVersion !== '3') {
+      console.error(chalk.red(i18n.t('cli.commands.vue.invalidVersion') as string));
+      process.exit(1);
+    }
+    return runBatchCommand(target, cmdOptions, program.opts(), {
+      framework: cmdOptions.framework === 'vue' ? 'vue' : 'react',
+      vueVersion: rawVersion === '2' ? 2 : 3,
+    });
+  });
+
+/** batch 命令的 commander 选项结构（v1.4.19 T20） */
+interface BatchCommandOptions {
+  /** -n, --node 页面/Frame 根节点 ID */
+  node?: string;
+  /** --nodes 逗号分隔的显式区块节点 ID */
+  nodes?: string;
+  /** --out 多文件输出目录 */
+  out?: string;
+  /** --prefix 组件名统一前缀 */
+  prefix?: string;
+  /** --depth 遍历深度 */
+  depth?: string;
+  /** --framework react|vue */
+  framework?: string;
+  /** --style 样式方案 */
+  style?: string;
+  /** --attributify（仅 unocss） */
+  attributify?: boolean;
+  /** --bundler */
+  bundler?: string;
+  /** --vue-version（仅 vue 语义） */
+  vueVersion?: string;
+  /** T21 智能推断分项（commander --no-smart-* 解析，缺省 true） */
+  smartGrid?: boolean;
+  smartIcons?: boolean;
+  smartDark?: boolean;
+  smartMotion?: boolean;
+}
+
+/**
+ * 解析 commander 的 --no-smart-* 选项为 T21 智能推断开关（四项缺省全开）。
+ *
+ * @param raw - 含 smartGrid/smartIcons/smartDark/smartMotion 的命令选项
+ * @returns SmartInferenceSwitches（仅含显式值，缺省由推断器兜底为开）
+ */
+function resolveCliInference(raw: {
+  smartGrid?: boolean;
+  smartIcons?: boolean;
+  smartDark?: boolean;
+  smartMotion?: boolean;
+}): SmartInferenceSwitches {
+  return {
+    grid: raw.smartGrid !== false,
+    icons: raw.smartIcons !== false,
+    darkMode: raw.smartDark !== false,
+    motion: raw.smartMotion !== false,
+  };
+}
+
+/**
+ * batch 命令动作：整页区块拆分 → 逐区块生成 → 多文件落盘 + barrel。
+ *
+ * @param target - URL 或 fileKey
+ * @param cmdOptions - commander 解析出的命令选项
+ * @param globalOpts - 全局选项（--token 等）
+ * @param force - 命令固定/解析出的框架与 Vue 大版本
+ */
+async function runBatchCommand(
+  target: string,
+  cmdOptions: BatchCommandOptions,
+  globalOpts: { token?: string },
+  force: { framework: Framework; vueVersion: 2 | 3 },
+): Promise<void> {
+  const { fileKey, nodeId: urlNodeId } = parseTarget(target);
+  const rootNodeId = cmdOptions.node ?? urlNodeId;
+  const maxDepth = Number.parseInt(cmdOptions.depth ?? '15', 10) || 15;
+
+  if (!rootNodeId) {
+    console.error(chalk.red(i18n.t('cli.commands.batch.noRootNode') as string));
+    process.exit(1);
+  }
+
+  const spinner = ora(chalk.blue('Batch-generating page blocks...')).start();
+  const startTime = Date.now();
+
+  try {
+    // 本地校验先行（构建器检测 + 样式矩阵闸门，均不触网）
+    const outputDir = path.resolve(cmdOptions.out ?? 'figma-generated');
+    const effectiveBundler = await resolveCliBundler(cmdOptions.bundler as string | undefined, outputDir);
+    const styleFormat = resolveCliStyleFormat(
+      cmdOptions.style as string | undefined,
+      STYLE_FORMATS_NEW_PIPELINE,
+      force.framework,
+    );
+    const unocssMode: 'wind' | 'attributify' = cmdOptions.attributify === true ? 'attributify' : 'wind';
+    if (unocssMode === 'attributify' && styleFormat !== 'unocss') {
+      console.warn(chalk.yellow('  ↳ ' + (i18n.t('cli.commands.jsx.attributifyIgnored') as string)));
+    }
+
+    const client = await getClient(globalOpts.token);
+    const ctxService = createDesignContextService(client);
+    const ctx = await ctxService.getDesignContext(fileKey, rootNodeId, maxDepth);
+
+    // 阶段一：显式 --nodes 优先；否则自动拆分整页
+    const explicitIds = (cmdOptions.nodes ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    const blocks =
+      explicitIds.length > 0 ? selectBlocksByIds(ctx.node, explicitIds) : splitPageIntoBlocks(ctx.node);
+    if (blocks.length === 0) {
+      spinner.fail(chalk.red(i18n.t('cli.commands.batch.emptySelection') as string));
       process.exit(1);
     }
 
-    const spinner = ora(chalk.blue(`Generating ${framework.toUpperCase()} component...`)).start();
+    // 阶段二：逐区块生成并汇总
+    const batchGenerator = createBatchGenerator(client);
+    const result = await batchGenerator.generate(blocks, ctx, {
+      framework: force.framework,
+      vueVersion: force.framework === 'vue' ? force.vueVersion : undefined,
+      styleFormat,
+      unocssMode,
+      bundler: effectiveBundler,
+      inference: resolveCliInference(cmdOptions),
+      componentNamePrefix: cmdOptions.prefix,
+    });
+
+    // 阶段三：多文件落盘（内容已由各区块生成器格式化；barrel 为静态生成）
+    await fs.ensureDir(outputDir);
+    for (const file of result.files) {
+      await fs.writeFile(path.join(outputDir, file.fileName), file.content, 'utf-8');
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    spinner.succeed(
+      chalk.green(
+        `${(i18n.t('cli.commands.batch.completed', result.blocks.length, result.files.length) as string)} (${duration}s)`,
+      ),
+    );
+    console.log(chalk.gray(`   ↳ ${i18n.t('batchGenerate.savedPrefix') as string}: ${outputDir}`));
+    for (const block of result.blocks) {
+      console.log(chalk.gray(`   • [${block.kind}] ${block.componentName} ← ${block.sourceName} (${block.nodeId})`));
+    }
+    for (const edge of result.edges) {
+      console.log(chalk.gray(`   ↳ ${edge.from} → ${edge.to} (${edge.kind})`));
+    }
+  } catch (error) {
+    spinner.fail(chalk.red(error instanceof Error ? error.message : String(error)));
+    process.exit(1);
+  }
+}
+
+/** jsx / vue 命令的 commander 选项结构（v1.4.19 T18） */
+interface GenerateCommandOptions {
+  /** -n, --node 显式节点 ID */
+  node?: string;
+  /** --name 组件名 */
+  name?: string;
+  /** --scene 场景名 */
+  scene?: string;
+  /** --depth 遍历深度 */
+  depth?: string;
+  /** --output 主组件输出路径 */
+  output?: string;
+  /** --style 样式方案 */
+  style?: string;
+  /** --framework（仅 jsx 命令） */
+  framework?: string;
+  /** --attributify（仅 unocss 生效） */
+  attributify?: boolean;
+  /** --bundler */
+  bundler?: string;
+  /** --vue-version（仅 vue 命令，commander 驼峰化） */
+  vueVersion?: string;
+  /** --skip-lint */
+  skipLint?: boolean;
+  /** T21 智能推断分项（commander --no-smart-* 解析，缺省 true） */
+  smartGrid?: boolean;
+  smartIcons?: boolean;
+  smartDark?: boolean;
+  smartMotion?: boolean;
+}
+
+/**
+ * jsx / vue 命令共享的组件生成动作（v1.4.19 T18 从 jsx action 抽取）。
+ *
+ * @param target - URL 或 fileKey
+ * @param cmdOptions - commander 解析出的命令选项
+ * @param globalOpts - 全局选项（--token 等）
+ * @param force - 命令固定的生成目标：框架与 Vue 大版本
+ */
+async function runGenerateCommand(
+  target: string,
+  cmdOptions: GenerateCommandOptions,
+  globalOpts: { token?: string },
+  force: { framework: Framework; vueVersion: 2 | 3 },
+): Promise<void> {
+  const opts = globalOpts;
+  const framework = force.framework;
+  const vueVersion = force.vueVersion;
+  const { fileKey, nodeId: urlNodeId } = parseTarget(target);
+  const nodeId = cmdOptions.node ?? urlNodeId;
+  // 默认深度提高到 15 层，支持深层嵌套节点（v1.4.0 优化）
+  const maxDepth = Number.parseInt(cmdOptions.depth ?? '15', 10) || 15;
+
+  if (!nodeId) {
+    console.error(chalk.red(i18n.t('cli.commands.jsx.noNodeId') as string));
+    process.exit(1);
+  }
+
+  const spinner = ora(chalk.blue(`Generating ${framework.toUpperCase()} component...`)).start();
+  console.log(
+    chalk.gray(
+      `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}, framework: ${framework}, style: ${cmdOptions.style}`,
+    ),
+  );
+
+  const startTime = Date.now();
+
+  try {
+    // v1.4.18（T4/T7）：本地参数解析先行——构建器检测仅文件 IO，样式注册表校验纯内存，
+    // 均无网络依赖，非法值在任何 Figma 请求前快速失败
+    const bundlerDetectRoot = cmdOptions.output ? path.dirname(path.resolve(cmdOptions.output)) : process.cwd();
+    const effectiveBundler = await resolveCliBundler(cmdOptions.bundler as string | undefined, bundlerDetectRoot);
+    const styleFormat = resolveCliStyleFormat(
+      cmdOptions.style as string | undefined,
+      STYLE_FORMATS_NEW_PIPELINE,
+      framework,
+    );
+    // v1.4.18 T8：--attributify 仅对 unocss 生效；非 unocss 时显式忽略并提示，避免用户误以为生效
+    const unocssMode: 'wind' | 'attributify' = cmdOptions.attributify === true ? 'attributify' : 'wind';
+    if (unocssMode === 'attributify' && styleFormat !== 'unocss') {
+      console.warn(chalk.yellow('  ↳ ' + (i18n.t('cli.commands.jsx.attributifyIgnored') as string)));
+    }
+
+    const client = await getClient(opts.token);
+    const ctxService = createDesignContextService(client);
+    const codeGen = createCodeGenerator(client);
+    const vueGen = createVueGenerator(client);
+    const componentMapper = createComponentMapper();
+
+    // 1. 获取精简设计上下文
+    console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.jsx.getContext')) as string));
+    const ctx = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
+
+    // v1.4.0 新增：自动检测组件库
+    const libDetection = componentMapper.detectLibrary();
+    if (libDetection.library !== 'none') {
+      console.log(chalk.cyan(`  ↳ 检测到组件库: ${libDetection.library} (${libDetection.reason})`));
+      const matches = componentMapper.matchComponentsInTree(ctx.node, libDetection.library);
+      if (matches.length > 0) {
+        console.log(chalk.green(`     匹配到 ${matches.length} 个可复用组件:`));
+        matches.slice(0, 5).forEach((m) => {
+          console.log(
+            `     • ${m.componentName} (置信度: ${Math.round(m.confidence * 100)}%) → import from ${m.importPath}`,
+          );
+        });
+      }
+    }
+
+    // 2. 可选：设计规范检查
+    if (!cmdOptions.skipLint) {
+      try {
+        console.log(chalk.gray('  ↳ 代码还原质量预检...'));
+        const linter = createDesignLinter();
+        const lintResult = linter.lint(ctx.node);
+        if (lintResult.errorCount > 0 || lintResult.warningCount > 3) {
+          const scoreEmoji =
+            lintResult.score >= 90 ? '🎉' : lintResult.score >= 80 ? '✅' : lintResult.score >= 60 ? '🔶' : '❌';
+          console.log(
+            chalk.yellow(
+              `  ${scoreEmoji} 代码还原质量评分: ${lintResult.score}/100，发现 ${lintResult.errorCount} 个错误、${lintResult.warningCount} 个警告`,
+            ),
+          );
+          if (lintResult.score < 80) {
+            console.log(chalk.gray('     💡 建议先运行 figma-dev lint 查看详细报告，修复问题后再生成代码'));
+          }
+        }
+      } catch (err) {
+        // Lint 预检失败不应阻断代码生成，仅输出提示
+        console.warn(chalk.yellow(`  ↳ Lint 预检失败（已跳过）: ${err instanceof Error ? err.message : err}`));
+      }
+    }
+
+    // 3. 生成代码（React 或 Vue）
+    console.log(chalk.gray(`  ↳ Generating ${framework.toUpperCase()} code...`));
+    let result: CodeGenResult;
+
+    if (framework === 'vue') {
+      const vueResult = await vueGen.generateFromContext(ctx, {
+        componentName: cmdOptions.name,
+        sceneName: cmdOptions.scene,
+        usePublicCdn: true,
+        bundler: effectiveBundler,
+        styleFormat,
+        unocssMode,
+        // v1.4.19 T21：智能推断分项开关（--no-smart-*，缺省全开）
+        inference: resolveCliInference(cmdOptions),
+        // v1.4.19 T18：vue 命令透传 --vue-version；jsx --framework vue 固定 3
+        vueVersion,
+      });
+      result = vueResult as unknown as CodeGenResult;
+    } else {
+      result = (await codeGen.generateJsxFromContext(ctx, {
+        componentName: cmdOptions.name,
+        sceneName: cmdOptions.scene,
+        usePublicCdn: true,
+        bundler: effectiveBundler,
+        styleFormat,
+        unocssMode,
+        // v1.4.19 T21：智能推断分项开关（--no-smart-*，缺省全开）
+        inference: resolveCliInference(cmdOptions),
+      })) as unknown as CodeGenResult;
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    // 统计
+    function countNodes(n: { children?: unknown[] }): number {
+      let c = 1;
+      if (n.children) for (const child of n.children as Array<{ children?: unknown[] }>) c += countNodes(child);
+      return c;
+    }
+
+    spinner.succeed(
+      chalk.green((i18n.t('cli.commands.jsx.completed') as string) + ` (${duration}s): ${result.componentName}`),
+    );
     console.log(
       chalk.gray(
-        `${i18n.t('cli.commands.sync.file') as string}: ${fileKey}, ${i18n.t('cli.commands.sync.node') as string}: ${nodeId}, ${i18n.t('cli.commands.metadata.depth') as string}: ${maxDepth}, framework: ${framework}, style: ${cmdOptions.style}`,
+        `   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${countNodes(ctx.node)}, ${i18n.t('cli.commands.structured.assets') as string}: ${ctx.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${ctx.textNodes.length}`,
       ),
     );
 
-    const startTime = Date.now();
-
-    try {
-      // v1.4.18（T4/T7）：本地参数解析先行——构建器检测仅文件 IO，样式注册表校验纯内存，
-      // 均无网络依赖，非法值在任何 Figma 请求前快速失败
-      const bundlerDetectRoot = cmdOptions.output ? path.dirname(path.resolve(cmdOptions.output)) : process.cwd();
-      const effectiveBundler = await resolveCliBundler(cmdOptions.bundler as string | undefined, bundlerDetectRoot);
-      const styleFormat = resolveCliStyleFormat(cmdOptions.style as string | undefined, STYLE_FORMATS_NEW_PIPELINE);
-      // v1.4.18 T8：--attributify 仅对 unocss 生效；非 unocss 时显式忽略并提示，避免用户误以为生效
-      const unocssMode: 'wind' | 'attributify' = cmdOptions.attributify === true ? 'attributify' : 'wind';
-      if (unocssMode === 'attributify' && styleFormat !== 'unocss') {
-        console.warn(chalk.yellow('  ↳ ' + (i18n.t('cli.commands.jsx.attributifyIgnored') as string)));
-      }
-
-      const client = await getClient(opts.token);
-      const ctxService = createDesignContextService(client);
-      const codeGen = createCodeGenerator(client);
-      const vueGen = createVueGenerator(client);
-      const componentMapper = createComponentMapper();
-
-      // 1. 获取精简设计上下文
-      console.log(chalk.gray(('  ↳ ' + i18n.t('cli.commands.jsx.getContext')) as string));
-      const ctx = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
-
-      // v1.4.0 新增：自动检测组件库
-      const libDetection = componentMapper.detectLibrary();
-      if (libDetection.library !== 'none') {
-        console.log(chalk.cyan(`  ↳ 检测到组件库: ${libDetection.library} (${libDetection.reason})`));
-        const matches = componentMapper.matchComponentsInTree(ctx.node, libDetection.library);
-        if (matches.length > 0) {
-          console.log(chalk.green(`     匹配到 ${matches.length} 个可复用组件:`));
-          matches.slice(0, 5).forEach((m) => {
-            console.log(
-              `     • ${m.componentName} (置信度: ${Math.round(m.confidence * 100)}%) → import from ${m.importPath}`,
-            );
-          });
-        }
-      }
-
-      // 2. 可选：设计规范检查
-      if (!cmdOptions.skipLint) {
-        try {
-          console.log(chalk.gray('  ↳ 代码还原质量预检...'));
-          const linter = createDesignLinter();
-          const lintResult = linter.lint(ctx.node);
-          if (lintResult.errorCount > 0 || lintResult.warningCount > 3) {
-            const scoreEmoji =
-              lintResult.score >= 90 ? '🎉' : lintResult.score >= 80 ? '✅' : lintResult.score >= 60 ? '🔶' : '❌';
-            console.log(
-              chalk.yellow(
-                `  ${scoreEmoji} 代码还原质量评分: ${lintResult.score}/100，发现 ${lintResult.errorCount} 个错误、${lintResult.warningCount} 个警告`,
-              ),
-            );
-            if (lintResult.score < 80) {
-              console.log(chalk.gray('     💡 建议先运行 figma-dev lint 查看详细报告，修复问题后再生成代码'));
-            }
-          }
-        } catch (err) {
-          // Lint 预检失败不应阻断代码生成，仅输出提示
-          console.warn(chalk.yellow(`  ↳ Lint 预检失败（已跳过）: ${err instanceof Error ? err.message : err}`));
-        }
-      }
-
-      // 3. 生成代码（React 或 Vue）
-      console.log(chalk.gray(`  ↳ Generating ${framework.toUpperCase()} code...`));
-      let result: CodeGenResult;
-
-      if (framework === 'vue') {
-        const vueResult = await vueGen.generateFromContext(ctx, {
-          componentName: cmdOptions.name,
-          sceneName: cmdOptions.scene,
-          usePublicCdn: true,
-          bundler: effectiveBundler,
-          styleFormat,
-          unocssMode,
-        });
-        result = vueResult as unknown as CodeGenResult;
-      } else {
-        result = (await codeGen.generateJsxFromContext(ctx, {
-          componentName: cmdOptions.name,
-          sceneName: cmdOptions.scene,
-          usePublicCdn: true,
-          bundler: effectiveBundler,
-          styleFormat,
-          unocssMode,
-        })) as unknown as CodeGenResult;
-      }
-
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-
-      // 统计
-      function countNodes(n: { children?: unknown[] }): number {
-        let c = 1;
-        if (n.children) for (const child of n.children as Array<{ children?: unknown[] }>) c += countNodes(child);
-        return c;
-      }
-
-      spinner.succeed(
-        chalk.green((i18n.t('cli.commands.jsx.completed') as string) + ` (${duration}s): ${result.componentName}`),
-      );
-      console.log(
-        chalk.gray(
-          `   ${i18n.t('cli.commands.structured.nodeCount') as string}: ${countNodes(ctx.node)}, ${i18n.t('cli.commands.structured.assets') as string}: ${ctx.assets.length}, ${i18n.t('cli.commands.structured.text') as string}: ${ctx.textNodes.length}`,
-        ),
-      );
-
-      if (result.reports) {
-        // v1.2.0 新增：显示增强报告
-        const reports = result.reports;
-        const flexFixes = reports.flexFixes;
-        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
-          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
-          console.log(
-            chalk.green(
-              `\n🔧 ${i18n.t('reports.flex.title') as string}: ${flexCount} ${i18n.t('reports.flex.fixesApplied') as string}`,
-            ),
-          );
-        }
-        const a11y = reports.a11y;
-        if (a11y) {
-          const a11yCount =
-            a11y.enhancementsCount ??
-            (a11y.semanticTagsCount || 0) + (a11y.buttonsIdentifiedCount || 0) + (a11y.ariaAddedCount || 0);
-          if (a11yCount > 0) {
-            console.log(
-              chalk.green(
-                `♿ ${i18n.t('reports.a11y.title') as string}: ${a11yCount} ${i18n.t('reports.a11y.enhancementsApplied') as string}`,
-              ),
-            );
-          }
-        }
-        const ds = reports.designSystem;
-        if (ds) {
-          const dsCount =
-            ds.suggestionsCount ??
-            (ds.colorSuggestions?.length || 0) +
-              (ds.spacingTokens?.length || 0) +
-              (ds.radiusTokens?.length || 0) +
-              (ds.typographySuggestions?.length || 0);
-          if (dsCount > 0) {
-            console.log(
-              chalk.cyan(
-                `\n🎨 ${i18n.t('reports.design.title') as string}: ${dsCount} ${i18n.t('reports.design.suggestions') as string}`,
-              ),
-            );
-          }
-        }
-        const resp = reports.responsive;
-        if (resp) {
-          const respCount =
-            resp.suggestionsCount ??
-            (resp.recommendations?.length || 0) +
-              (resp.classSuggestions?.length || 0) +
-              (resp.layoutSuggestions?.length || 0);
-          if (respCount > 0) {
-            console.log(
-              chalk.cyan(
-                `📱 ${i18n.t('reports.responsive.title') as string}: ${respCount} ${i18n.t('reports.responsive.suggestions') as string}`,
-              ),
-            );
-          }
-        }
-      }
-
-      if ((result.extensionsNeeded || []).length > 0) {
-        // 按 type:originalValue 去重，相同值只显示一次
-        const seen = new Set<string>();
-        const unique = (result.extensionsNeeded as readonly TailwindExtension[]).filter((ext) => {
-          const key = `${ext.type}:${ext.originalValue}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-
-        // Tailwind v4 @theme 变量前缀映射
-        const prefixMap: Record<string, string> = {
-          color: '--color-',
-          spacing: '--spacing-',
-          radius: '--radius-',
-          shadow: '--shadow-',
-          'font-size': '--text-',
-          'font-weight': '--font-weight-',
-        };
-
-        console.log(chalk.yellow(`\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${unique.length}):`));
-        unique.slice(0, 10).forEach((ext) => {
-          const prefix = prefixMap[ext.type] || '--color-';
-          console.log(`  - @theme inline { ${prefix}${ext.suggestedName}: ${ext.originalValue}; }`);
-        });
-        if (unique.length > 10) {
-          console.log(`  - ... and ${unique.length - 10} more`);
-        }
-      }
-
-      if ((result.pendingAssets || []).length > 0) {
-        const uniqueAssets = (result.pendingAssets as readonly PendingAsset[]).filter(
-          (v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i,
-        );
-        console.log(chalk.cyan(`\n🖼️  ${i18n.t('cli.commands.jsx.assetsNeeded') as string} (${uniqueAssets.length}):`));
-        uniqueAssets.forEach((a) => {
-          console.log(`  - ${a.nodeId}: ${a.name} (${a.type})`);
-        });
+    if (result.reports) {
+      // v1.2.0 新增：显示增强报告
+      const reports = result.reports;
+      const flexFixes = reports.flexFixes;
+      if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
+        const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
         console.log(
-          chalk.gray(
-            `   ${i18n.t('cli.commands.jsx.downloadHint') as string} figma-dev assets <url> --scene ${cmdOptions.scene || '<scene>'} --nodes <nodeIds>`,
+          chalk.green(
+            `\n🔧 ${i18n.t('reports.flex.title') as string}: ${flexCount} ${i18n.t('reports.flex.fixesApplied') as string}`,
           ),
         );
       }
-
-      const reusableComponents = ctx.componentsUsed.filter((c) => c.instanceCount > 0);
-      if (reusableComponents.length > 0) {
-        console.log(chalk.magenta(`\n🧩 ${i18n.t('cli.commands.jsx.reusableComponents') as string}:`));
-        reusableComponents.forEach((c) => {
+      const a11y = reports.a11y;
+      if (a11y) {
+        const a11yCount =
+          a11y.enhancementsCount ??
+          (a11y.semanticTagsCount || 0) + (a11y.buttonsIdentifiedCount || 0) + (a11y.ariaAddedCount || 0);
+        if (a11yCount > 0) {
           console.log(
-            `  - ${c.name} (${i18n.t('cli.commands.jsx.usedTimes') as string} ${c.instanceCount} ${i18n.t('cli.commands.jsx.times') as string}) → @/components/web-official/`,
+            chalk.green(
+              `♿ ${i18n.t('reports.a11y.title') as string}: ${a11yCount} ${i18n.t('reports.a11y.enhancementsApplied') as string}`,
+            ),
           );
-        });
-      }
-
-      // 输出代码
-      console.log('');
-      console.log(chalk.cyan('─'.repeat(70)));
-
-      if (cmdOptions.output) {
-        const outPath = path.resolve(cmdOptions.output);
-        await fs.ensureDir(path.dirname(outPath));
-        await fs.writeFile(outPath, result.code, 'utf-8');
-        console.log(chalk.green((i18n.t('cli.commands.jsx.codeSaved') as string) + `: ${outPath}`));
-      } else {
-        console.log(result.code);
-      }
-      console.log(chalk.cyan('─'.repeat(70)));
-
-      // v1.4.18 T9：CSS Modules 同名 .module.css 旁路文件
-      // --output 指定主组件路径时，旁路文件写入同目录（用户显式要求落盘）；否则仅在终端展示
-      if (styleFormat === 'css-modules' && result.styleSidecar) {
-        if (cmdOptions.output) {
-          const sidecarPath = path.resolve(path.dirname(cmdOptions.output), result.styleSidecar.fileName);
-          await fs.writeFile(sidecarPath, result.styleSidecar.content, 'utf-8');
-          console.log(chalk.green((i18n.t('cli.commands.jsx.moduleCssSaved') as string) + `: ${sidecarPath}`));
-        } else {
-          console.log('');
-          console.log(chalk.magenta(`📎 ${i18n.t('cli.commands.jsx.moduleCssPreview') as string}: ${result.styleSidecar.fileName}`));
-          console.log(chalk.gray(result.styleSidecar.content));
         }
       }
-
-      // v1.4.18 T8：UnoCSS 配置指引（仅在终端展示，不写入用户项目）
-      if (styleFormat === 'unocss' && result.styleHints && result.styleHints.length > 0) {
-        console.log('');
-        console.log(chalk.magenta(`🎛️ UnoCSS ${unocssMode} ${i18n.t('cli.commands.jsx.styleHintsSuffix') as string}`));
-        for (const hint of result.styleHints) {
-          console.log(chalk.yellow(`\n### ${hint.title}`));
-          console.log(chalk.gray(hint.code));
+      const ds = reports.designSystem;
+      if (ds) {
+        const dsCount =
+          ds.suggestionsCount ??
+          (ds.colorSuggestions?.length || 0) +
+            (ds.spacingTokens?.length || 0) +
+            (ds.radiusTokens?.length || 0) +
+            (ds.typographySuggestions?.length || 0);
+        if (dsCount > 0) {
+          console.log(
+            chalk.cyan(
+              `\n🎨 ${i18n.t('reports.design.title') as string}: ${dsCount} ${i18n.t('reports.design.suggestions') as string}`,
+            ),
+          );
         }
       }
-    } catch (error) {
-      spinner.fail(
-        chalk.red(
-          (i18n.t('cli.commands.jsx.failed') as string) +
-            ': ' +
-            (error instanceof Error ? error.message : String(error)),
+      const resp = reports.responsive;
+      if (resp) {
+        const respCount =
+          resp.suggestionsCount ??
+          (resp.recommendations?.length || 0) +
+            (resp.classSuggestions?.length || 0) +
+            (resp.layoutSuggestions?.length || 0);
+        if (respCount > 0) {
+          console.log(
+            chalk.cyan(
+              `📱 ${i18n.t('reports.responsive.title') as string}: ${respCount} ${i18n.t('reports.responsive.suggestions') as string}`,
+            ),
+          );
+        }
+      }
+    }
+
+    if ((result.extensionsNeeded || []).length > 0) {
+      // 按 type:originalValue 去重，相同值只显示一次
+      const seen = new Set<string>();
+      const unique = (result.extensionsNeeded as readonly TailwindExtension[]).filter((ext) => {
+        const key = `${ext.type}:${ext.originalValue}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      // Tailwind v4 @theme 变量前缀映射
+      const prefixMap: Record<string, string> = {
+        color: '--color-',
+        spacing: '--spacing-',
+        radius: '--radius-',
+        shadow: '--shadow-',
+        'font-size': '--text-',
+        'font-weight': '--font-weight-',
+      };
+
+      console.log(chalk.yellow(`\n⚠️  ${i18n.t('cli.commands.jsx.themeExtensions') as string} (${unique.length}):`));
+      unique.slice(0, 10).forEach((ext) => {
+        const prefix = prefixMap[ext.type] || '--color-';
+        console.log(`  - @theme inline { ${prefix}${ext.suggestedName}: ${ext.originalValue}; }`);
+      });
+      if (unique.length > 10) {
+        console.log(`  - ... and ${unique.length - 10} more`);
+      }
+    }
+
+    if ((result.pendingAssets || []).length > 0) {
+      const uniqueAssets = (result.pendingAssets as readonly PendingAsset[]).filter(
+        (v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i,
+      );
+      console.log(chalk.cyan(`\n🖼️  ${i18n.t('cli.commands.jsx.assetsNeeded') as string} (${uniqueAssets.length}):`));
+      uniqueAssets.forEach((a) => {
+        console.log(`  - ${a.nodeId}: ${a.name} (${a.type})`);
+      });
+      console.log(
+        chalk.gray(
+          `   ${i18n.t('cli.commands.jsx.downloadHint') as string} figma-dev assets <url> --scene ${cmdOptions.scene || '<scene>'} --nodes <nodeIds>`,
         ),
       );
-      process.exit(1);
     }
-  });
+
+    const reusableComponents = ctx.componentsUsed.filter((c) => c.instanceCount > 0);
+    if (reusableComponents.length > 0) {
+      console.log(chalk.magenta(`\n🧩 ${i18n.t('cli.commands.jsx.reusableComponents') as string}:`));
+      reusableComponents.forEach((c) => {
+        console.log(
+          `  - ${c.name} (${i18n.t('cli.commands.jsx.usedTimes') as string} ${c.instanceCount} ${i18n.t('cli.commands.jsx.times') as string}) → @/components/web-official/`,
+        );
+      });
+    }
+
+    // 输出代码
+    console.log('');
+    console.log(chalk.cyan('─'.repeat(70)));
+
+    if (cmdOptions.output) {
+      const outPath = path.resolve(cmdOptions.output);
+      await fs.ensureDir(path.dirname(outPath));
+      await fs.writeFile(outPath, result.code, 'utf-8');
+      console.log(chalk.green((i18n.t('cli.commands.jsx.codeSaved') as string) + `: ${outPath}`));
+    } else {
+      console.log(result.code);
+    }
+    console.log(chalk.cyan('─'.repeat(70)));
+
+    // v1.4.18 T9 / v1.4.19 T16：同名样式旁路文件（CSS Modules / Less / Sass）
+    // --output 指定主组件路径时，旁路文件写入同目录（用户显式要求落盘）；否则仅在终端展示
+    if (result.styleSidecar) {
+      if (cmdOptions.output) {
+        const sidecarPath = path.resolve(path.dirname(cmdOptions.output), result.styleSidecar.fileName);
+        await fs.writeFile(sidecarPath, result.styleSidecar.content, 'utf-8');
+        console.log(chalk.green((i18n.t('cli.commands.jsx.sidecarSaved') as string) + `: ${sidecarPath}`));
+      } else {
+        console.log('');
+        console.log(chalk.magenta(`📎 ${i18n.t('cli.commands.jsx.sidecarPreview') as string}: ${result.styleSidecar.fileName}`));
+        console.log(chalk.gray(result.styleSidecar.content));
+      }
+    }
+
+    // v1.4.18 T8：UnoCSS 配置指引（仅在终端展示，不写入用户项目）
+    if (styleFormat === 'unocss' && result.styleHints && result.styleHints.length > 0) {
+      console.log('');
+      console.log(chalk.magenta(`🎛️ UnoCSS ${unocssMode} ${i18n.t('cli.commands.jsx.styleHintsSuffix') as string}`));
+      for (const hint of result.styleHints) {
+        console.log(chalk.yellow(`\n### ${hint.title}`));
+        console.log(chalk.gray(hint.code));
+      }
+    }
+  } catch (error) {
+    spinner.fail(
+      chalk.red(
+        (i18n.t('cli.commands.jsx.failed') as string) +
+          ': ' +
+          (error instanceof Error ? error.message : String(error)),
+      ),
+    );
+    process.exit(1);
+  }
+}
 
 // ============= 命令: 下载资源 (v2.0) =============
 
@@ -2386,6 +2688,8 @@ if (rawArgs.includes('--update')) {
     ['lint', 'lint'],
     ['structured', 'structured'],
     ['jsx', 'jsx'],
+    ['vue', 'vue'],
+    ['batch', 'batch'],
     ['assets', 'assets'],
     ['tutorial', 'tutorial'],
     ['mcp', 'mcp'],

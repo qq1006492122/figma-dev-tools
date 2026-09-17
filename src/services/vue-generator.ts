@@ -1,13 +1,15 @@
 /**
- * Vue 3 SFC 代码生成服务 - Vue Generator
+ * Vue 代码生成服务 - Vue Generator
  *
- * 核心职责：将 Figma 节点转换为 Vue 3 单文件组件（SFC），
- * 使用 <script setup lang="ts"> + Template + Tailwind CSS/UnoCSS。
+ * 核心职责：将 Figma 节点转换为 Vue 单文件组件（SFC）：
+ * - vueVersion=3（默认）：<script setup lang="ts"> + Template + Tailwind CSS/UnoCSS；
+ * - vueVersion=2（v1.4.19 T18）：Options API SFC（defineComponent + props/data/computed/methods）。
  *
  * @module
  */
 
 import type { DesignContext, ProcessedNode } from '../types/nodes.js';
+import type { SmartInferenceSwitches } from '../types.js';
 import { escapeAttribute, sanitizeIdentifier, sanitizeText } from '../utils/security.js';
 import { createA11yEnhancer } from './a11y-enhancer.js';
 import { formatCode } from './code-formatter.js';
@@ -16,6 +18,11 @@ import { createDesignSystemAnalyzer } from './design-system.js';
 import type { FigmaClient } from './figma-client.js';
 import { createFlexFixer } from './flex-fixer.js';
 import { createResponsiveInferrer } from './responsive-inferrer.js';
+import {
+  createSemanticInferrer,
+  formatSemanticComments,
+} from './semantic-inferrer.js';
+import { createSmartInferrer, formatSmartInferenceComments } from './smart-inferrer.js';
 import { SvgInlineRenderer, isVectorNode } from './svg-inline-renderer.js';
 import {
   assertStyleFormatSupported,
@@ -30,14 +37,19 @@ import {
   type UnocssMode,
 } from './style-renderers/index.js';
 import { normalizeAssetUrlPath, planAssetReference, toAssetVarName, type BundlerKind } from './asset-paths.js';
-import { generateVue3Props, type GeneratedVue3Props } from './props-type-generator.js';
+import {
+  generateVue2Props,
+  generateVue3Props,
+  type GeneratedVue2Props,
+  type GeneratedVue3Props,
+} from './props-type-generator.js';
 
 // ============ 类型定义 ============
 
 export interface VueCodeGenOptions {
   componentName?: string;
   typescript?: boolean;
-  /** 样式方案（v1.4.18 T7：StyleFormat 11 值联合，新管线仅 tailwind/unocss 可用） */
+  /** 样式方案（v1.4.18 T7：StyleFormat 11 值联合，新管线 tailwind/unocss/css-modules/less/sass） */
   styleFormat?: StyleFormat;
   /** UnoCSS 模式（v1.4.18 T8，仅 styleFormat=unocss 生效）：wind（默认）| attributify */
   unocssMode?: UnocssMode;
@@ -46,6 +58,10 @@ export interface VueCodeGenOptions {
   /** 目标构建器（v1.4.18）：默认 none，模板资源引用与 1.4.17 一致 */
   bundler?: BundlerKind;
   skipEnhancements?: boolean;
+  /** v1.4.19 T21：智能推断分项开关（缺省全开，skipEnhancements 为总闸） */
+  inference?: SmartInferenceSwitches;
+  /** Vue 大版本（v1.4.19 T18）：3（默认，<script setup>）| 2（Options API SFC） */
+  vueVersion?: 2 | 3;
 }
 
 export interface GeneratedVueComponent {
@@ -58,8 +74,10 @@ export interface GeneratedVueComponent {
   imports: string[];
   /** 样式方案配置建议（v1.4.18 T8，UnoCSS 非空；仅建议，不写入用户项目） */
   styleHints: StyleHint[];
-  /** 同名旁路样式文件（v1.4.18 T9，仅 css-modules：${componentName}.module.css） */
+  /** 同名旁路样式文件（css-modules/less/sass：${componentName}.module.*） */
   styleSidecar?: StyleSidecarFile;
+  /** 实际采用的 Vue 大版本（v1.4.19 T18，供调用方标注产物） */
+  vueVersion: 2 | 3;
 }
 
 /**
@@ -73,11 +91,15 @@ interface VueRenderContext {
   usePublicCdn: boolean;
   /** 目标构建器（v1.4.18，决定图片资源引用形态） */
   bundler: BundlerKind;
-  /** 脚本区 import 集合（ESM 资源引用回传到 script setup） */
+  /** 脚本区 import 集合（ESM 资源引用回传到 script 区） */
   imports: Set<string>;
   sceneName: string;
   fileKey: string;
   svgRenderer: SvgInlineRenderer;
+  /** 当前组件名（v1.4.19 T14：渲染器上下文） */
+  componentName: string;
+  /** 父级节点在样式渲染器中注册的类名（v1.4.19 T16：Less/Sass 嵌套归属） */
+  parentStyleIdentifier?: string;
 }
 
 const DEFAULT_VUE_OPTIONS: Required<VueCodeGenOptions> = {
@@ -89,6 +111,8 @@ const DEFAULT_VUE_OPTIONS: Required<VueCodeGenOptions> = {
   usePublicCdn: true,
   bundler: 'none',
   skipEnhancements: false,
+  inference: {},
+  vueVersion: 3,
 };
 
 // ============ VueGenerator 类 ============
@@ -124,7 +148,8 @@ export class VueGenerator {
     const designSystem = createDesignSystemAnalyzer();
     const responsiveInferrer = createResponsiveInferrer();
     // v1.4.18（T7/T8）：样式方案注册表校验 + 渲染器工厂（tailwind/unocss 共用原子类映射；attributify 属性化）
-    assertStyleFormatSupported(opts.styleFormat ?? 'tailwind', STYLE_FORMATS_NEW_PIPELINE);
+    // v1.4.19 T14–T17：追加框架矩阵校验（styled/emotion/vanilla-extract/panda 仅 React，Vue 选择时显式抛错不降级）
+    assertStyleFormatSupported(opts.styleFormat ?? 'tailwind', STYLE_FORMATS_NEW_PIPELINE, undefined, 'vue');
     const styleRenderer = createStyleRenderer(opts.styleFormat ?? 'tailwind', {
       framework: 'vue',
       unocssMode: opts.unocssMode ?? 'wind',
@@ -146,6 +171,15 @@ export class VueGenerator {
       reports.a11y = a11yEnhancer.enhance(context.node);
       reports.designSystem = designSystem.analyze(context);
       reports.responsive = responsiveInferrer.infer(context);
+      // v1.4.19 T21：智能推断（布局/图标/主题/动效，只建议不改写显式样式）
+      reports.smartInference = createSmartInferrer().infer(context.node, {
+        framework: 'vue',
+        switches: opts.inference,
+      });
+      // v1.4.19 T22：语义推断（列表数据化示例 + 语义命名，仅输出建议）
+      reports.semantic = createSemanticInferrer().infer(context.node, {
+        framework: 'vue',
+      });
     }
 
     const templateContent = await this._renderNode(
@@ -162,6 +196,7 @@ export class VueGenerator {
         sceneName: opts.sceneName || '',
         fileKey: context.fileKey,
         svgRenderer: this._svgRenderer,
+        componentName,
       },
       true,
     );
@@ -171,23 +206,46 @@ export class VueGenerator {
       imports.add("import { publicCdnUrl } from '@/lib/asset-path';");
     }
 
-    // v1.4.18 T9：CSS Modules 同名 .module.css 旁路（模板以 $style.x 引用，SFC 经 <style module src> 外置）
-    const styleSidecar =
-      opts.styleFormat === 'css-modules' && styleRenderer.buildSidecar
-        ? styleRenderer.buildSidecar(componentName)
-        : undefined;
+    // 样式旁路文件（v1.4.18 T9 css-modules；v1.4.19 T16 less/sass；vanilla-extract 不支持 Vue 已在校验闸被拒）
+    const styleSidecar = styleRenderer.buildSidecar ? styleRenderer.buildSidecar(componentName) : undefined;
 
-    // v1.4.18 T10：Component Properties → Vue3 Props 类型推导
-    const generatedProps = generateVue3Props(context.node.componentProperties ?? [], {
-      typescript: opts.typescript,
-    });
-    if (opts.typescript && generatedProps.needsComponentImport) {
-      imports.add("import type { Component } from 'vue';");
+    // v1.4.18 T10：Component Properties → Props 类型推导
+    // v1.4.19 T18：按 vueVersion 分流 Vue3 script setup / Vue2 Options API（模板与增强链完全一致）
+    const vueVersion: 2 | 3 = opts.vueVersion === 2 ? 2 : 3;
+    // v1.4.19 T21：智能推断以脚本头注释形式留痕；关开关（含 skipEnhancements）为空数组
+    const smartCommentLines = reports.smartInference ? formatSmartInferenceComments(reports.smartInference) : [];
+    // v1.4.19 T22：列表数据化/命名建议同样以脚本头注释留痕（slash 风格）
+    const semanticCommentLines = reports.semantic ? formatSemanticComments(reports.semantic, 'slash') : [];
+    const advisoryCommentLines = [...smartCommentLines, ...semanticCommentLines];
+    let scriptBlock: string;
+    if (vueVersion === 2) {
+      const vue2Props = generateVue2Props(context.node.componentProperties ?? [], {
+        typescript: opts.typescript,
+      });
+      scriptBlock = this._generateOptionsApiScript(
+        componentName,
+        opts.typescript,
+        Array.from(imports),
+        vue2Props,
+        advisoryCommentLines,
+      );
+    } else {
+      const generatedProps = generateVue3Props(context.node.componentProperties ?? [], {
+        typescript: opts.typescript,
+      });
+      if (opts.typescript && generatedProps.needsComponentImport) {
+        imports.add("import type { Component } from 'vue';");
+      }
+      scriptBlock = this._generateScriptSetup(
+        componentName,
+        opts.typescript,
+        Array.from(imports),
+        generatedProps,
+        advisoryCommentLines,
+      );
     }
-
-    const scriptSetup = this._generateScriptSetup(componentName, opts.typescript, Array.from(imports), generatedProps);
     const template = `<template>\n${templateContent}\n</template>`;
-    const style = this._generateStyle(opts.styleFormat, componentName);
+    const style = this._generateStyle(styleSidecar);
 
     const lines: string[] = [];
     lines.push(template);
@@ -199,7 +257,7 @@ export class VueGenerator {
     lines.push(' - 补充 Props/Emits 类型定义');
     lines.push('-->');
     lines.push('');
-    lines.push(scriptSetup);
+    lines.push(scriptBlock);
     lines.push('');
     lines.push(style);
     lines.push('');
@@ -234,6 +292,7 @@ export class VueGenerator {
       imports: Array.from(imports),
       styleHints: [...(styleRenderer.hints ?? [])],
       styleSidecar,
+      vueVersion,
     };
   }
 
@@ -290,7 +349,12 @@ export class VueGenerator {
       return `${indent}<!-- TODO: 引入并使用项目组件 ${compName} -->\n${indent}<${compName} />`;
     }
 
-    const mapping = styleRenderer.renderNode(node);
+    const mapping = styleRenderer.renderNode(node, {
+      framework: 'vue',
+      componentName: ctx.componentName,
+      isRoot,
+      parentIdentifier: ctx.parentStyleIdentifier,
+    });
     ctx.extensions.push(...(mapping.extensionsNeeded || []));
 
     // 收集 Tailwind 映射警告（去重后添加到上下文）
@@ -310,10 +374,10 @@ export class VueGenerator {
       extraTokens.push(...nodeEnhancements._flexFixes);
     }
 
-    // v1.4.18 T9：CSS Modules 下渲染器产出语义本地类名（$style.x），
+    // v1.4.18 T9 / v1.4.19 T16：css-module 绑定（css-modules/less/sass）渲染器产出语义本地类名（$style.x），
     // a11y/flexFixes 补丁都是 Tailwind 原子类，合入会引入未声明 token，故整体跳过；
     // attributify 属性化也不适用于模块类。
-    const isCssModulesFormat = styleRenderer.id === 'css-modules';
+    const isCssModuleBinding = styleRenderer.classBinding === 'css-module';
 
     // v1.4.18 T8：attributify 模式下安全 token 分流为无值模板属性；
     // 注意渲染器已做过一次分区（attributes + 回退 className），
@@ -321,7 +385,7 @@ export class VueGenerator {
     // 否则只对回退 class 再分区会把安全 token 整体丢弃。
     let className: string;
     let attributifyAttrs: string[] = [];
-    if (isCssModulesFormat) {
+    if (isCssModuleBinding) {
       className = mapping.className;
     } else if (mapping.attributes !== undefined) {
       const existingAttrTokens = mapping.attributes.map((attr) => attr.name);
@@ -334,9 +398,9 @@ export class VueGenerator {
       className = [mapping.className, ...extraTokens].filter(Boolean).join(' ');
     }
 
-    /** 输出 class 属性：CSS Modules 走 $style 动态绑定（kebab 本地名必须方括号访问），其余走静态 class */
+    /** 输出 class 属性：css-module 绑定走 $style 动态绑定（kebab 本地名必须方括号访问），其余走静态 class */
     const buildClassAttr = (value: string): string =>
-      isCssModulesFormat ? `:class="$style['${value}']"` : `class="${value}"`;
+      isCssModuleBinding ? `:class="$style['${value}']"` : `class="${value}"`;
 
     const tag = this._selectTag(node);
 
@@ -359,10 +423,10 @@ export class VueGenerator {
     if (isImageNode) {
       const attrs: string[] = [];
 
-      // v1.4.18 T9：CSS Modules 没有原子工具类，object-fit:cover 以内联样式兜底；
+      // v1.4.18 T9 / v1.4.19 T16：css-module 绑定没有原子工具类，object-fit:cover 以内联样式兜底；
       // 其余管线继续追加 object-cover 原子类
       let imgClassName = className || '';
-      if (isCssModulesFormat) {
+      if (isCssModuleBinding) {
         if (imgClassName) attrs.push(buildClassAttr(imgClassName));
         attrs.push('style="object-fit: cover;"');
       } else {
@@ -486,8 +550,14 @@ export class VueGenerator {
 
     let children = '';
     if (node.children && node.children.length > 0) {
+      // v1.4.19 T16：向子节点传递当前样式归属（Less/Sass 嵌套输出；其他渲染器忽略）
+      const childCtx: VueRenderContext = {
+        ...ctx,
+        depth: ctx.depth + 1,
+        parentStyleIdentifier: mapping.className || undefined,
+      };
       const childResults = await Promise.all(
-        node.children.map((child) => this._renderNode(child, styleRenderer, { ...ctx, depth: ctx.depth + 1 }, false)),
+        node.children.map((child) => this._renderNode(child, styleRenderer, childCtx, false)),
       );
       children = childResults.filter(Boolean).join('\n');
     }
@@ -574,12 +644,16 @@ export class VueGenerator {
     useTs: boolean,
     imports: string[],
     generatedProps: GeneratedVue3Props,
+    smartCommentLines: string[] = [],
   ): string {
     const lang = useTs ? ' lang="ts"' : '';
     const lines: string[] = [];
 
     lines.push(`<script setup${lang}>`);
     lines.push(`// ${componentName} - Generated by figma-dev-tools v1.4.0`);
+    if (smartCommentLines.length > 0) {
+      lines.push(...smartCommentLines);
+    }
     lines.push('');
 
     if (imports.length > 0) {
@@ -611,19 +685,88 @@ export class VueGenerator {
   }
 
   /**
+   * 生成 Vue 2 Options API 的 <script> 块（v1.4.19 T18）。
+   *
+   * - TS 模式：`export default defineComponent({...})`，VARIANT/INSTANCE_SWAP 走 PropType 泛型；
+   * - JS 模式：`export default {...}`，VARIANT 以运行时 validator 白名单兜底；
+   * - 固定骨架 name/props/data/computed/methods，业务内容以 TODO 占位，
+   *   class 透传契约与 Vue3 输出保持一致。
+   *
+   * @param componentName - PascalCase 组件名（同时作为 name 选项）
+   * @param useTs - 是否 lang="ts"
+   * @param scriptImports - 模板区回传的 ESM import（资源引用等）
+   * @param generatedProps - Vue2 props 声明片段
+   * @param smartCommentLines - v1.4.19 T21 智能推断注释行（关闭时为空）
+   * @returns 完整 script 块文本
+   */
+  private _generateOptionsApiScript(
+    componentName: string,
+    useTs: boolean,
+    scriptImports: string[],
+    generatedProps: GeneratedVue2Props,
+    smartCommentLines: string[] = [],
+  ): string {
+    const lang = useTs ? ' lang="ts"' : '';
+    const lines: string[] = [];
+
+    lines.push(`<script${lang}>`);
+    lines.push(`// ${componentName} - Generated by figma-dev-tools v1.4.19 (Vue 2 Options API)`);
+    if (smartCommentLines.length > 0) {
+      lines.push(...smartCommentLines);
+    }
+    lines.push('');
+
+    if (useTs) {
+      // 组合 vue 导入：defineComponent 必有；PropType/Component 按 props 类型需要追加
+      const namedImports: string[] = ['defineComponent'];
+      if (generatedProps.needsPropType) namedImports.push('type PropType');
+      if (generatedProps.needsComponentImport) namedImports.push('type Component');
+      lines.push(`import { ${namedImports.join(', ')} } from 'vue';`);
+    }
+    if (scriptImports.length > 0) {
+      lines.push(...scriptImports);
+      lines.push('');
+    }
+
+    lines.push(useTs ? 'export default defineComponent({' : 'export default {');
+    lines.push(`  name: '${componentName}',`);
+    lines.push('  props: {');
+    // 始终保留 class 透传契约（与 Vue3 script setup 输出一致）
+    lines.push("    class: { type: String, default: '' },");
+    lines.push(...generatedProps.entries.map((entry) => `    ${entry}`));
+    lines.push('  },');
+    lines.push('  data() {');
+    lines.push('    return {');
+    lines.push('      // TODO: 在此声明响应式数据');
+    lines.push('    };');
+    lines.push('  },');
+    lines.push('  computed: {');
+    lines.push('    // TODO: 在此声明计算属性');
+    lines.push('  },');
+    lines.push('  methods: {');
+    lines.push('    // TODO: 在此实现交互方法（@click、表单提交等）');
+    lines.push('  },');
+    lines.push(useTs ? '});' : '};');
+    lines.push('</script>');
+
+    return lines.join('\n');
+  }
+
+  /**
    * 生成 SFC style 块。
    *
-   * - css-modules（v1.4.18 T9）：`<style module src="./X.module.css">` 外置同名旁路文件，
+   * - css-module 绑定（v1.4.18 T9 css-modules；v1.4.19 T16 less/sass）：
+   *   `<style module [lang="less|scss"] src="./X.module.*">` 外置同名旁路文件，
    *   模板即可使用 $style.x；
    * - tailwind/unocss：保持 1.4.17 的 scoped 占位块（历史快照契约）。
    *
-   * @param styleFormat - 样式方案
-   * @param componentName - 组件名（css-modules 旁路文件命名用）
+   * @param sidecar - 样式旁路文件描述（无则输出 scoped 占位块）
    * @returns SFC style 块文本
    */
-  private _generateStyle(styleFormat: string, componentName: string): string {
-    if (styleFormat === 'css-modules') {
-      return `<style module src="./${componentName}.module.css"></style>`;
+  private _generateStyle(sidecar?: StyleSidecarFile): string {
+    if (sidecar) {
+      const langAttr = sidecar.lang && sidecar.lang !== 'css' ? ` lang="${sidecar.lang}"` : '';
+      return `<style module${langAttr} src="./${sidecar.fileName}"></style>`;
     }
     return `<style scoped>\n/* 自定义样式（如需覆盖 Tailwind/UnoCSS） */\n</style>`;
   }

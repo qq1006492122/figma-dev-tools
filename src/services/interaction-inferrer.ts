@@ -24,6 +24,7 @@ import type { ProcessedNode } from '../types/nodes.js';
 export type InteractionType =
   | 'button-click'
   | 'form-submit'
+  | 'form-validation'
   | 'dialog-toggle'
   | 'sheet-toggle'
   | 'tabs-switch'
@@ -33,7 +34,9 @@ export type InteractionType =
   | 'switch-toggle'
   | 'hover-tooltip'
   | 'hover-popover'
-  | 'link-navigation';
+  | 'link-navigation'
+  | 'carousel-swipe'
+  | 'accordion-toggle';
 
 /**
  * 推断出的交互
@@ -214,6 +217,23 @@ export class InteractionInferrer {
       this._inferTabsSwitch(node);
     }
 
+    // ============ 6b. v1.4.19 T22：轮播（Swiper/Carousel/Slider，必须是容器） ============
+    if (
+      hasChildren &&
+      this._nameContains(name, ['carousel', 'swiper', 'slider', 'slideshow', '轮播', '走马灯', '幻灯片'])
+    ) {
+      this._inferCarouselSwipe(node);
+    }
+
+    // ============ 6c. v1.4.19 T22：手风琴/折叠面板（必须是容器；排除 item/header/content 子部件） ============
+    if (
+      hasChildren &&
+      !this._nameContains(name, ['item', 'header', 'content', 'body', 'trigger', '条目', '子项'])
+      && this._nameContains(name, ['accordion', 'collapse', 'collapsible', 'faq', '手风琴', '折叠面板'])
+    ) {
+      this._inferAccordionToggle(node);
+    }
+
     // ============ 7. 链接导航 ============
     if (role === 'link' || this._nameContains(name, ['link', '链接'])) {
       this._inferLinkNavigation(node);
@@ -265,6 +285,82 @@ export class InteractionInferrer {
       handlerName,
       confidence: 0.6,
       codeHint: `// TODO: 给 <form> 添加 onSubmit={${handlerName}}，为输入框添加 name 属性和 value/onChange`,
+    });
+
+    // v1.4.19 T22：表单校验占位（根据后代字段命名给出必填/格式/长度约束）
+    this._inferFormValidation(node, stateName, handlerName);
+  }
+
+  /**
+   * 推断表单校验占位（v1.4.19 T22）
+   *
+   * 扫描表单后代的输入型节点命名，仅对可识别字段（email/phone/password/required）
+   * 产出校验骨架；无识别字段时不输出，避免噪声。
+   *
+   * @param formNode - 表单容器节点
+   * @param stateName - 表单数据 state 名
+   * @param handlerName - 提交 handler 名（用于串联 validate 调用）
+   */
+  private _inferFormValidation(formNode: ProcessedNode, stateName: string, handlerName: string): void {
+    const fields: Array<{ key: string; rule: string }> = [];
+    const seen = new Set<string>();
+
+    const visit = (candidate: ProcessedNode): void => {
+      const candidateName = (candidate.name || '').toLowerCase();
+      const isField =
+        candidate.role === 'input' ||
+        this._nameContains(candidateName, ['input', 'email', 'phone', 'password', '邮箱', '手机', '密码']);
+      if (isField) {
+        let key = '';
+        let rule = "rules: [(v) => Boolean(v) || 'required']";
+        if (this._nameContains(candidateName, ['email', '邮箱'])) {
+          key = 'email';
+          rule = "rules: [(v) => /.+@.+\\..+/.test(v) || 'invalid email']";
+        } else if (this._nameContains(candidateName, ['phone', '手机'])) {
+          key = 'phone';
+          rule = "rules: [(v) => /^\\d{6,}$/.test(v) || 'invalid phone']";
+        } else if (this._nameContains(candidateName, ['password', '密码'])) {
+          key = 'password';
+          rule = "rules: [(v) => (v?.length ?? 0) >= 8 || 'min 8 chars']";
+        } else {
+          key = this._toCamelCase(candidate.name) || 'field';
+        }
+        if (!seen.has(key)) {
+          seen.add(key);
+          fields.push({ key, rule });
+        }
+      }
+      for (const child of candidate.children ?? []) visit(child);
+    };
+    for (const child of formNode.children ?? []) visit(child);
+
+    if (fields.length === 0) return;
+
+    const validateName = `validate${this._toPascalCase(formNode.name) || 'Form'}`;
+    const fieldsLiteral = fields.map((field) => `      ${field.key}: { ${field.rule} },`).join('\n');
+    if (!this._handlerSkeletons.some((skeleton) => skeleton.includes(validateName))) {
+      this._handlerSkeletons.push(
+        `  const ${validateName} = (): boolean => {
+    // TODO（示例）: 接入 zod / react-hook-form / vuelidate 等校验库替换此占位
+    const rules: Record<string, { rules: Array<(v: string) => boolean | string> }> = {
+${fieldsLiteral}
+    };
+    return Object.entries(rules).every(([key, field]) => field.rules.every((rule) => rule(${stateName}[key] as string) === true));
+  };`,
+      );
+    }
+
+    this._interactions.push({
+      nodeId: formNode.id,
+      nodeName: formNode.name,
+      type: 'form-validation',
+      handlerName: validateName,
+      relatedNodeId: formNode.id,
+      confidence: 0.55,
+      codeHint:
+        `// TODO: 在 ${handlerName} 内先调用 if (!${validateName}()) return;（字段：${fields
+          .map((field) => field.key)
+          .join(', ')}；示例骨架，建议替换为 zod/react-hook-form 等校验库）`,
     });
   }
 
@@ -468,6 +564,83 @@ export class InteractionInferrer {
       stateName,
       confidence: 0.7,
       codeHint: `// TODO: 添加 value={${stateName}} onValueChange={set${this._toPascalCase(stateName)}} defaultValue 改为 value`,
+    });
+  }
+
+  /**
+   * 推断轮播切换（v1.4.19 T22）
+   *
+   * 产出当前索引 state 与 prev/next（或 Swiper/Embla 接入）提示；
+   * 子节点含 dots/pagination/箭头命名时在 codeHint 中补充联动说明。
+   *
+   * @param node - 轮播容器节点
+   */
+  private _inferCarouselSwipe(node: ProcessedNode): void {
+    this._requiredReactImports.add('useState');
+    const nodeCamel = this._toCamelCase(node.name);
+    const stateName = nodeCamel && nodeCamel !== 'carousel' ? `${nodeCamel}Index` : 'carouselIndex';
+    const stateDecl = `  const [${stateName}, set${this._toPascalCase(stateName)}] = useState(0);`;
+    if (!this._stateDeclarations.some((s) => s.includes(`[${stateName},`))) {
+      this._stateDeclarations.push(stateDecl);
+    }
+
+    // 屏数：优先取 track/slides 包装层内的子项数，否则按直接子节点计
+    const trackChild = (node.children ?? []).find((child) =>
+      this._nameContains((child.name || '').toLowerCase(), ['track', 'slides', 'viewport', '轨道']),
+    );
+    const slideCount = (trackChild?.children ?? node.children ?? []).filter(
+      (child) => child.visible !== false,
+    ).length;
+    const hasDots = (node.children ?? []).some((child) =>
+      this._nameContains((child.name || '').toLowerCase(), ['dots', 'pagination', 'indicator', '指示点', '分页器']),
+    );
+    const hasArrows = (node.children ?? []).some((child) =>
+      this._nameContains((child.name || '').toLowerCase(), ['arrow', 'prev', 'next', 'chevron', '上一', '下一']),
+    );
+    const extras = [
+      hasArrows ? '上一张/下一张按钮绑定 setIndex((i) => Math.max/Min(...))' : '',
+      hasDots ? '指示点（dots）以 index === current 高亮并可点击跳转' : '',
+    ]
+      .filter(Boolean)
+      .join('；');
+
+    this._interactions.push({
+      nodeId: node.id,
+      nodeName: node.name,
+      type: 'carousel-swipe',
+      stateName,
+      confidence: 0.65,
+      codeHint:
+        `// TODO: 用 ${stateName} 驱动轨道位移（共 ${slideCount} 屏，示例：` +
+        `style={{ transform: 'translateX(-' + ${stateName} * 100 + '%)' }}）；` +
+        `复杂手势/循环建议接入 Swiper/Embla${extras ? `；${extras}` : ''}`,
+    });
+  }
+
+  /**
+   * 推断手风琴展开状态（v1.4.19 T22）
+   *
+   * @param node - 手风琴容器节点
+   */
+  private _inferAccordionToggle(node: ProcessedNode): void {
+    this._requiredReactImports.add('useState');
+    const nodeCamel = this._toCamelCase(node.name);
+    const stateName = nodeCamel && !['accordion', 'collapse', 'faq'].includes(nodeCamel) ? `${nodeCamel}OpenItems` : 'openItems';
+    const stateDecl = `  const [${stateName}, set${this._toPascalCase(stateName)}] = useState<string[]>([]);`;
+    if (!this._stateDeclarations.some((s) => s.includes(`[${stateName},`))) {
+      this._stateDeclarations.push(stateDecl);
+    }
+
+    const itemCount = (node.children ?? []).filter((child) => child.visible !== false).length;
+    this._interactions.push({
+      nodeId: node.id,
+      nodeName: node.name,
+      type: 'accordion-toggle',
+      stateName,
+      confidence: 0.65,
+      codeHint:
+        `// TODO: 每项 header 可点击切换 ${stateName}（${itemCount} 项；单开模式在切换时替换数组，多开用 includes/filter 增删），` +
+        "内容区以条件渲染展开并补 aria-expanded/aria-controls，箭头随状态 rotate-180",
     });
   }
 

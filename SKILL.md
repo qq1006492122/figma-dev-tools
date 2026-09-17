@@ -1,13 +1,13 @@
 ---
 name: 'figma-dev-tools'
 description:
-  'Figma 设计到代码增强工具集 v1.4.18 -
-  20个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、支持React+Tailwind高保真代码生成及Vue/Svelte/HTML等任意框架（通过框架无关结构化数据）。解决div
+  'Figma 设计到代码增强工具集 v1.4.19 -
+  22个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、React（9套样式）与Vue（Vue3 setup/Vue2 Options API，5套样式）一级高保真代码生成及整页批量生成，Svelte/HTML等其他框架通过框架无关结构化数据支持；智能推断仅以注释/报告给建议（Grid/图标/暗色/动效、交互骨架、列表数据化、语义命名）。解决div
   soup、上下文爆炸、hex写死、资源路径处理、深层嵌套截断、层级混乱等问题。支持Trae/VS
   Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。'
 ---
 
-# Figma Dev Tools v1.4.18 - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.4.19 - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 
@@ -45,11 +45,11 @@ description:
 | 7   | **禁止 emoji 图标**              | SVG 图标通过 publicCdnUrl 引用                               | 使用 ❌✅📌 等 emoji 代替图标        |
 | 8   | **新色必须 @theme 扩展**         | 在 CSS 中 `@theme inline { --color-xxx: ... }`               | 直接写 `bg-[#new-color]`             |
 | 9   | **Token 安全**                   | .env 中配置，不提交 Git                                      | 将 Token 硬编码在代码或配置里        |
-| 10  | **非React框架用structured_data** | Vue/Svelte/HTML：先调用 `figma_get_structured_data` 获取JSON | 非React框架误用 `figma_generate_jsx` |
+| 10  | **框架选对生成工具（v1.4.19）** | Vue 项目直接用 `figma_generate_vue`（Vue3/Vue2）；整页用 `figma_batch_generate`；Svelte/HTML/Angular/Solid 仍先 `figma_get_structured_data` | Vue 误用 `figma_generate_jsx`；Svelte 误用任一代码生成工具 |
 
 ---
 
-## 🚀 标准工作流（v1.3.2）
+## 🚀 标准工作流（v1.4.19：A React / B 其他框架 / C Vue 一级 / D 批量）
 
 > **根据目标框架选择对应工作流，严格按步骤调用工具，不要跳步！**
 
@@ -71,7 +71,9 @@ Step 6: 人工微调               ← 处理TODO、复用组件、加交互
 Step 7: 高保真检查             ← 对照下方检查清单逐项验证
 ```
 
-### 工作流 B：Vue/Svelte/HTML/Angular/Solid 等任意框架（v1.3.2 新）
+### 工作流 B：Svelte/HTML/Angular/Solid 等任意框架（v1.3.2 新）
+
+> 注：Vue 自 v1.4.19 起为一级支持，请走工作流 C；本工作流用于 Vue 以外的非 React 框架。
 
 ```
 Step 1: figma_get_metadata        ← 高层概览（~4KB，了解结构）
@@ -88,6 +90,36 @@ Step 6: figma_download_assets     ← 下载图片/SVG资源（如需要）
    ↓
 Step 7: 人工微调 + 还原度检查
 ```
+
+### 工作流 C：Vue 一级支持（v1.4.19 新）
+
+```
+Step 1: figma_get_metadata       ← 高层概览
+   ↓
+Step 2: figma_get_design_context ← 目标区块精简上下文
+   ↓
+Step 3: figma_get_screenshot     ← 视觉基准截图（2x）
+   ↓
+Step 4: figma_generate_vue       ← 一键生成 .vue SFC
+   │   · vueVersion=3（默认）：<script setup lang="ts">
+   │   · vueVersion=2：Options API（defineComponent + PropType/validator）
+   │   · styleFormat：tailwind / unocss / css-modules / less / sass
+   │     （styled/emotion/vanilla-extract/panda 为 React 专属，会触网前报错）
+   ↓
+Step 5: figma_download_assets    ← 下载图片/SVG 资源
+   ↓
+Step 6: 人工微调                 ← 智能建议仅在注释中：交互骨架需自行接 Pinia/vue-router/表单库
+   ↓
+Step 7: 高保真检查
+```
+
+### 工作流 D：整页批量生成（v1.4.19 新）
+
+- 页面/大 Frame 直接调 `figma_batch_generate`：自动按 Header/Hero/Features/Section/Sticky/Footer 语义拆区块，逐块产出组件文件 + `index.ts` barrel + 依赖图。
+- `framework: 'react' | 'vue'`（Vue 配 `vueVersion: 2 | 3`）；其余样式/`inference` 参数与单组件工具一致。
+- 需要精确控制时传 `nodeIds` 显式指定区块；`componentNamePrefix` 给区块组件统一前缀（如 `Landing`）。
+- MCP 不写磁盘；CLI `figma-dev batch <url> --out <dir>` 直接落盘多文件目录。
+- 智能推断产出（T21 四类 + T22 交互/列表/命名）**全部是头注释与 structuredContent 里的建议，不自动改写显式样式/代码**；不需要时用 `inference` 分项关闭或 `skipEnhancements` 总闸关闭。
 
 ---
 
@@ -223,7 +255,7 @@ Step 7: 人工微调 + 还原度检查
 
 ---
 
-## 工作流 B 详细步骤（Vue/Svelte/HTML 等任意框架）
+## 工作流 B 详细步骤（Svelte/HTML/Angular/Solid 等任意框架；Vue 请看工作流 C）
 
 ### Step 1: 获取高层结构概览
 
@@ -418,10 +450,12 @@ Variables、Svelte 的 CSS custom properties 等）。
 ### 工具调用正确性
 
 - [ ] **调用顺序正确**：React: metadata → design_context → screenshot →
-      generate_jsx → download_assets；其他框架: metadata → structured_data →
-      screenshot → (tokens) → 生成代码
-- [ ] **非React框架未误用generate_jsx**：Vue/Svelte/HTML 使用
-      `figma_get_structured_data`
+      generate_jsx → download_assets；Vue（v1.4.19 一级）: metadata →
+      design_context → screenshot → generate_vue → download_assets；
+      其他框架（Svelte/HTML/Angular/Solid）: metadata → structured_data →
+      screenshot → (tokens) → 生成代码；整页可改用 figma_batch_generate
+- [ ] **框架工具未混用**：Vue 用 `figma_generate_vue`（不是 generate_jsx）；
+      Svelte/HTML 等只用 `figma_get_structured_data`
 - [ ] **未使用旧版工具**：React 用 `figma_generate_jsx` 而非
       `figma_generate_component`
 - [ ] **maxDepth 合理**：大区块拆分处理，单次 maxDepth 不超过 8（structured_data 不超过10）
@@ -489,7 +523,8 @@ Variables、Svelte 的 CSS custom properties 等）。
 | 颜色看起来偏色/不对              | oklch 色彩空间在某些浏览器渲染差异，或透明度丢失 | 尝试切换 `colorFormat: "hex"`；检查 fills 中的 opacity 属性                |
 | 图片加载 404                     | 路径错误或未用正确引用方式                       | 确认资源已下载；React 用 `publicCdnUrl()`，其他框架用对应路径方式          |
 | 大区块生成时间超长/截断          | 节点数过多（>100），单次深度太大                 | 拆分为多个子区块分别处理                                                   |
-| Vue/Svelte 项目误用 generate_jsx | 工具选择错误                                     | 使用 `figma_get_structured_data` 获取框架无关JSON，再生成对应框架代码      |
+| Svelte/HTML/Angular/Solid 误用 generate_jsx / generate_vue | 工具选择错误                             | 使用 `figma_get_structured_data` 获取框架无关JSON，再生成对应框架代码      |
+| Vue 项目误用 generate_jsx（v1.4.19 起） | Vue 已有一级生成工具                     | 改用 `figma_generate_vue`（`vueVersion: 2|3`，5 套样式）；整页用 `figma_batch_generate` |
 
 ### Mac 窗口交通灯标准组件（React，可直接复用）
 
@@ -516,13 +551,13 @@ function TrafficLights() {
 
 ---
 
-## 🔧 MCP 工具快速参考（19个）
+## 🔧 MCP 工具快速参考（22个）
 
 > 调用参数格式：直接以 JSON 对象传入，无需额外包装。
 
 ### 核心工作流工具
 
-**React 专用（v1.0+）：**
+**React 专用（v1.0+；v1.4.19 支持 9 套 styleFormat）：**
 
 | 工具                       | 一句话用途             | 最小调用示例                                                  |
 | -------------------------- | ---------------------- | ------------------------------------------------------------- |
@@ -532,11 +567,18 @@ function TrafficLights() {
 | `figma_generate_jsx`       | ⭐ 一键生成React TSX   | `{ figmaUrl: "...", componentName: "Xxx", sceneName: "xxx" }` |
 | `figma_download_assets`    | 下载图片/SVG到public   | `{ fileKey: "...", sceneName: "xxx", assetNodeIds: ["..."] }` |
 
-**多框架支持（v1.3.2 新）：**
+**Vue 一级支持 + 整页批量（v1.4.19 新）：**
+
+| 工具                        | 一句话用途                                        | 最小调用示例                                                                   |
+| --------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `figma_generate_vue`        | ⭐ 一键生成 Vue3/Vue2 SFC（5 套样式）             | `{ figmaUrl: "...", componentName: "Xxx", vueVersion: 3, styleFormat: "sass" }` |
+| `figma_batch_generate`      | ⭐ 整页语义区块批量生成 + barrel（React/Vue）      | `{ figmaUrl: "...", nodeId: "1-2", framework: "vue", componentNamePrefix: "Landing" }` |
+
+**多框架支持（v1.3.2 新，Svelte/HTML/Angular/Solid 等）：**
 
 | 工具                        | 一句话用途                               | 最小调用示例                       |
 | --------------------------- | ---------------------------------------- | ---------------------------------- |
-| `figma_get_structured_data` | ⭐ 框架无关JSON结构（Vue/Svelte/HTML等） | `{ figmaUrl: "...", maxDepth: 8 }` |
+| `figma_get_structured_data` | ⭐ 框架无关JSON结构（非React/Vue 框架）  | `{ figmaUrl: "...", maxDepth: 8 }` |
 
 ### 辅助工具
 

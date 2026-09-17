@@ -1010,6 +1010,25 @@ export type StyleFormat =
 export type ColorFormat = 'hex' | 'rgb' | 'oklch' | 'hsl';
 
 /**
+ * v1.4.19 T21 智能推断分项开关（全部缺省开启；skipEnhancements 为总闸）。
+ *
+ * - grid：CSS Grid / sticky / fixed / absolute 参照物布局推断
+ * - icons：≤48px 图标节点 → Lucide/Iconify/内联 SVG 建议
+ * - darkMode：dark/light 语义或深色填充 → dark: 前缀策略
+ * - motion：transition / hover / 持续时间类建议
+ */
+export interface SmartInferenceSwitches {
+  /** 布局推断（Grid/定位/参照物） */
+  readonly grid?: boolean;
+  /** 图标识别建议 */
+  readonly icons?: boolean;
+  /** 深色模式策略 */
+  readonly darkMode?: boolean;
+  /** 交互动效建议 */
+  readonly motion?: boolean;
+}
+
+/**
  * 组件代码生成选项
  */
 export interface CodeGenOptions {
@@ -1035,6 +1054,8 @@ export interface CodeGenOptions {
   readonly includeChildren?: boolean;
   /** 是否跳过增强功能（flex-fixer/a11y/design-system/responsive） */
   readonly skipEnhancements?: boolean;
+  /** v1.4.19 T21：智能推断分项开关（缺省全开） */
+  readonly inference?: SmartInferenceSwitches;
 }
 
 /**
@@ -1126,6 +1147,88 @@ export interface EnhancementReports {
     readonly classSuggestions: ReadonlyArray<unknown>;
     readonly layoutSuggestions: ReadonlyArray<unknown>;
   };
+  /**
+   * 智能推断报告（v1.4.19 T21：布局/图标/深色模式/动效，仅建议不改写显式样式）
+   *
+   * 此处为结构型声明（与 services/smart-inferrer.ts 的 SmartInferenceResult 同构），
+   * 避免 types 层反向依赖 services 层形成循环导入。
+   */
+  readonly smartInference?: {
+    /** 实际生效的四项开关 */
+    readonly enabled: {
+      readonly grid: boolean;
+      readonly icons: boolean;
+      readonly darkMode: boolean;
+      readonly motion: boolean;
+    };
+    /** 建议列表 */
+    readonly suggestions: ReadonlyArray<{
+      /** 类别：grid | icon | dark-mode | motion */
+      readonly category: string;
+      /** Figma 节点 ID */
+      readonly nodeId: string;
+      /** Figma 节点名 */
+      readonly nodeName: string;
+      /** 建议正文 */
+      readonly message: string;
+      /** 建议原子类 */
+      readonly utilityClass?: string;
+      /** 代码片段提示 */
+      readonly codeHint?: string;
+    }>;
+    /** 各类别建议计数 */
+    readonly counts: Readonly<Record<string, number>>;
+  };
+  /**
+   * 语义推断报告（v1.4.19 T22：列表数据化建议 + 语义命名建议，仅建议不改写）。
+   *
+   * 此处为结构型声明（与 services/semantic-inferrer.ts 的 SemanticInferenceResult 同构），
+   * 避免 types 层反向依赖 services 层形成循环导入。
+   */
+  readonly semantic?: {
+    /** 列表→数据结构建议 */
+    readonly dataStructures: ReadonlyArray<{
+      /** 固定类别 list-data */
+      readonly category: string;
+      /** 列表容器节点 ID */
+      readonly nodeId: string;
+      /** 列表容器节点名 */
+      readonly nodeName: string;
+      /** 建议的子项组件名 */
+      readonly itemComponentName: string;
+      /** 建议的 TS 接口名 */
+      readonly interfaceName: string;
+      /** 重复子项数量 */
+      readonly repeatedCount: number;
+      /** 推断字段 */
+      readonly fields: ReadonlyArray<{
+        readonly name: string;
+        readonly tsType: string;
+        readonly sample?: string;
+      }>;
+      /** TS interface 示例代码 */
+      readonly interfaceCode: string;
+      /** mock 数据示例代码 */
+      readonly mockCode: string;
+      /** 框架渲染示例（.map() / v-for） */
+      readonly renderHint: string;
+    }>;
+    /** 语义命名建议 */
+    readonly nameSuggestions: ReadonlyArray<{
+      /** 固定类别 name */
+      readonly category: string;
+      /** 节点 ID */
+      readonly nodeId: string;
+      /** 当前节点名 */
+      readonly nodeName: string;
+      /** 建议名称（PascalCase） */
+      readonly suggestedName: string;
+      /** 建议理由 */
+      readonly reason: string;
+    }>;
+    /** 计数 */
+    readonly counts: Readonly<Record<string, number>>;
+  };
 }
 
 /**
@@ -1161,17 +1264,22 @@ export interface CodeGenResult {
     readonly code: string;
   }>;
   /**
-   * 同名旁路样式文件（v1.4.18 T9 新增，仅 styleFormat='css-modules' 时存在）
+   * 同名旁路样式文件（v1.4.18 T9 css-modules；v1.4.19 T16 扩展 less/sass）
    *
-   * React：组件经 `import styles from './X.module.css'` 以 styles.x 引用；
-   * Vue：SFC 经 `<style module src="./X.module.css">` 外置，模板以 $style.x 引用。
+   * React：组件经 `import styles from './X.module.*'` 以 styles.x 引用；
+   * Vue：SFC 经 `<style module [lang] src="./X.module.*">` 外置，模板以 $style.x 引用。
    * 工具只描述文件内容，由调用方决定落盘或展示，不直接写入用户项目目录。
    */
   readonly styleSidecar?: {
-    /** 文件名（不含目录，与组件同目录，如 'Card.module.css'） */
+    /** 文件名（不含目录，与组件同目录，如 'Card.module.css' / 'Card.module.less'） */
     readonly fileName: string;
     /** 文件完整内容 */
     readonly content: string;
+    /**
+     * 样式语言（v1.4.19 T16）：css（默认，css-modules）| less | scss；
+     * vanilla-extract 的 .css.ts 另有 reactImport 元信息，由具体渲染器类型描述。
+     */
+    readonly lang?: string;
   };
 }
 

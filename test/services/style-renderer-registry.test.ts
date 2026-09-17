@@ -1,10 +1,10 @@
 /**
- * 样式渲染器注册表测试（v1.4.18，T7）
+ * 样式渲染器注册表测试（v1.4.18 T7 建立；v1.4.19 T14–T17 翻转为 9 方案新管线）
  *
  * 锁定单一数据源：
  * - 11 值 StyleFormat 全登记，枚举顺序稳定（CLI/MCP/文档共用）；
  * - available / planned 状态与版本路线图；
- * - 管线支持集合（新 React/Vue 管线、legacy React 管线）；
+ * - 管线支持集合（新 React/Vue 管线、legacy React 管线）与框架矩阵；
  * - 未启用/未知值显式抛 i18n 错误，绝不静默错配到 tailwind。
  */
 import { describe, expect, it } from 'vitest';
@@ -15,6 +15,7 @@ import {
   buildStyleFormatHelp,
   getStyleDescriptor,
   listStyleFormatsByStatus,
+  NEW_PIPELINE_FRAMEWORK_SUPPORT,
   STYLE_FORMATS_LEGACY_REACT,
   STYLE_FORMATS_NEW_PIPELINE,
   UnsupportedStyleFormatError,
@@ -56,22 +57,39 @@ describe('T7 样式渲染器注册表（单一数据源）', () => {
     }
   });
 
-  it('状态分组：批次一可用 4 项；styled/emotion/less/sass/vanilla-extract 规划 v1.4.19', () => {
+  it('状态分组：v1.4.19 起 10 项可用（含新管线 6 方案）；css-variables 规划 v1.5.0', () => {
     expect(listStyleFormatsByStatus('available')).toEqual([
       'tailwind',
       'unocss',
       'css-modules',
+      'styled',
+      'emotion',
+      'less',
+      'sass',
+      'vanilla-extract',
+      'panda',
       'inline-styles',
     ]);
-    const planned = listStyleFormatsByStatus('planned');
-    expect(planned).toEqual(['styled', 'emotion', 'less', 'sass', 'vanilla-extract', 'panda', 'css-variables']);
+    expect(listStyleFormatsByStatus('planned')).toEqual(['css-variables']);
+    expect(getStyleDescriptor('css-variables').plannedVersion).toBe('1.5.0');
     for (const id of ['styled', 'emotion', 'less', 'sass', 'vanilla-extract', 'panda'] as const) {
-      expect(getStyleDescriptor(id).plannedVersion).toBe('1.4.19');
+      expect(getStyleDescriptor(id).status).toBe('available');
+      expect(getStyleDescriptor(id).plannedVersion).toBeUndefined();
     }
   });
 
-  it('管线支持集合：新管线 tailwind/unocss/css-modules（T9 起）；legacy React 三方案', () => {
-    expect(STYLE_FORMATS_NEW_PIPELINE).toEqual(['tailwind', 'unocss', 'css-modules']);
+  it('管线支持集合：v1.4.19 新管线 9 方案；legacy React 三方案', () => {
+    expect(STYLE_FORMATS_NEW_PIPELINE).toEqual([
+      'tailwind',
+      'unocss',
+      'css-modules',
+      'styled',
+      'emotion',
+      'less',
+      'sass',
+      'vanilla-extract',
+      'panda',
+    ]);
     expect(STYLE_FORMATS_LEGACY_REACT).toEqual(['tailwind', 'css-modules', 'inline-styles']);
   });
 
@@ -81,18 +99,49 @@ describe('T7 样式渲染器注册表（单一数据源）', () => {
     expect(assertStyleFormatSupported('inline-styles', STYLE_FORMATS_LEGACY_REACT, 'zh-CN')).toBe('inline-styles');
   });
 
-  it('planned 值在新管线抛中英双语错误，消息含计划版本与可用列表', () => {
-    const zh = () => assertStyleFormatSupported('styled', STYLE_FORMATS_NEW_PIPELINE, 'zh-CN');
-    const en = () => assertStyleFormatSupported('styled', STYLE_FORMATS_NEW_PIPELINE, 'en-US');
+  it('v1.4.19 框架矩阵：React 专属方案在 Vue 侧抛中英双语错误（TR-14.1 显式拒绝不静默降级）', () => {
+    // React 侧：全部 9 方案通过
+    for (const id of STYLE_FORMATS_NEW_PIPELINE) {
+      expect(assertStyleFormatSupported(id, STYLE_FORMATS_NEW_PIPELINE, 'zh-CN', 'react')).toBe(id);
+    }
+    // Vue 侧：双框架方案通过
+    for (const id of ['tailwind', 'unocss', 'css-modules', 'less', 'sass'] as const) {
+      expect(assertStyleFormatSupported(id, STYLE_FORMATS_NEW_PIPELINE, 'en-US', 'vue')).toBe(id);
+    }
+    const zh = () => assertStyleFormatSupported('styled', STYLE_FORMATS_NEW_PIPELINE, 'zh-CN', 'vue');
+    const en = () => assertStyleFormatSupported('panda', STYLE_FORMATS_NEW_PIPELINE, 'en-US', 'vue');
     expect(zh).toThrow(UnsupportedStyleFormatError);
     expect(zh).toThrow(/styled/);
-    expect(zh).toThrow(/1\.4\.19/);
-    expect(zh).toThrow(/tailwind/);
+    expect(zh).toThrow(/vue/);
+    expect(zh).toThrow(/react/);
     const err = catchError(zh);
     expect(err).toBeInstanceOf(UnsupportedStyleFormatError);
     expect((err as UnsupportedStyleFormatError).format).toBe('styled');
-    // 英文消息结构不同（planned for v...）
-    expect(en).toThrow(/planned for v1\.4\.19/i);
+    expect(en).toThrow(/does not support the vue framework/i);
+    expect(en).toThrow(/panda/);
+    expect(en).not.toThrow(/样式方案/);
+  });
+
+  it('框架矩阵数据源：styled/emotion/vanilla-extract/panda 仅 react；less/sass 双框架', () => {
+    expect(NEW_PIPELINE_FRAMEWORK_SUPPORT.styled).toEqual(['react']);
+    expect(NEW_PIPELINE_FRAMEWORK_SUPPORT.emotion).toEqual(['react']);
+    expect(NEW_PIPELINE_FRAMEWORK_SUPPORT['vanilla-extract']).toEqual(['react']);
+    expect(NEW_PIPELINE_FRAMEWORK_SUPPORT.panda).toEqual(['react']);
+    expect(NEW_PIPELINE_FRAMEWORK_SUPPORT.less).toEqual(['react', 'vue']);
+    expect(NEW_PIPELINE_FRAMEWORK_SUPPORT.sass).toEqual(['react', 'vue']);
+  });
+
+  it('planned 值在新管线抛中英双语错误，消息含计划版本与可用列表（css-variables v1.5.0）', () => {
+    const zh = () => assertStyleFormatSupported('css-variables', STYLE_FORMATS_NEW_PIPELINE, 'zh-CN');
+    const en = () => assertStyleFormatSupported('css-variables', STYLE_FORMATS_NEW_PIPELINE, 'en-US');
+    expect(zh).toThrow(UnsupportedStyleFormatError);
+    expect(zh).toThrow(/css-variables/);
+    expect(zh).toThrow(/1\.5\.0/);
+    expect(zh).toThrow(/tailwind/);
+    const err = catchError(zh);
+    expect(err).toBeInstanceOf(UnsupportedStyleFormatError);
+    expect((err as UnsupportedStyleFormatError).format).toBe('css-variables');
+    expect(en).toThrow(/planned for v1\.5\.0/i);
     expect(en).not.toThrow(/样式方案/);
   });
 

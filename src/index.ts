@@ -19,10 +19,11 @@ import { fileURLToPath } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-import { initI18nSync } from './i18n/index.js';
+import { getI18n, initI18nSync } from './i18n/index.js';
 import type { A11yReportEntry } from './services/a11y-enhancer.js';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
 import { detectBundler, type BundlerKind } from './services/bundler-detector.js';
@@ -66,7 +67,17 @@ import {
 } from './services/visual-approximation.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
 import { createVueGenerator } from './services/vue-generator.js';
-import type { CodeGenResult, DesignTokens, FigmaNode, TailwindExtension } from './types.js';
+// v1.4.19 T20：批量生成（页面区块拆分 + 多文件 + barrel + 依赖图）
+import { createBatchGenerator } from './services/batch-generator.js';
+import { selectBlocksByIds, splitPageIntoBlocks } from './services/block-splitter.js';
+import type {
+  CodeGenResult,
+  DesignTokens,
+  FigmaNode,
+  Framework,
+  SmartInferenceSwitches,
+  TailwindExtension,
+} from './types.js';
 import type { ProcessedNode, StructuredNode } from './types/nodes.js';
 import type { FigmaApiError } from './utils/errors.js';
 import { isFigmaApiError, isFigmaDevError } from './utils/errors.js';
@@ -290,15 +301,17 @@ const server = new McpServer({
 });
 
 /**
- * 样式方案参数（v1.4.18，T7）：
+ * 样式方案参数（v1.4.18 T7；v1.4.19 T14–T17 六方案翻转为可用）：
  * schema 层暴露注册表全部 11 个方案（单一数据源），
- * handler 层按管线用 assertStyleFormatSupported 显式拒绝未启用值，
- * 用户可看到「计划于 1.4.19/1.5.0 支持」的提示而非静默错配。
+ * handler 层按管线/框架用 assertStyleFormatSupported 显式拒绝未启用值，
+ * 用户可看到「计划于 1.5.0 支持」或「该方案不支持 vue 框架」的提示而非静默错配。
  */
 const STYLE_FORMAT_PARAM = z
   .enum(ALL_STYLE_FORMATS as [StyleFormat, ...StyleFormat[]])
   .default('tailwind')
-  .describe('样式方案：tailwind（默认）/unocss 已启用；styled/emotion/less/sass/vanilla-extract/panda 计划 1.4.19；css-variables 计划 1.5.0');
+  .describe(
+    '样式方案：tailwind（默认）/unocss/css-modules/styled/emotion/less/sass/vanilla-extract/panda 已启用（styled/emotion/vanilla-extract/panda 仅 React；less/sass 支持 React+Vue）；css-variables 计划 1.5.0',
+  );
 
 /**
  * legacy React 管线（figma_generate_component）样式参数：
@@ -308,6 +321,35 @@ const LEGACY_STYLE_FORMAT_PARAM = z
   .enum([...STYLE_FORMATS_LEGACY_REACT])
   .default('tailwind')
   .describe('样式格式：tailwind（默认）| css-modules | inline-styles');
+
+/**
+ * v1.4.19 T21 智能推断分项开关：
+ * 缺省四项全开；仅产出建议（注释/报告），不改写显式样式；skipEnhancements 为总闸。
+ * Per-category smart inference toggles; all default on; advisory only (no explicit-style rewrites).
+ */
+const INFERENCE_PARAM = z
+  .object({
+    grid: z
+      .boolean()
+      .optional()
+      .describe('布局推断：CSS Grid 行列/间隙、sticky/fixed/absolute 参照物（默认开）/ Grid & positioning inference (default on)'),
+    icons: z
+      .boolean()
+      .optional()
+      .describe('图标识别：≤48px 语义图标 → Lucide/Iconify/内联 SVG 建议（默认开）/ Icon recognition (default on)'),
+    darkMode: z
+      .boolean()
+      .optional()
+      .describe('深色模式：dark/light 语义 → dark: 前缀策略建议（默认开）/ Dark-mode strategy (default on)'),
+    motion: z
+      .boolean()
+      .optional()
+      .describe('交互动效：transition/hover/持续时间类建议（默认开）/ Motion hints (default on)'),
+  })
+  .optional()
+  .describe(
+    '智能推断分项开关（v1.4.19，缺省全开，仅建议不改写）/ Smart inference switches (v1.4.19, all on by default, advisory only)',
+  );
 
 server.registerTool(
   'figma_parse_url',
@@ -1438,6 +1480,7 @@ v1.2.0 新增强化功能：
         .default(false)
         .describe('UnoCSS attributify 模式（v1.4.18新增，仅 styleFormat=unocss 生效；默认 false=wind 模式）'),
       skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能'),
+      inference: INFERENCE_PARAM,
       skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示'),
       accessToken: z.string().optional().describe('Figma Access Token'),
     }),
@@ -1448,7 +1491,342 @@ v1.2.0 新增强化功能：
       openWorldHint: false,
     },
   },
-  async ({
+  async (params) =>
+    executeGenerateCodeTool({
+      ...params,
+      framework: params.framework,
+      vueVersion: 3,
+    }),
+);
+
+server.registerTool(
+  'figma_generate_vue',
+  {
+    title: '一键生成 Vue 2/3 SFC 组件代码（v1.4.19 新增）/ Generate Vue 2 or Vue 3 SFC',
+    description: `figma_generate_jsx 的 Vue 一级入口：自动精简层级 → design token 匹配 → 语义标签 → Flex 修复 → 无障碍增强 → 设计系统对齐 → 响应式推断 → 生成 .vue 单文件组件。
+Dedicated Vue entry of figma_generate_jsx: produces a .vue SFC with the full enhancement pipeline (flex fixes, a11y, design-system tokens, responsive hints).
+- vueVersion=3（默认/default）：<script setup lang="ts">；vueVersion=2：Options API（export default defineComponent，含 props/data/computed/methods 骨架与 PropType/validator）。
+- 样式方案：tailwind / unocss / css-modules / less / sass（React 专属的 styled-components / Emotion / vanilla-extract / Panda CSS 会在触网前明确报错）。
+- Style options: tailwind, unocss, css-modules, less, sass (React-only formats fail fast with a clear error).
+输出包含 Output：Vue SFC 代码、增强报告、需下载资源、@theme 扩展 token、旁路样式文件（.module.css/.less/.scss）。`,
+    inputSchema: z.object({
+      fileKey: z.string().describe('Figma 文件 Key（URL 中 /design/<key>/ 部分）/ Figma file key'),
+      nodeId: z.string().describe('目标节点 ID（URL 中 node-id= 参数）/ Target node id'),
+      figmaUrl: z
+        .string()
+        .optional()
+        .describe('Figma URL（可替代 fileKey+nodeId）/ Figma URL (alternative to fileKey+nodeId)'),
+      componentName: z
+        .string()
+        .optional()
+        .describe('生成的组件名（默认从节点名推断）/ Component name (inferred from node name by default)'),
+      sceneName: z.string().optional().describe('场景名（用于资源子路径组织）/ Scene name for asset sub-path'),
+      projectRoot: z
+        .string()
+        .optional()
+        .describe('项目根目录绝对路径（bundler=auto 时用于检测构建器）/ Project root for bundler auto-detection'),
+      bundler: BUNDLER_PARAM,
+      maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）/ Max traversal depth (default 15)'),
+      vueVersion: z
+        .union([z.literal(2), z.literal(3)])
+        .default(3)
+        .describe(
+          'Vue 大版本：3（默认，<script setup>）| 2（Options API）/ Vue major version: 3 (default, script setup) | 2 (Options API)',
+        ),
+      styleFormat: STYLE_FORMAT_PARAM,
+      unocssAttributify: z
+        .boolean()
+        .default(false)
+        .describe(
+          'UnoCSS attributify 模式（仅 styleFormat=unocss 生效，默认 false）/ UnoCSS attributify mode (unocss only, default false)',
+        ),
+      skipEnhancements: z.boolean().default(false).describe('是否跳过增强功能 / Skip enhancement pipeline'),
+      inference: INFERENCE_PARAM,
+      skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示 / Skip design lint hints'),
+      accessToken: z.string().optional().describe('Figma Access Token'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params) =>
+    executeGenerateCodeTool({
+      ...params,
+      framework: 'vue',
+    }),
+);
+
+// ============= v1.4.19 T20：整页批量生成（工具 22） =============
+
+server.registerTool(
+  'figma_batch_generate',
+  {
+    title: '批量生成整页组件：区块拆分 → 多文件组件 → index barrel（v1.4.19 新增）',
+    description: `把一个页面/大 Frame 自动拆分为语义区块（header / hero / features / section / sticky / footer），逐区块复用与 figma_generate_jsx 完全相同的增强管线生成独立组件文件，并产出 index.ts barrel 与文件依赖图。
+Auto-splits a page/frame into semantic blocks (header, hero, features, sections, sticky bars, footer), generates one component file per block with the same enhancement pipeline as figma_generate_jsx, and emits an index.ts barrel plus a dependency graph.
+- 省略 nodeIds：自动拆分 nodeId 指向页面/Frame 的顶层区块；提供 nodeIds 时仅生成指定区块（顺序按树位置归一化，与整页拆分同节点结果一致）。
+- 框架与样式透传：framework=react|vue（vueVersion 2|3），styleFormat 支持全部 11 方案，React 专属方案在 Vue 下触网前明确报错。
+- 输出 Output：区块清单、文件树、依赖图（barrel→主文件→旁路样式）、每个文件的完整代码、聚合待下载资源。
+- MCP 不写磁盘；CLI figma-dev batch 可直接落盘为多文件目录。`,
+    inputSchema: z.object({
+      fileKey: z.string().describe('Figma 文件 Key（URL 中 /design/<key>/ 部分）/ Figma file key'),
+      nodeId: z
+        .string()
+        .describe('页面或大 Frame 的根节点 ID（自动拆分对象；URL node-id）/ Root page/frame node id to split'),
+      figmaUrl: z
+        .string()
+        .optional()
+        .describe('Figma URL（可替代 fileKey+nodeId）/ Figma URL (alternative to fileKey+nodeId)'),
+      nodeIds: z
+        .array(z.string())
+        .optional()
+        .describe(
+          '显式区块节点 ID 列表（省略=自动拆分整页；顺序按树位置归一化）/ Explicit block node ids (omit to auto-split)',
+        ),
+      componentNamePrefix: z
+        .string()
+        .optional()
+        .describe('所有区块组件名统一前缀（ASCII，如 Landing）/ Prefix applied to every block component name'),
+      sceneName: z.string().optional().describe('场景名（资源子路径组织）/ Scene name for asset sub-path'),
+      projectRoot: z
+        .string()
+        .optional()
+        .describe('项目根目录绝对路径（bundler=auto 检测用）/ Project root for bundler auto-detection'),
+      bundler: BUNDLER_PARAM,
+      maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）/ Max traversal depth'),
+      framework: z.enum(['react', 'vue']).default('react').describe('目标框架：react (默认) | vue'),
+      vueVersion: z.union([z.literal(2), z.literal(3)]).default(3).describe('Vue 大版本（仅 framework=vue）：3 默认 | 2'),
+      styleFormat: STYLE_FORMAT_PARAM,
+      unocssAttributify: z
+        .boolean()
+        .default(false)
+        .describe('UnoCSS attributify 模式（仅 unocss 生效，默认 false）'),
+      skipEnhancements: z.boolean().default(false).describe('是否跳过增强管线 / Skip enhancement pipeline'),
+      inference: INFERENCE_PARAM,
+      accessToken: z.string().optional().describe('Figma Access Token'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params) => executeBatchGenerateTool(params),
+);
+
+/** figma_batch_generate 工具入参（v1.4.19 T20） */
+interface BatchGenerateToolInput {
+  fileKey?: string;
+  nodeId?: string;
+  figmaUrl?: string;
+  /** 显式区块节点 ID；省略/空数组 = 自动拆分整页 */
+  nodeIds?: string[];
+  componentNamePrefix?: string;
+  sceneName?: string;
+  projectRoot?: string;
+  bundler: 'auto' | BundlerKind;
+  maxDepth: number;
+  framework: Framework;
+  vueVersion: 2 | 3;
+  styleFormat: StyleFormat;
+  unocssAttributify: boolean;
+  skipEnhancements: boolean;
+  /** v1.4.19 T21：智能推断分项开关（缺省全开） */
+  inference?: SmartInferenceSwitches;
+  accessToken?: string;
+}
+
+/**
+ * figma_batch_generate 工具执行体：整页区块拆分 + 逐区块生成 + barrel 汇总（v1.4.19 T20）。
+ *
+ * @param input - 已合并默认值的工具入参
+ * @returns MCP 工具响应（Markdown 报告含全部文件代码 + structuredContent 文件清单）
+ */
+async function executeBatchGenerateTool(input: BatchGenerateToolInput): Promise<CallToolResult> {
+  const {
+    fileKey,
+    nodeId,
+    figmaUrl,
+    nodeIds,
+    componentNamePrefix,
+    projectRoot,
+    bundler,
+    maxDepth,
+    framework,
+    vueVersion,
+    styleFormat,
+    unocssAttributify,
+    skipEnhancements,
+    inference,
+    accessToken,
+  } = input;
+  const i18n = getI18n();
+  try {
+    let resolvedKey = fileKey;
+    let resolvedNode = nodeId;
+    if (figmaUrl) {
+      const parsed = parseFigmaUrl(figmaUrl);
+      if (parsed?.fileKey) resolvedKey = parsed.fileKey;
+      if (parsed?.nodeId) resolvedNode = parsed.nodeId;
+    }
+    if (!resolvedKey || !resolvedNode) {
+      return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId（页面/Frame 根节点），或 figmaUrl' }], isError: true };
+    }
+
+    // 本地校验先行（与单文件入口一致）：构建器检测与样式矩阵闸门均不触网
+    const effectiveBundler: BundlerKind =
+      bundler === 'auto' ? (await detectBundler(projectRoot ?? process.cwd())).kind : bundler;
+    assertStyleFormatSupported(styleFormat, STYLE_FORMATS_NEW_PIPELINE, undefined, framework);
+
+    const client = getFigmaClient(accessToken);
+    const ctxService = createDesignContextService(client);
+    const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
+
+    // 阶段一：显式 nodeIds 优先；否则自动拆分整页（两者同节点时结果一致，TR-20.2）
+    const explicitIds = (nodeIds ?? []).map((id) => id.trim()).filter(Boolean);
+    const blocks = explicitIds.length > 0 ? selectBlocksByIds(ctx.node, explicitIds) : splitPageIntoBlocks(ctx.node);
+    if (blocks.length === 0) {
+      return { content: [{ type: 'text', text: i18n.t('batchGenerate.emptySelection') as string }], isError: true };
+    }
+
+    // 阶段二：逐区块复用单组件生成管线并汇总多文件产物
+    const unocssMode: 'wind' | 'attributify' = unocssAttributify ? 'attributify' : 'wind';
+    const batchGenerator = createBatchGenerator(client);
+    const result = await batchGenerator.generate(blocks, ctx, {
+      framework,
+      vueVersion: framework === 'vue' ? vueVersion : undefined,
+      styleFormat,
+      unocssMode,
+      bundler: effectiveBundler,
+      skipEnhancements,
+      inference,
+      componentNamePrefix,
+    });
+
+    const lines: string[] = [];
+    const frameworkLabel =
+      framework === 'vue'
+        ? vueVersion === 2
+          ? 'Vue 2 SFC (Options API)'
+          : 'Vue 3 SFC (<script setup>)'
+        : 'React TSX';
+    lines.push(`# ${i18n.t('batchGenerate.title') as string} - ${frameworkLabel} (${styleFormat})\n`);
+    lines.push(`- **数据来源**: ${ctx.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}`);
+    lines.push(`- **区块数量**: ${result.blocks.length}`);
+    lines.push(`- **文件数量**: ${result.files.length}（含 ${result.entryPoint}）\n`);
+
+    // 区块清单
+    lines.push(`## 🧱 ${i18n.t('batchGenerate.blocksHeading') as string}\n`);
+    lines.push('| # | 类型 | 组件 | 源节点 | nodeId |');
+    lines.push('| - | ---- | ---- | ------ | ------ |');
+    result.blocks.forEach((block, index) => {
+      lines.push(
+        `| ${index + 1} | ${block.kind} | ${block.componentName} | ${block.sourceName} | \`${block.nodeId}\` |`,
+      );
+    });
+    lines.push('');
+
+    // 文件树
+    lines.push(`## 📂 ${i18n.t('batchGenerate.filesHeading') as string}\n`);
+    lines.push('```text');
+    result.files.forEach((file, index) => {
+      const branch = index === result.files.length - 1 ? '└──' : '├──';
+      lines.push(`${branch} ${file.fileName}`);
+    });
+    lines.push('```\n');
+
+    // 依赖图
+    lines.push(`## 🔗 ${i18n.t('batchGenerate.graphHeading') as string}\n`);
+    for (const edge of result.edges) {
+      lines.push(`- \`${edge.from}\` → \`${edge.to}\` (${edge.kind})`);
+    }
+    lines.push('');
+
+    // 全部文件内容
+    for (const file of result.files) {
+      lines.push(`## 📄 ${file.fileName}\n`);
+      lines.push(`\`\`\`${file.lang}`);
+      lines.push(file.content);
+      lines.push('```\n');
+    }
+
+    if (result.pendingAssets.length > 0) {
+      lines.push('## 🖼️ 需要下载的资源\n');
+      lines.push('调用 `figma_download_assets` 下载以下资源：\n');
+      const uniqueAssets = result.pendingAssets.filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
+      uniqueAssets.forEach((a) => {
+        lines.push(`- nodeId: \`${a.nodeId}\` | 名称: ${a.name} | 类型: ${a.type}`);
+      });
+      lines.push('');
+    }
+
+    if (result.warnings.length > 0) {
+      lines.push('## ⚠️ 聚合警告\n');
+      result.warnings.slice(0, 15).forEach((w) => lines.push(`- ${w}`));
+      if (result.warnings.length > 15) lines.push(`- ...还有 ${result.warnings.length - 15} 条`);
+      lines.push('');
+    }
+
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }],
+      structuredContent: {
+        framework,
+        vueVersion: framework === 'vue' ? vueVersion : undefined,
+        styleFormat,
+        blocks: result.blocks,
+        files: result.files,
+        entryPoint: result.entryPoint,
+        edges: result.edges,
+        warnings: result.warnings,
+        pendingAssets: result.pendingAssets,
+        dataSource: ctx.dataSource ?? 'live',
+      },
+    };
+  } catch (error) {
+    return buildToolErrorResponse(
+      framework === 'vue' ? '批量生成 Vue 组件' : '批量生成页面组件',
+      error,
+      getFigmaClientSafe(accessToken),
+    );
+  }
+}
+
+/** figma_generate_jsx / figma_generate_vue 的合并入参（v1.4.19 T18） */
+interface GenerateCodeToolInput {
+  fileKey?: string;
+  nodeId?: string;
+  figmaUrl?: string;
+  componentName?: string;
+  sceneName?: string;
+  projectRoot?: string;
+  /** zod 参数保留 'auto'，进入管线后解析为具体 BundlerKind */
+  bundler: 'auto' | BundlerKind;
+  maxDepth: number;
+  /** 目标框架：figma_generate_jsx 由用户选择；figma_generate_vue 固定 vue */
+  framework: Framework;
+  /** Vue 大版本（仅 framework=vue 生效；jsx 工具固定补 3） */
+  vueVersion: 2 | 3;
+  styleFormat: StyleFormat;
+  unocssAttributify: boolean;
+  skipEnhancements: boolean;
+  /** v1.4.19 T21：智能推断分项开关（缺省全开） */
+  inference?: SmartInferenceSwitches;
+  skipLintCheck: boolean;
+  accessToken?: string;
+}
+
+/**
+ * figma_generate_jsx 与 figma_generate_vue 的共享生成管线（v1.4.19 T18 抽取）。
+ *
+ * @param input - 已合并默认值的工具入参
+ * @returns MCP 工具响应（Markdown 报告 + structuredContent）
+ */
+async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<CallToolResult> {
+  const {
     fileKey,
     nodeId,
     figmaUrl,
@@ -1458,291 +1836,358 @@ v1.2.0 新增强化功能：
     bundler,
     maxDepth,
     framework,
+    vueVersion,
     styleFormat,
     unocssAttributify,
     skipEnhancements,
+    inference,
     skipLintCheck,
     accessToken,
-  }) => {
-    try {
-      let resolvedKey = fileKey;
-      let resolvedNode = nodeId;
-      if (figmaUrl) {
-        const parsed = parseFigmaUrl(figmaUrl);
-        if (parsed?.fileKey) resolvedKey = parsed.fileKey;
-        if (parsed?.nodeId) resolvedNode = parsed.nodeId;
+  } = input;
+  try {
+    let resolvedKey = fileKey;
+    let resolvedNode = nodeId;
+    if (figmaUrl) {
+      const parsed = parseFigmaUrl(figmaUrl);
+      if (parsed?.fileKey) resolvedKey = parsed.fileKey;
+      if (parsed?.nodeId) resolvedNode = parsed.nodeId;
+    }
+    if (!resolvedKey || !resolvedNode) {
+      return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId，或 figmaUrl' }], isError: true };
+    }
+
+    // v1.4.18（T4）：解析构建器；auto 时以 projectRoot（默认 cwd）检测，未识别得到 none
+    const effectiveBundler: BundlerKind =
+      bundler === 'auto' ? (await detectBundler(projectRoot ?? process.cwd())).kind : bundler;
+
+    // v1.4.18（T7）：新管线样式注册表校验；planned/其他管线值显式报错（含计划版本），不静默降级
+    // v1.4.19 T14–T17：追加框架矩阵（styled/emotion/vanilla-extract/panda 在 vue 下触网前拒绝）
+    assertStyleFormatSupported(styleFormat, STYLE_FORMATS_NEW_PIPELINE, undefined, framework);
+
+    const client = getFigmaClient(accessToken);
+    const ctxService = createDesignContextService(client);
+    const codeGen = createCodeGenerator(client);
+    const vueGen = createVueGenerator(client);
+    const componentMapper = createComponentMapper();
+
+    const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
+
+    // v1.4.0 新增：组件库检测
+    const libDetection = componentMapper.detectLibrary();
+    const componentMatches = componentMapper.matchComponentsInTree(ctx.node, libDetection.library);
+
+    let lintReport: Awaited<ReturnType<ReturnType<typeof createDesignLinter>['lint']>> | null = null;
+    if (!skipLintCheck) {
+      try {
+        const linter = createDesignLinter();
+        lintReport = linter.lint(ctx.node);
+      } catch {
+        // 设计规范检查失败不阻塞代码生成
       }
-      if (!resolvedKey || !resolvedNode) {
-        return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId，或 figmaUrl' }], isError: true };
+    }
+
+    let result: CodeGenResult;
+    // v1.4.18 T8：UnoCSS attributify 模式透传（仅 unocss 时有意义，其他格式渲染器忽略该参数）
+    const unocssMode: 'wind' | 'attributify' = unocssAttributify ? 'attributify' : 'wind';
+
+    if (framework === 'vue') {
+      const vueResult = await vueGen.generateFromContext(ctx, {
+        componentName,
+        sceneName,
+        usePublicCdn: true,
+        bundler: effectiveBundler,
+        styleFormat,
+        unocssMode,
+        skipEnhancements,
+        inference,
+        // v1.4.19 T18：Vue 一级工具可选 Vue2 Options API；jsx 工具固定补 3
+        vueVersion,
+      });
+      result = vueResult as unknown as CodeGenResult;
+    } else {
+      result = (await codeGen.generateJsxFromContext(ctx, {
+        componentName,
+        sceneName,
+        usePublicCdn: true,
+        bundler: effectiveBundler,
+        styleFormat,
+        unocssMode,
+        skipEnhancements,
+        inference,
+      })) as unknown as CodeGenResult;
+    }
+
+    const lines: string[] = [];
+
+    // 陈旧缓存降级警告（最优先展示）
+    if (ctx.warnings && ctx.warnings.length > 0) {
+      for (const w of ctx.warnings) {
+        lines.push(`> ⚠️ ${w}\n`);
       }
+    }
 
-      // v1.4.18（T4）：解析构建器；auto 时以 projectRoot（默认 cwd）检测，未识别得到 none
-      const effectiveBundler: BundlerKind =
-        bundler === 'auto' ? (await detectBundler(projectRoot ?? process.cwd())).kind : bundler;
+    // v1.4.19 T18：Vue 工具按 vueVersion 标注产物形态
+    const frameworkLabel =
+      framework === 'vue'
+        ? vueVersion === 2
+          ? 'Vue 2 SFC (Options API)'
+          : 'Vue 3 SFC (<script setup>)'
+        : 'React TSX';
+    lines.push(`# ${result.componentName} - ${frameworkLabel} 代码 (${styleFormat})\n`);
+    lines.push(`- **数据来源**: ${ctx.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}\n`);
 
-      // v1.4.18（T7）：新管线样式注册表校验；planned/其他管线值显式报错（含计划版本），不静默降级
-      assertStyleFormatSupported(styleFormat, STYLE_FORMATS_NEW_PIPELINE);
-
-      const client = getFigmaClient(accessToken);
-      const ctxService = createDesignContextService(client);
-      const codeGen = createCodeGenerator(client);
-      const vueGen = createVueGenerator(client);
-      const componentMapper = createComponentMapper();
-
-      const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
-
-      // v1.4.0 新增：组件库检测
-      const libDetection = componentMapper.detectLibrary();
-      const componentMatches = componentMapper.matchComponentsInTree(ctx.node, libDetection.library);
-
-      let lintReport: Awaited<ReturnType<ReturnType<typeof createDesignLinter>['lint']>> | null = null;
-      if (!skipLintCheck) {
-        try {
-          const linter = createDesignLinter();
-          lintReport = linter.lint(ctx.node);
-        } catch {
-          // 设计规范检查失败不阻塞代码生成
-        }
-      }
-
-      let result: CodeGenResult;
-      // v1.4.18 T8：UnoCSS attributify 模式透传（仅 unocss 时有意义，其他格式渲染器忽略该参数）
-      const unocssMode: 'wind' | 'attributify' = unocssAttributify ? 'attributify' : 'wind';
-
-      if (framework === 'vue') {
-        const vueResult = await vueGen.generateFromContext(ctx, {
-          componentName,
-          sceneName,
-          usePublicCdn: true,
-          bundler: effectiveBundler,
-          styleFormat,
-          unocssMode,
-          skipEnhancements,
-        });
-        result = vueResult as unknown as CodeGenResult;
-      } else {
-        result = (await codeGen.generateJsxFromContext(ctx, {
-          componentName,
-          sceneName,
-          usePublicCdn: true,
-          bundler: effectiveBundler,
-          styleFormat,
-          unocssMode,
-          skipEnhancements,
-        })) as unknown as CodeGenResult;
-      }
-
-      const lines: string[] = [];
-
-      // 陈旧缓存降级警告（最优先展示）
-      if (ctx.warnings && ctx.warnings.length > 0) {
-        for (const w of ctx.warnings) {
-          lines.push(`> ⚠️ ${w}\n`);
-        }
-      }
-
-      lines.push(
-        `# ${result.componentName} - ${framework === 'vue' ? 'Vue 3 SFC' : 'React TSX'} 代码 (${styleFormat})\n`,
-      );
-      lines.push(`- **数据来源**: ${ctx.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}\n`);
-
-      if (libDetection.library !== 'none' && componentMatches.length > 0) {
-        lines.push(`## 🧩 检测到组件库: ${libDetection.library}\n`);
-        lines.push(`匹配到 ${componentMatches.length} 个可复用组件：\n`);
-        componentMatches.slice(0, 5).forEach((m) => {
-          lines.push(
-            `- **${m.componentName}** (置信度 ${Math.round(m.confidence * 100)}%) → import from \`${m.importPath}\``,
-          );
-        });
-        lines.push('');
-      }
-
-      if (lintReport && (lintReport.errorCount > 0 || lintReport.warningCount > 3)) {
-        lines.push(`## ⚠️ 设计规范提示\n`);
-        const scoreEmoji =
-          lintReport.score >= 90 ? '🎉' : lintReport.score >= 80 ? '✅' : lintReport.score >= 60 ? '🔶' : '❌';
+    if (libDetection.library !== 'none' && componentMatches.length > 0) {
+      lines.push(`## 🧩 检测到组件库: ${libDetection.library}\n`);
+      lines.push(`匹配到 ${componentMatches.length} 个可复用组件：\n`);
+      componentMatches.slice(0, 5).forEach((m) => {
         lines.push(
-          `${scoreEmoji} 当前设计规范评分: **${lintReport.score}/100**，发现 ${lintReport.errorCount} 个错误、${lintReport.warningCount} 个警告`,
+          `- **${m.componentName}** (置信度 ${Math.round(m.confidence * 100)}%) → import from \`${m.importPath}\``,
         );
-        if (lintReport.score < 80) {
-          lines.push('');
-          lines.push('💡 建议先修复设计规范问题再生成代码，可以获得更高质量的还原结果。');
-          lines.push(`   可调用 \`figma_lint_design\` 工具查看详细报告。`);
-        }
+      });
+      lines.push('');
+    }
+
+    if (lintReport && (lintReport.errorCount > 0 || lintReport.warningCount > 3)) {
+      lines.push(`## ⚠️ 设计规范提示\n`);
+      const scoreEmoji =
+        lintReport.score >= 90 ? '🎉' : lintReport.score >= 80 ? '✅' : lintReport.score >= 60 ? '🔶' : '❌';
+      lines.push(
+        `${scoreEmoji} 当前设计规范评分: **${lintReport.score}/100**，发现 ${lintReport.errorCount} 个错误、${lintReport.warningCount} 个警告`,
+      );
+      if (lintReport.score < 80) {
+        lines.push('');
+        lines.push('💡 建议先修复设计规范问题再生成代码，可以获得更高质量的还原结果。');
+        lines.push(`   可调用 \`figma_lint_design\` 工具查看详细报告。`);
+      }
+      lines.push('');
+    }
+
+    // v1.2.0 新增：显示增强报告
+    if (result.reports && !skipEnhancements) {
+      const reports = result.reports;
+      const flexFixes = reports.flexFixes;
+      if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
+        const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
+        lines.push(`## 🔧 Flex 布局修复 (${flexCount} 处)\n`);
+        ((flexFixes.fixes as readonly FlexFixEntry[]) || []).slice(0, 10).forEach((fix) => {
+          lines.push(`- 节点 \`${fix.nodeName}\`: 添加了 ${fix.addedClasses.join(', ')}`);
+        });
         lines.push('');
       }
-
-      // v1.2.0 新增：显示增强报告
-      if (result.reports && !skipEnhancements) {
-        const reports = result.reports;
-        const flexFixes = reports.flexFixes;
-        if (flexFixes && (flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0) > 0) {
-          const flexCount = flexFixes.fixedCount ?? flexFixes.totalFixedNodes ?? 0;
-          lines.push(`## 🔧 Flex 布局修复 (${flexCount} 处)\n`);
-          ((flexFixes.fixes as readonly FlexFixEntry[]) || []).slice(0, 10).forEach((fix) => {
-            lines.push(`- 节点 \`${fix.nodeName}\`: 添加了 ${fix.addedClasses.join(', ')}`);
+      const a11yReport = reports.a11y;
+      if (a11yReport) {
+        const a11yCount =
+          a11yReport.enhancementsCount ??
+          (a11yReport.semanticTagsCount || 0) +
+            (a11yReport.buttonsIdentifiedCount || 0) +
+            (a11yReport.ariaAddedCount || 0);
+        if (a11yCount > 0) {
+          lines.push(`## ♿ 无障碍增强 (${a11yCount} 处)\n`);
+          (a11yReport.report as readonly A11yReportEntry[]).slice(0, 10).forEach((enh) => {
+            lines.push(`- 节点 \`${enh.nodeName}\`: ${enh.enhancement}`);
           });
           lines.push('');
         }
-        const a11yReport = reports.a11y;
-        if (a11yReport) {
-          const a11yCount =
-            a11yReport.enhancementsCount ??
-            (a11yReport.semanticTagsCount || 0) +
-              (a11yReport.buttonsIdentifiedCount || 0) +
-              (a11yReport.ariaAddedCount || 0);
-          if (a11yCount > 0) {
-            lines.push(`## ♿ 无障碍增强 (${a11yCount} 处)\n`);
-            (a11yReport.report as readonly A11yReportEntry[]).slice(0, 10).forEach((enh) => {
-              lines.push(`- 节点 \`${enh.nodeName}\`: ${enh.enhancement}`);
-            });
-            lines.push('');
-          }
-        }
-        const dsReport = reports.designSystem;
-        if (dsReport) {
-          const dsCount =
-            dsReport.suggestionsCount ??
-            (dsReport.colorSuggestions?.length || 0) +
-              (dsReport.spacingTokens?.length || 0) +
-              (dsReport.radiusTokens?.length || 0) +
-              (dsReport.typographySuggestions?.length || 0);
-          if (dsCount > 0) {
-            lines.push(`## 🎨 设计系统建议 (${dsCount} 条)\n`);
-            ((dsReport.suggestions as readonly DesignSystemSuggestion[]) || []).slice(0, 10).forEach((sug) => {
-              lines.push(`- ${sug.message}`);
-            });
-            lines.push('');
-          }
-        }
-        const respReport = reports.responsive;
-        if (respReport) {
-          const respCount =
-            respReport.suggestionsCount ??
-            (respReport.recommendations?.length || 0) +
-              (respReport.classSuggestions?.length || 0) +
-              (respReport.layoutSuggestions?.length || 0);
-          if (respCount > 0) {
-            lines.push(`## 📱 响应式建议 (${respCount} 条)\n`);
-            ((respReport.suggestions as readonly ResponsiveSuggestion[]) || []).slice(0, 10).forEach((sug) => {
-              lines.push(`- ${sug.message}`);
-            });
-            lines.push('');
-          }
+      }
+      const dsReport = reports.designSystem;
+      if (dsReport) {
+        const dsCount =
+          dsReport.suggestionsCount ??
+          (dsReport.colorSuggestions?.length || 0) +
+            (dsReport.spacingTokens?.length || 0) +
+            (dsReport.radiusTokens?.length || 0) +
+            (dsReport.typographySuggestions?.length || 0);
+        if (dsCount > 0) {
+          lines.push(`## 🎨 设计系统建议 (${dsCount} 条)\n`);
+          ((dsReport.suggestions as readonly DesignSystemSuggestion[]) || []).slice(0, 10).forEach((sug) => {
+            lines.push(`- ${sug.message}`);
+          });
+          lines.push('');
         }
       }
-
-      lines.push(framework === 'vue' ? '```vue' : '```tsx');
-      lines.push(result.code);
-      lines.push('```\n');
-
-      // v1.4.18 T8：UnoCSS 配置指引（仅建议文本，不写用户项目文件；attributify 模式额外附 TS shim）
-      if (styleFormat === 'unocss' && result.styleHints && result.styleHints.length > 0) {
-        lines.push(`## 🎛️ UnoCSS 配置指引（${unocssMode} 模式）\n`);
-        lines.push('> 以下为配置建议，工具不会修改你的项目文件，请按需手动落地。\n');
-        for (const hint of result.styleHints) {
-          lines.push(`### ${hint.title}\n`);
+      const respReport = reports.responsive;
+      if (respReport) {
+        const respCount =
+          respReport.suggestionsCount ??
+          (respReport.recommendations?.length || 0) +
+            (respReport.classSuggestions?.length || 0) +
+            (respReport.layoutSuggestions?.length || 0);
+        if (respCount > 0) {
+          lines.push(`## 📱 响应式建议 (${respCount} 条)\n`);
+          ((respReport.suggestions as readonly ResponsiveSuggestion[]) || []).slice(0, 10).forEach((sug) => {
+            lines.push(`- ${sug.message}`);
+          });
+          lines.push('');
+        }
+      }
+      // v1.4.19 T21：智能推断（布局/图标/主题/动效；仅建议，不改写显式样式）
+      const smartReport = reports.smartInference;
+      if (smartReport && smartReport.suggestions.length > 0) {
+        const smartCount = smartReport.suggestions.length;
+        lines.push(`## 🧠 智能推断建议 (${smartCount} 条，v1.4.19 仅建议)\n`);
+        smartReport.suggestions.slice(0, 12).forEach((sug) => {
+          const utility = sug.utilityClass ? ` → \`${sug.utilityClass}\`` : '';
+          lines.push(`- [${sug.category}] \`${sug.nodeName}\`: ${sug.message}${utility}`);
+        });
+        if (smartReport.suggestions.length > 12) {
+          lines.push(`- ……另有 ${smartReport.suggestions.length - 12} 条见 structuredContent.reports.smartInference`);
+        }
+        lines.push('');
+      }
+      // v1.4.19 T22：语义推断（列表数据化示例 + 语义命名；仅建议，不自动改写）
+      const semanticReport = reports.semantic;
+      if (semanticReport && semanticReport.dataStructures.length > 0) {
+        lines.push(`## 📐 列表数据化建议 (${semanticReport.dataStructures.length} 组，v1.4.19 仅示例)\n`);
+        lines.push('> 以下为数据驱动重构示例（TS 接口 + mock + 渲染），工具不会改写已生成代码，请按需手动落地。\n');
+        semanticReport.dataStructures.slice(0, 2).forEach((structure) => {
+          lines.push(`### \`${structure.nodeName}\`：${structure.repeatedCount} 个重复子项 → ${structure.interfaceName}\n`);
           lines.push('```ts');
-          lines.push(hint.code);
+          lines.push(structure.interfaceCode);
+          lines.push('');
+          lines.push(structure.mockCode);
+          lines.push('```');
+          lines.push(framework === 'vue' ? '```vue' : '```tsx');
+          lines.push(structure.renderHint);
           lines.push('```\n');
+        });
+        if (semanticReport.dataStructures.length > 2) {
+          lines.push(`- ……另有 ${semanticReport.dataStructures.length - 2} 组见 structuredContent.reports.semantic.dataStructures`);
+          lines.push('');
         }
       }
+      if (semanticReport && semanticReport.nameSuggestions.length > 0) {
+        lines.push(`## 🏷️ 语义命名建议 (${semanticReport.nameSuggestions.length} 条，v1.4.19 仅建议)\n`);
+        semanticReport.nameSuggestions.slice(0, 12).forEach((suggestion) => {
+          lines.push(`- \`${suggestion.nodeName}\` → **${suggestion.suggestedName}**（${suggestion.reason}）`);
+        });
+        if (semanticReport.nameSuggestions.length > 12) {
+          lines.push(`- ……另有 ${semanticReport.nameSuggestions.length - 12} 条见 structuredContent.reports.semantic.nameSuggestions`);
+        }
+        lines.push('');
+      }
+    }
 
-      // v1.4.18 T9：CSS Modules 同名 .module.css 旁路文件（工具只输出内容，不直接写项目目录）
-      if (styleFormat === 'css-modules' && result.styleSidecar) {
-        lines.push(`## 📎 同名样式模块（CSS Modules）：${result.styleSidecar.fileName}\n`);
-        lines.push(
-          `> 请将以下内容保存为与组件同目录的 \`${result.styleSidecar.fileName}\`；组件代码已按 ${
-            framework === 'vue' ? '$style.x' : 'styles.x'
-          } 引用，重复样式经 composes 复用。\n`,
-        );
-        lines.push('```css');
-        lines.push(result.styleSidecar.content);
+    lines.push(framework === 'vue' ? '```vue' : '```tsx');
+    lines.push(result.code);
+    lines.push('```\n');
+
+    // v1.4.18 T8：UnoCSS 配置指引（仅建议文本，不写用户项目文件；attributify 模式额外附 TS shim）
+    if (styleFormat === 'unocss' && result.styleHints && result.styleHints.length > 0) {
+      lines.push(`## 🎛️ UnoCSS 配置指引（${unocssMode} 模式）\n`);
+      lines.push('> 以下为配置建议，工具不会修改你的项目文件，请按需手动落地。\n');
+      for (const hint of result.styleHints) {
+        lines.push(`### ${hint.title}\n`);
+        lines.push('```ts');
+        lines.push(hint.code);
         lines.push('```\n');
       }
-
-      if ((result.extensionsNeeded || []).length > 0) {
-        lines.push('## ⚠️ 需要 @theme 扩展的 token\n');
-        const grouped = new Map<string, Array<{ name: string; value: string }>>();
-        for (const ext of result.extensionsNeeded as readonly TailwindExtension[]) {
-          if (!grouped.has(ext.type)) grouped.set(ext.type, []);
-          grouped.get(ext.type)!.push({ name: ext.suggestedName, value: ext.originalValue });
-        }
-        for (const [type, items] of grouped) {
-          lines.push(`**${type}:**`);
-          const uniqueItems = items.filter((v, i, a) => a.findIndex((x) => x.value === v.value) === i);
-          uniqueItems.slice(0, 10).forEach((it) => {
-            lines.push(`- @theme inline { --color-${it.name}: ${it.value}; } /* ${it.value} */`);
-          });
-          lines.push('');
-        }
-      }
-
-      if ((result.pendingAssets || []).length > 0) {
-        lines.push('## 🖼️ 需要下载的资源\n');
-        lines.push('调用 `figma_download_assets` 下载以下资源：\n');
-        const uniqueAssets = result.pendingAssets.filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
-        uniqueAssets.forEach((a) => {
-          lines.push(`- nodeId: \`${a.nodeId}\` | 名称: ${a.name} | 类型: ${a.type}`);
-        });
-        lines.push('');
-      }
-
-      const reusableComponents = ctx.componentsUsed.filter((c) => c.instanceCount > 0);
-      if (reusableComponents.length > 0) {
-        lines.push('## 🧩 复用组件（检查 web-official）\n');
-        reusableComponents.forEach((c) => {
-          lines.push(`- ${c.name} (使用 ${c.instanceCount} 次) → 检查 @/components/web-official/ 是否已有`);
-        });
-        lines.push('');
-      }
-
-      // 代码生成阶段产生的样式映射警告（与 ctx.warnings 去重后展示）
-      const ctxWarningsSet = new Set(ctx.warnings ?? []);
-      const codeGenWarnings = (result.warnings ?? []).filter((w) => !ctxWarningsSet.has(w));
-      if (codeGenWarnings.length > 0) {
-        lines.push('## ⚠️ 样式还原警告\n');
-        codeGenWarnings.slice(0, 15).forEach((w) => {
-          lines.push(`- ${w}`);
-        });
-        if (codeGenWarnings.length > 15) {
-          lines.push(`- ...还有 ${codeGenWarnings.length - 15} 条警告（详见 structuredContent.warnings）`);
-        }
-        lines.push('');
-      }
-
-      lines.push('## 📋 节点层级精简统计\n');
-      lines.push(`- 精简后节点树深度：${maxDepth}`);
-      lines.push(`- 节点数量：${countNodes(ctx.node)}`);
-      lines.push(`- 图片/图标资源：${ctx.assets.length}`);
-      lines.push(`- 文本节点：${ctx.textNodes.length}`);
-      lines.push(`- 阴影效果：${ctx.shadows.length}`);
-
-      return {
-        content: [{ type: 'text', text: lines.join('\n') }],
-        structuredContent: {
-          componentName: result.componentName,
-          code: result.code,
-          reports: result.reports,
-          extensionsNeeded: result.extensionsNeeded,
-          pendingAssets: result.pendingAssets,
-          warnings: result.warnings ?? [],
-          reusableComponents,
-          lintScore: lintReport?.score,
-          dataSource: ctx.dataSource ?? 'live',
-          stats: {
-            assetCount: ctx.assets.length,
-            textCount: ctx.textNodes.length,
-            shadowCount: ctx.shadows.length,
-            colorsUsed: ctx.colors.length,
-          },
-        },
-      };
-    } catch (error) {
-      return buildToolErrorResponse('生成 JSX', error, getFigmaClientSafe(accessToken));
     }
-  },
-);
+
+    // v1.4.18 T9 / v1.4.19 T16：同名样式旁路文件（CSS Modules / Less / Sass；工具只输出内容，不直接写项目目录）
+    if (result.styleSidecar) {
+      // 代码块语言：css/less/scss（vanilla-extract 的 .css.ts 仅 React 管线产出）
+      const sidecarFenceLang =
+        result.styleSidecar.lang === 'less' || result.styleSidecar.lang === 'scss'
+          ? result.styleSidecar.lang
+          : 'css';
+      lines.push(`## 📎 同名旁路样式文件：${result.styleSidecar.fileName}\n`);
+      lines.push(
+        `> 请将以下内容保存为与组件同目录的 \`${result.styleSidecar.fileName}\`；组件代码已按 ${
+          framework === 'vue' ? '$style.x' : 'styles.x'
+        } 引用。\n`,
+      );
+      lines.push(`\`\`\`${sidecarFenceLang}`);
+      lines.push(result.styleSidecar.content);
+      lines.push('```\n');
+    }
+
+    if ((result.extensionsNeeded || []).length > 0) {
+      lines.push('## ⚠️ 需要 @theme 扩展的 token\n');
+      const grouped = new Map<string, Array<{ name: string; value: string }>>();
+      for (const ext of result.extensionsNeeded as readonly TailwindExtension[]) {
+        if (!grouped.has(ext.type)) grouped.set(ext.type, []);
+        grouped.get(ext.type)!.push({ name: ext.suggestedName, value: ext.originalValue });
+      }
+      for (const [type, items] of grouped) {
+        lines.push(`**${type}:**`);
+        const uniqueItems = items.filter((v, i, a) => a.findIndex((x) => x.value === v.value) === i);
+        uniqueItems.slice(0, 10).forEach((it) => {
+          lines.push(`- @theme inline { --color-${it.name}: ${it.value}; } /* ${it.value} */`);
+        });
+        lines.push('');
+      }
+    }
+
+    if ((result.pendingAssets || []).length > 0) {
+      lines.push('## 🖼️ 需要下载的资源\n');
+      lines.push('调用 `figma_download_assets` 下载以下资源：\n');
+      const uniqueAssets = result.pendingAssets.filter((v, i, a) => a.findIndex((x) => x.nodeId === v.nodeId) === i);
+      uniqueAssets.forEach((a) => {
+        lines.push(`- nodeId: \`${a.nodeId}\` | 名称: ${a.name} | 类型: ${a.type}`);
+      });
+      lines.push('');
+    }
+
+    const reusableComponents = ctx.componentsUsed.filter((c) => c.instanceCount > 0);
+    if (reusableComponents.length > 0) {
+      lines.push('## 🧩 复用组件（检查 web-official）\n');
+      reusableComponents.forEach((c) => {
+        lines.push(`- ${c.name} (使用 ${c.instanceCount} 次) → 检查 @/components/web-official/ 是否已有`);
+      });
+      lines.push('');
+    }
+
+    // 代码生成阶段产生的样式映射警告（与 ctx.warnings 去重后展示）
+    const ctxWarningsSet = new Set(ctx.warnings ?? []);
+    const codeGenWarnings = (result.warnings ?? []).filter((w) => !ctxWarningsSet.has(w));
+    if (codeGenWarnings.length > 0) {
+      lines.push('## ⚠️ 样式还原警告\n');
+      codeGenWarnings.slice(0, 15).forEach((w) => {
+        lines.push(`- ${w}`);
+      });
+      if (codeGenWarnings.length > 15) {
+        lines.push(`- ...还有 ${codeGenWarnings.length - 15} 条警告（详见 structuredContent.warnings）`);
+      }
+      lines.push('');
+    }
+
+    lines.push('## 📋 节点层级精简统计\n');
+    lines.push(`- 精简后节点树深度：${maxDepth}`);
+    lines.push(`- 节点数量：${countNodes(ctx.node)}`);
+    lines.push(`- 图片/图标资源：${ctx.assets.length}`);
+    lines.push(`- 文本节点：${ctx.textNodes.length}`);
+    lines.push(`- 阴影效果：${ctx.shadows.length}`);
+
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }],
+      structuredContent: {
+        componentName: result.componentName,
+        framework,
+        vueVersion: framework === 'vue' ? vueVersion : undefined,
+        code: result.code,
+        reports: result.reports,
+        extensionsNeeded: result.extensionsNeeded,
+        pendingAssets: result.pendingAssets,
+        warnings: result.warnings ?? [],
+        reusableComponents,
+        lintScore: lintReport?.score,
+        dataSource: ctx.dataSource ?? 'live',
+        stats: {
+          assetCount: ctx.assets.length,
+          textCount: ctx.textNodes.length,
+          shadowCount: ctx.shadows.length,
+          colorsUsed: ctx.colors.length,
+        },
+      },
+    };
+  } catch (error) {
+    return buildToolErrorResponse(
+      framework === 'vue' ? '生成 Vue 组件' : '生成 JSX',
+      error,
+      getFigmaClientSafe(accessToken),
+    );
+  }
+}
 
 server.registerTool(
   'figma_get_structured_data',

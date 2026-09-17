@@ -1,4 +1,4 @@
-# 🎨 Figma Dev Tools v1.4.18
+# 🎨 Figma Dev Tools v1.4.19
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
@@ -68,6 +68,7 @@ const service = new BrowserFallbackService({
 
 | Version | Theme                          | Highlights                                                                                                 |
 | ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| v1.4.19 | Multi-framework × Multi-style × Batch × Intelligence | 1) Six new style renderers — Styled Components (`styled`), Emotion, Less, Sass, vanilla-extract, Panda CSS (`panda`) — land in the enhanced pipeline (the batch's "seven styles" work also deepened CSS Modules); React/Vue gated by NEW_PIPELINE_FRAMEWORK_SUPPORT (registry holds 11 descriptors, 9 available in the new pipeline); 2) first-class Vue (MCP `figma_generate_vue` + CLI `figma-dev vue`; Vue3 `<script setup>` / Vue2 Options API via `vueVersion`); 3) deeper component-library mapping (built-in shadcn/ui, Ant Design, Element Plus + project-level `.figma-dev/components.json` overrides with draft-07 `components.schema.json`); 4) `figma_batch_generate` semantic page-block splitting (Header/Hero/Features/Footer etc. + barrel index + dependency graph; CLI `figma-dev batch`); 5) two batches of smart inference — T21 Grid/sticky/positioning, Lucide/Iconify icons, dark surfaces, hover/pressed/spinner motion (per-category `inference` switches / CLI `--no-smart-*`), T22 interactions (form submit + validation scaffolds, Modal open/close, Carousel, Tabs, Accordion), repeated children → TS interface + mock + `.map()`/`v-for` data examples (advisory only), and PascalCase semantic naming for `Frame N` layers. All smart output stays advisory (header comments / structuredContent reports); `skipEnhancements` is the master switch. Full suite 39 files / 493 tests + 4 smoke files / 73 cases green |
 | v1.4.18 | Multi-framework/Style Foundation + P0 Wrap-up | 1) Pluggable style architecture (`style-renderers` registry/factory with 11 descriptors); 2) UnoCSS deepened across React/Vue (preset-wind + attributify mode, `--attributify` / MCP `unocssAttributify`); 3) full CSS Modules support (canonical declaration ordering, shared class merging, collision de-duplication, maximal strict-subset `composes`, React `styles['x']` / Vue `<style module>` sidecar output); 4) Figma Component Properties → TS Props inference (React interfaces extending HTMLAttributes with JSDoc; Vue3 `defineProps<Props>()` + `withDefaults`; all four property kinds TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP); 5) W3C DTCG Design Tokens output (`outputFormat:'dtcg'` / `sync --output-format dtcg`) with a built-in structural validator; 6) custom CA via `FIGMA_CA_CERT_PATH` (effective for both API calls and OCR image downloads); 7) bundler detection with asset-path correction (Vite/Webpack/Next.js/Remix, five placement shapes); 8) automatic React/Vue import organizing before Prettier (idempotent); 9) bilingual `--help` examples for every CLI command (29-path snapshot smoke); 10) smoke/full/perf three-tier test infrastructure (21,845-node makeLargeTree fixture, MCP stdio harness). Full suite 27 files / 375 tests green (323 unit + 68 smoke); `npm audit` 0 vulnerabilities |
 | v1.4.17 | MCP Concurrency Reliability + OCR SSRF Hardening + Update Double Verification | 1) BrowserPool gains a `poolKey` snapshot and an idempotent `release`, fixing pool cross-talk and double-release under concurrent requests; 2) OCR remote-image SSRF now blocks the RFC2544 `198.19.0.0/16` benchmark range, rejects DNS answers containing ANY private/reserved address (multi-A-record bypass), and forces `redirect:'error'`; injectable DNS/fetch seams add rebinding/redirect unit tests (residual TOCTOU risk documented in code); 3) `--update`/GUI fallback first resolves and PINS the latest stable version (floating `@latest` removed) and strictly verifies BOTH the source tgz and the on-disk package.json — a failed verification can no longer report success; 4) CLI/GUI temp install directories are always cleaned via try/finally; fallback errors are fully i18n (5 new zh-CN/en-US keys) with `update.hint`; 5) GUI listens on 127.0.0.1 only with an Origin allowlist and OPTIONS preflight; 6) the McpServer handshake version is read from package.json at runtime, ending version drift; tests 134→152 green |
 | v1.4.16 | npm Version Placeholder Release | Version-slot publish; code identical to v1.4.15 with no functional changes; version-history documentation reconciled from this release onward |
@@ -93,7 +94,7 @@ const service = new BrowserFallbackService({
 | Feature                         | Description                                                                                                          | Version        |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------- |
 | 🖥️ **GUI Visual Config Wizard** | Browser graphical interface configuration, welcome page → language selection → Token config + real-time validation → editor detection → one-click install → framework preference → completion page, zero barriers for beginners | **v1.3.0**     |
-| 🔗 **20 MCP tools**             | Full coverage: URL parsing → Token extraction → component generation → asset download → paywall fallback → fidelity verification | v1.4.4         |
+| 🔗 **22 MCP tools**             | Full coverage: URL parsing → Token extraction → component generation (React/Vue/batch) → asset download → paywall fallback → fidelity verification | v1.4.19        |
 | 🧠 **Framework-agnostic Structured Data** | Outputs id/name/role/type/size/layout/styles/text/asset/children JSON, supports Vue/Svelte/HTML/Angular/Solid and any framework | v1.1.0         |
 | ⚛️ **React + Tailwind First-class Support** | Semantic tag selection + Tailwind mapping + cn() merging + TODO markers, one-click high-fidelity TSX generation | v1.3.2         |
 | 🔧 **Flex Layout Auto-fix**     | Smart fix for icon deformation, text truncation, overflow and other Flex issues                                       | v1.3.2         |
@@ -117,6 +118,11 @@ const service = new BrowserFallbackService({
 | 🪙 **W3C DTCG Tokens**            | **⭐ v1.4.18 new: `figma_generate_styles` / `figma_sync_to_project` emit standard DTCG (`$type`/`$value`) JSON covering color/dimension/shadow/typography with built-in structural validation** | **v1.4.18**     |
 | 🏢 **Enterprise-network Ready**   | **⭐ v1.4.18 new: `FIGMA_CA_CERT_PATH` custom root CA (private PKI / HTTPS-decrypting proxies); auto bundler detection (Vite/Webpack/Next.js/Remix) placing assets into `public/` or `src/assets/` correctly** | **v1.4.18**     |
 | 📐 **Import Organizing + Help Examples** | **⭐ v1.4.18 new: React/Vue output organizes imports before Prettier (add missing, remove unused, idempotent); every CLI `--help` ships bilingual examples, switchable per invocation with `-l`** | **v1.4.18**     |
+| 🎻 **Multi-style × React/Vue**   | **⭐ v1.4.19 new: the registry holds 11 style descriptors; 9 are available in the enhanced pipeline — Tailwind / UnoCSS (incl. attributify) / CSS Modules / Styled Components / Emotion / Less / Sass / vanilla-extract / Panda CSS (all 9 on React, 5 on Vue); inline-styles stays on the legacy React pipeline, css-variables is planned for 1.5.0** | **v1.4.19**     |
+| 💚 **First-class Vue**           | **⭐ v1.4.19 new: MCP `figma_generate_vue` and CLI `figma-dev vue`; Vue3 `<script setup>` / Vue2 Options API (`vueVersion: 2`), same template/sidecar fidelity as React** | **v1.4.19**     |
+| 🧩 **Deeper Component Mapping**  | **⭐ v1.4.19 new: built-in shadcn/ui, Ant Design and Element Plus mappings; project-root `.figma-dev/components.json` overrides import sources and prop passthrough by node name / component key (validated against a draft-07 schema)** | **v1.4.19**     |
+| 📦 **Batch Generation + Semantic Blocks** | **⭐ v1.4.19 new: MCP `figma_batch_generate` / CLI `figma-dev batch` splits a page into Header/Hero/Features/Footer-style semantic blocks, generates one file per block and emits a barrel index (React & Vue)** | **v1.4.19**     |
+| 🧠 **Smart Inference (advisory only)** | **⭐ v1.4.19 new: per-category toggles for Grid/sticky/positioning hints, Lucide/Iconify icons, dark surfaces and hover/pressed/spinner motion; T22 adds form-validation scaffolds, Modal/Carousel/Tabs/Accordion interaction skeletons, repeated children → TS interface + mock + `.map()`/`v-for` data examples, and `Frame N` → PascalCase semantic naming. Everything surfaces as header comments / structuredContent reports; `skipEnhancements` turns it all off** | **v1.4.19**     |
 
 ---
 
@@ -363,7 +369,7 @@ npx figma-dev token list    # List saved Tokens
 
 ## 🔧 MCP Tool Reference
 
-**20 MCP tools** in total, arranged by usage flow:
+**22 MCP tools** in total, arranged by usage flow:
 
 | #   | Tool Name                   | Function                                                                            | Key Parameters                           | Version     |
 | --- | --------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------- | ----------- |
@@ -376,7 +382,7 @@ npx figma-dev token list    # List saved Tokens
 | 7   | `figma_get_screenshot`      | Get high-res node screenshot                                                       | `fileKey/nodeId/scale`                   | v1          |
 | 8   | `figma_get_structured_data` | **⭐ Framework-agnostic structured data** (id/name/role/type/size/layout/styles/text/asset/children) | `fileKey/nodeId/maxDepth` | v1.1.0      |
 | 9   | `figma_lint_design`         | **⭐ v1.3.2 new: Code restoration quality pre-check**                              | `fileKey/nodeId/maxDepth`                | **v1.3.2**  |
-| 10  | `figma_generate_jsx`        | **⭐ One-click React/Vue component generation** (Flex/a11y/design system/responsive; v1.4.18 adds CSS Modules, UnoCSS attributify and TS Props inference) | `fileKey/nodeId/componentName/sceneName/framework/styleFormat/unocssAttributify/typescript` | v1.4.18 enhanced |
+| 10  | `figma_generate_jsx`        | **⭐ One-click React TSX generation** (Flex/a11y/design system/responsive; 9 pluggable styles in the enhanced pipeline, TS Props inference, smart-inference advice) | `fileKey/nodeId/componentName/sceneName/styleFormat/unocssAttributify/typescript/inference` | v1.4.19 enhanced |
 | 11  | `figma_generate_component`  | Basic component generation (legacy, recommend generate_jsx)                          | `fileKey/nodeId/styleFormat`             | v1          |
 | 12  | `figma_download_assets`     | **Download assets + SVGO optimization + publicCdnUrl; v1.4.18 places by bundler (src/assets etc., five shapes)** | `fileKey/sceneName/assetNodeIds/bundler` | v1.4.18 enhanced |
 | 13  | `figma_create_icon_sprite`  | **⭐ v1.3.2 new: Generate SVG Sprite**                                               | `svgDir/outputPath/typesPath`            | **v1.3.2**  |
@@ -387,6 +393,8 @@ npx figma-dev token list    # List saved Tokens
 | 18  | `figma_dev_fallback_capture`| **⭐ v1.4.4 new: Trigger browser fallback screenshot** (paywall screenshot + Dev Mode CSS + visual approximation mode) | `figmaUrl/devicePixelRatio/framework` | **v1.4.4**  |
 | 19  | `figma_verify_fidelity`     | **⭐ v1.4.4 new: Fidelity verification** (pixel diff + diff heatmap + quantified score 0-100%) | `figmaUrl/codeContent/threshold` | **v1.4.4**  |
 | 20  | `figma_ocr_extract`         | **⭐ v1.4.14 new: OCR text extraction** (native node JSON first + tesseract.js image OCR fallback) | `figmaUrl/imagePath/language/psm/oem` | **v1.4.14** |
+| 21  | `figma_generate_vue`        | **⭐ v1.4.19 new: One-click Vue SFC generation** (Vue3 `<script setup>` / Vue2 Options API; 5 Vue styles, TS Props, style sidecars, smart inference shared with React) | `fileKey/nodeId/componentName/vueVersion(2\|3)/styleFormat/inference` | **v1.4.19** |
+| 22  | `figma_batch_generate`      | **⭐ v1.4.19 new: Batch generation** (splits a page into Header/Hero/Features/Footer-style semantic blocks, one React/Vue file per block + barrel index + dependency graph) | `fileKey/nodeId/nodeIds/framework/styleFormat/vueVersion/componentNamePrefix/inference` | **v1.4.19** |
 
 ---
 
@@ -414,7 +422,7 @@ npx figma-dev token list    # List saved Tokens
 
 **Dependencies:** tesseract.js is an optional dependency (only needed for image OCR path), with install hint when missing. Remote image URLs have SSRF protection (rejects private network addresses).
 
-#### `figma_generate_jsx` (v1.4.18 enhanced, most commonly used)
+#### `figma_generate_jsx` (v1.4.19 enhanced, most commonly used)
 
 ```typescript
 {
@@ -424,23 +432,115 @@ npx figma-dev token list    # List saved Tokens
   componentName?: string;      // Component name (e.g. HeroSection)
   sceneName?: string;          // Scene name used for asset paths
   maxDepth?: number;           // Max traversal depth, default 15 (1-30)
-  framework?: 'react' | 'vue'; // Target framework, default react (vue added in v1.4.0)
-  // v1.4.18: pluggable styles — react/vue both support tailwind | unocss | css-modules
-  styleFormat?: 'tailwind' | 'unocss' | 'css-modules';
-  unocssAttributify?: boolean; // v1.4.18: UnoCSS attributify mode (text="sm center"), requires styleFormat=unocss
-  typescript?: boolean;        // Emit TypeScript (Vue can be TS/JS), default true
-  skipEnhancements?: boolean;  // Skip Flex/a11y/design-system/responsive enhancements
+  // v1.4.19: 9 styles available in the enhanced pipeline
+  // (registry has 11; inline-styles is legacy-only, css-variables planned for 1.5.0)
+  styleFormat?: 'tailwind' | 'unocss' | 'css-modules' | 'styled'
+              | 'emotion' | 'less' | 'sass'
+              | 'vanilla-extract' | 'panda';
+  unocssAttributify?: boolean; // UnoCSS attributify mode (text="sm center"), unocss only
+  typescript?: boolean;        // Emit TypeScript, default true
+  // v1.4.19 T21: per-category smart-inference switches (all default on; advisory only)
+  inference?: {
+    grid?: boolean;            // Grid rows/columns, sticky/fixed/absolute positioning hints
+    icons?: boolean;           // Lucide/Iconify icon suggestions
+    darkMode?: boolean;        // Dark-surface dark: variant hints
+    motion?: boolean;          // hover/pressed/spinner/transition motion hints
+  };
+  skipEnhancements?: boolean;  // Master switch: skips Flex/a11y/design-system/responsive and T21/T22 inference
   skipLintCheck?: boolean;     // Skip design-lint hints
   accessToken?: string;        // Optional; env var takes precedence otherwise
 }
 ```
 
+**v1.4.19 output behavior:**
+
+- 🎻 **New style renderers**: `styled` (Styled Components), `emotion`, `less`, `sass`, `vanilla-extract`, `panda` join the enhanced pipeline (the batch's "seven styles" work also deepened CSS Modules); unsupported framework×style combinations fail fast via dual zod/registry validation with a readable error (matrix below)
+- 💚 **For Vue use the dedicated `figma_generate_vue` tool** (below): Vue3 `<script setup>` or Vue2 Options API SFC
+- 📦 **For full pages use `figma_batch_generate`** (below) with automatic semantic block splitting
+- 🧠 **Smart-inference advice (comments only, never rewrites output code)**: the TSX header comment lists Grid/icons/dark/motion hints (T21), form-validation / Carousel / Accordion / Tabs / Modal interaction scaffolds, repeated-children → TS interface + mock + `.map()` data examples, and PascalCase naming for `Frame N` nodes (T22); full structured results are in `structuredContent.reports`
+
 **v1.4.18 output behavior:**
 
-- 🎴 **Multi-style pipelines**: `styleFormat:'css-modules'` emits a sidecar `X.module.css` (React uses `styles['class']`, Vue uses `<style module src="./X.module.css">`); `unocss` with `unocssAttributify:true` emits attributify-style attributes; unsupported framework×style combinations return an explicit pre-validated error (`UnsupportedStyleFormatError`)
-- 🧩 **TS Props inference**: reads Component Properties (TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP); React components get a JSDoc `XxxProps` interface (with `@default` / swap-key docs), Vue3 gets `interface Props` + `withDefaults(defineProps<Props>(), {...})`; components without properties emit no empty interface
+- 🎴 **Multi-style pipeline**: `styleFormat:'css-modules'` emits a sidecar `X.module.css` (React uses `styles['class']`); `unocss` with `unocssAttributify:true` emits attributify-style attributes
+- 🧩 **TS Props inference**: reads Component Properties (TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP) and emits a JSDoc `XxxProps` interface (with `@default` / swap-key docs); components without properties emit no empty interface
 - 🧹 **Import organizing**: before Prettier, used imports are added and unused ones removed (including statement-level `import type`); the result is idempotent
 - 🖼️ Asset reference paths are corrected per target bundler (Vite/Webpack/Next.js/Remix auto-detected; CLI `--bundler` overrides)
+
+#### `figma_generate_vue` (new in v1.4.19, first-class Vue SFC entry)
+
+```typescript
+{
+  figmaUrl?: string;           // Figma URL (alternative to fileKey+nodeId)
+  fileKey?: string;
+  nodeId?: string;
+  componentName?: string;      // Inferred (PascalCase) from node name by default
+  sceneName?: string;          // Asset sub-path
+  projectRoot?: string;        // Used for bundler auto-detection
+  bundler?: 'auto' | 'vite' | 'webpack' | 'nextjs' | 'remix';
+  maxDepth?: number;           // Default 15 (1-30)
+  vueVersion?: 2 | 3;          // Default 3: <script setup lang="ts">; 2: Options API (defineComponent + PropType/validator)
+  // 5 styles on Vue: tailwind / unocss / css-modules / less / sass
+  // styled/emotion/vanilla-extract/panda are React-only and fail before any network call
+  styleFormat?: 'tailwind' | 'unocss' | 'css-modules' | 'less' | 'sass';
+  unocssAttributify?: boolean; // Default false, unocss only
+  typescript?: boolean;        // Default true
+  inference?: { grid?: boolean; icons?: boolean; darkMode?: boolean; motion?: boolean };
+  skipEnhancements?: boolean;  // Default false (master switch for all T21/T22 advice)
+  skipLintCheck?: boolean;
+  accessToken?: string;
+}
+```
+
+**Output:** a single `.vue` SFC (`<template>` + `<script setup lang="ts">` / Options API + `<style>`) running the same enhancement pipeline and T21/T22 advice as React (interaction scaffolds appear as advisory comments on Vue; list-data examples use `v-for`); `css-modules/less/sass` produce a style sidecar (`<style module src="./X.module.css">` or `<style lang="less/scss">`).
+
+#### `figma_batch_generate` (new in v1.4.19, full-page batch generation)
+
+```typescript
+{
+  figmaUrl?: string;
+  fileKey?: string;
+  nodeId: string;              // Root page/large frame (the auto-split target), required
+  nodeIds?: string[];          // Explicit block IDs; omit to auto-split the whole page (tree-order normalized, deterministic)
+  componentNamePrefix?: string;// ASCII prefix for every block name, e.g. 'Landing' → LandingHeader / LandingHero
+  sceneName?: string;
+  projectRoot?: string;
+  bundler?: 'auto' | 'vite' | 'webpack' | 'nextjs' | 'remix';
+  maxDepth?: number;           // Default 15
+  framework?: 'react' | 'vue'; // Default react
+  vueVersion?: 2 | 3;          // Default 3 (framework=vue only)
+  styleFormat?: StyleFormat;   // Same as single-component tools; unsupported combos fail before network calls
+  unocssAttributify?: boolean;
+  inference?: { grid?: boolean; icons?: boolean; darkMode?: boolean; motion?: boolean };
+  skipEnhancements?: boolean;
+  accessToken?: string;
+}
+```
+
+**Output:** a block manifest (header / hero / features / section / sticky / footer semantic types), one complete component file per block (the same pipeline as `figma_generate_jsx`/`figma_generate_vue`), an `index.ts` barrel, a file dependency graph (barrel → component → style sidecar) and aggregated pending assets. MCP calls never write to disk; CLI `figma-dev batch` writes a multi-file directory directly.
+
+**Custom component-library mapping (v1.4.19 T19):** place `.figma-dev/components.json` at the project root (JSON Schema draft-07; `components.schema.json` ships with the package) to map Figma node names / component keys to library components (e.g. shadcn/ui, Ant Design, Element Plus) with prop passthrough. Without it, built-in mappings apply (a root `components.json` is treated as shadcn/ui; the two files never conflict). Custom rules take priority and the first keyword hit wins; an invalid file is reported (i18n) and ignored without interrupting generation. Template:
+
+```json
+{
+  "$schema": "https://figma-dev-tools.com/components.schema.json",
+  "version": 1,
+  "components": [
+    {
+      "name": "ElButton",
+      "library": "element-plus",
+      "importPath": "element-plus",
+      "keywords": ["button", "按钮"],
+      "suggestedProps": { "type": "primary" },
+      "usageExample": "<el-button type=\"primary\">Get started</el-button>"
+    },
+    {
+      "name": "PrimaryButton",
+      "importPath": "@/components/primary-button",
+      "keywords": ["cta", "primary action"]
+    }
+  ]
+}
+```
 
 #### `figma_generate_styles` / `figma_sync_to_project` (W3C DTCG new in v1.4.18)
 
@@ -448,17 +548,26 @@ npx figma-dev token list    # List saved Tokens
 - `figma_sync_to_project` `format`: `css` | `tailwind` | `json` | **`dtcg`** | `all` (`all` additionally writes `design-tokens.tokens.json`)
 - DTCG mapping: colors → `$type:'color'`; spacing/radii → `dimension` (px/rem); shadows → `shadow` (incl. inset detection); text styles → nested `typography` groups (font-family/font-size/font-weight/line-height/letter-spacing); empty groups are omitted; a structural validation runs before writing and every invalid node is reported with its full path (e.g. `color.primary-500`)
 
-### 🧭 Framework × Style Support Matrix (v1.4.18)
+### 🧭 Framework × Style Support Matrix (v1.4.19)
 
-| Style option | React | Vue 3 | Notes |
-| --- | --- | --- | --- |
-| Tailwind (tailwind-v4 mapping) | ✅ | ✅ | Default; React merges via `cn()` (clsx + tailwind-merge) |
-| UnoCSS preset-wind | ✅ | ✅ | Utilities isomorphic to Tailwind |
-| UnoCSS attributify | ✅ | ✅ | `--attributify` / MCP `unocssAttributify`; emits usage hints |
-| CSS Modules | ✅ | ✅ | Sidecar `*.module.css`; semantic class names, shared-declaration merging, collision de-dup, subset `composes` reuse |
-| inline-styles (legacy pipeline) | ✅ | — | Retained only in the React legacy pipeline |
+The registry (single source of truth at `src/services/style-renderers/registry.ts`) holds **11 descriptors**; 9 are available in the v1.4.19 enhanced pipeline:
 
-> styled-components / Emotion / Less / Sass / vanilla-extract / Panda CSS are planned for v1.4.19; Vue2 Options API and WeChat mini-program / uni-app / Taro are planned for v1.4.19/v1.4.20.
+| Style option (`styleFormat`) | React | Vue 3 | Vue 2 | Notes |
+| --- | --- | --- | --- | --- |
+| Tailwind (`tailwind`, default) | ✅ | ✅ | ✅ | tailwind-v4 mapping; React merges via `cn()` (clsx + tailwind-merge) |
+| UnoCSS preset-wind (`unocss`) | ✅ | ✅ | ✅ | Utilities isomorphic to Tailwind; `unocssAttributify` enables attributify mode |
+| CSS Modules (`css-modules`) | ✅ | ✅ | ✅ | Sidecar `*.module.css`; semantic class names, shared-declaration merging, collision de-dup, `composes` reuse |
+| Styled Components (`styled`) | ✅ | — | — | New in v1.4.19; tagged-template styled components + ThemeProvider placeholder |
+| Emotion (`emotion`) | ✅ | — | — | New in v1.4.19; `css` prop / `css()` object-style constants |
+| Less (`less`) | ✅ | ✅ | ✅ | New in v1.4.19; variables, nesting, mixins; `.less` sidecar |
+| Sass/SCSS (`sass`) | ✅ | ✅ | ✅ | New in v1.4.19; variables, nesting, mixins; `.scss` sidecar |
+| vanilla-extract (`vanilla-extract`) | ✅ | — | — | New in v1.4.19; type-safe zero-runtime `.css.ts` |
+| Panda CSS (`panda`) | ✅ | — | — | New in v1.4.19; `css()` object styles + cva/recipe hints |
+| inline-styles (`inline-styles`) | ✅¹ | — | — | Contract retained only in the legacy `figma_generate_component` pipeline |
+| CSS variables component styles (`css-variables`) | 🔜 | 🔜 | 🔜 | Planned for v1.5.0; `:root` token extraction already exists today |
+
+> ¹ The legacy React pipeline (`figma_generate_component`) supports tailwind / css-modules / inline-styles; use `figma_generate_jsx` for new components.
+> Unsupported combinations (e.g. Vue + styled/emotion/vanilla-extract/panda, or css-variables in any pipeline) fail before any network call via dual zod/registry validation — no silent degradation. WeChat mini-program / uni-app / Taro are planned for v1.4.20.
 
 ---
 
@@ -488,8 +597,10 @@ npx figma-dev-tools <command> [options]
 | `figma-dev lint <url>`       | **✅ Design spec pre-check**                       | `--node <id>` `--depth <n>` `--format md/json` `--output <file>`           | **v1.3.2** |
 | `figma-dev metadata <url>`   | Get metadata overview                              | `--node <id>` `--depth <n>`                                                 | v1.1.0      |
 | `figma-dev structured <url>` | **Get framework-agnostic structured data**         | `--node <id>` `--depth <n>` `--format pretty/json` `--output <file>`        | v1.1.0      |
-| `figma-dev jsx <url>`        | **Generate React/Vue components** (Flex/a11y/design system/responsive; v1.4.18 adds css-modules, `--attributify`, TS Props inference and import organizing) | `--name <ComponentName>` `--scene <name>` `--depth <n>` `--framework react|vue` `--style tailwind|unocss|css-modules` `--attributify` `--typescript/--no-typescript` `--bundler auto|vite|webpack|nextjs|remix|none` `--skip-lint` `--inline-svg` | **v1.4.18** |
-| `figma-dev component <url>`  | Generate basic component                           | `--name <name>` `--node <id>` `--js` `--style tailwind` `--no-children` `--output <dir>` | v1          |
+| `figma-dev jsx <url>`        | **Generate React TSX components** (Flex/a11y/design system/responsive; v1.4.19 brings 9 enhanced-pipeline styles, TS Props, import organizing, `--no-smart-*` toggles) | `--name` `--scene` `--depth` `--style <9 options>` `--attributify` `--typescript/--no-typescript` `--bundler` `--no-smart-grid/icons/dark/motion` `--skip-lint` | **v1.4.19** |
+| `figma-dev vue <url>`        | **⭐ v1.4.19 new: Generate a Vue SFC** (Vue3 `<script setup>` default / Vue2 Options API; 5 Vue styles + sidecars) | `--name` `--scene` `--vue-version 2\|3` `--style tailwind\|unocss\|css-modules\|less\|sass` `--attributify` `--bundler` `--no-smart-grid/icons/dark/motion` | **v1.4.19** |
+| `figma-dev batch <url>`      | **⭐ v1.4.19 new: Full-page batch generation** (semantic block splitting, one file per block + barrel index) | `--node/--nodes <ids>` `--out <dir>` (default `figma-generated`) `--prefix <Prefix>` `--framework react\|vue` `--vue-version 2\|3` `--style` `--no-smart-grid/icons/dark/motion` | **v1.4.19** |
+| `figma-dev component <url>`  | Generate basic component (legacy React pipeline, recommend jsx/vue) | `--name <name>` `--node <id>` `--js` `--style tailwind|css-modules|inline-styles` `--no-children` `--output <dir>` | v1          |
 | `figma-dev assets <url>`     | Download assets (SVGO optimized; v1.4.18 places by bundler into public/ or src/assets/) | `--node <id>` `--nodes <id1,id2>` `--scene <name>` `--scale <n>` `--svg-format svg|png` `--bundler auto|vite|webpack|nextjs|remix|none` `--project-root <dir>` | **v1.4.18** |
 | `figma-dev sync <url>`       | Sync Design Tokens (v1.4.18 adds dtcg/all)         | `--node <id>` `--format oklch` `--spacing-unit px|rem` `--prefix <name>` `--output-format css|tailwind|json|dtcg|all` `--file-name <name>` | **v1.4.18** |
 | `figma-dev screenshot <url>` | Get screenshot                                     | `--node <id>` `--format png` `--scale 2` `--download <dir>`                 | v1          |
@@ -532,6 +643,28 @@ figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
 # 🎴 v1.4.18 new: CSS Modules (emits HeroSection.module.css sidecar)
 figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
   --name HeroSection --style css-modules
+
+# 💚 v1.4.19 new: Vue3 SFC (<script setup lang="ts">; 5 styles incl. Tailwind/Sass)
+figma-dev vue "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
+  --name HeroSection --style sass
+
+# 💚 v1.4.19 new: Vue2 Options API (defineComponent + PropType/validator)
+figma-dev vue "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
+  --name HeroSection --vue-version 2
+
+# 🎻 v1.4.19 new: new style renderers (styled/emotion/less/sass/vanilla-extract/panda)
+figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
+  --name PricingCard --style vanilla-extract
+
+# 📦 v1.4.19 new: full-page batch generation (auto semantic split, writes figma-generated/)
+figma-dev batch "https://www.figma.com/design/xxxxx/MyProject?node-id=1-2" \
+  --prefix Landing --out src/components/landing
+# Vue2 batch: add --framework vue --vue-version 2
+
+# 🧠 v1.4.19 new: disable smart-inference advice as needed (all four default on;
+# the MCP skipEnhancements input is the master switch)
+figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
+  --name HeroSection --no-smart-dark --no-smart-motion
 
 # 🪙 v1.4.18 new: sync W3C DTCG tokens (design-tokens.tokens.json)
 figma-dev sync "https://www.figma.com/design/xxxxx/MyProject" --output-format dtcg
@@ -944,7 +1077,7 @@ It's recommended to run `figma_lint_design` to check design quality before gener
 - **Paywall Fallback**: figma-dev-tools v1.4.4's exclusive `BrowserFallbackService` — when the Figma REST API fails due to paywall, it automatically launches Playwright to capture a screenshot as a fallback. No competitor offers a similar mechanism.
 - **Fidelity Verification Loop**: `figma_verify_fidelity` provides pixel diff + diff heatmap + quantified score (0-100%). Other tools mostly stop at "pixel-perfect" marketing claims without automated verification.
 - **Framework-agnostic Structured Data**: `figma_get_structured_data` outputs standard JSON supporting any framework, while commercial SaaS solutions mostly lock into specific frameworks.
-- **Open Source + Free + Full-featured**: MIT license, no paid seat required to use all 20 MCP tools.
+- **Open Source + Free + Full-featured**: MIT license, no paid seat required to use all 22 MCP tools.
 
 ---
 

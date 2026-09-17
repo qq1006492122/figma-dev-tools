@@ -281,11 +281,12 @@ function declarationKeySet(declarations: readonly CssDeclaration[]): Set<string>
  * 节点名 → 合法 CSS 类名片段（kebab-case）。
  *
  * 中文等非 ASCII 字符被剥离；结果为空或数字开头时回退到 figmaId 派生。
+ * v1.4.19 T16 起导出，供 Less/Sass 预处理器渲染器复用同一命名口径。
  *
  * @param node - 精简节点
  * @returns 合法类名片段（可能为空字符串）
  */
-function nodeNameToClass(node: ProcessedNode): string {
+export function nodeNameToClass(node: ProcessedNode): string {
   const fromName = (node.name || '')
     .trim()
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
@@ -309,6 +310,8 @@ function nodeNameToClass(node: ProcessedNode): string {
 export class CssModulesRenderer {
   /** 样式方案标识 */
   readonly id = 'css-modules' as const;
+  /** v1.4.19 T16：声明 css-module 绑定形态，供 React/Vue 生成器统一走 styles['x']/$style['x'] 访问 */
+  readonly classBinding = 'css-module' as const;
   /** CSS Modules 无需配置建议 */
   readonly hints: readonly never[] = [];
 

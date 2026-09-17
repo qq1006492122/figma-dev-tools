@@ -56,6 +56,22 @@ export interface NodeStyleResult {
    * 值统一空字符串（React 未知布尔属性跨版本行为不一致，空串最稳）。
    */
   attributes?: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  /**
+   * 替代原生标签的组件标识符（v1.4.19 T14：styled-components 等）。
+   * 出现时生成器以 `<Identifier ...>` 替换语义标签，且不再输出静态 className；
+   * 标识符对应的样式声明由渲染器经 buildPreamble 聚合输出。
+   */
+  elementIdentifier?: string;
+  /**
+   * 需要原样追加到开标签的属性片段（v1.4.19 T15：Emotion 的 css={...}）。
+   * 片段必须为自洽的 JSX/Vue 属性语法，渲染器负责转义。
+   */
+  extraProps?: readonly string[];
+  /**
+   * className 是否为 JS 表达式标识符而非静态类名字符串（v1.4.19 T17：Panda css() 返回字符串常量）。
+   * true 时 React 输出 className={identifier}（非 `className="identifier"`）。
+   */
+  classNameIsExpression?: boolean;
   /** 无法用类名表达时的内联样式兜底（写入 style 属性） */
   inlineStyle?: Record<string, string | number>;
   /** 无法完整映射时的人工复核提示 */
@@ -75,13 +91,37 @@ export interface StyleHint {
   readonly code: string;
 }
 
-/** 节点渲染上下文（T9 起承载 componentName 等用于模块类名派生） */
+/** 节点渲染上下文（T9 起承载 componentName 等用于模块类名派生；T14 起承载 isRoot） */
 export interface StyleRenderContext {
   /** 目标框架 */
   framework: Framework;
   /** 当前组件名（CSS Modules 等场景使用） */
   componentName?: string;
+  /** 当前节点是否为组件根节点（v1.4.19 T14：根 styled 包装命名 Root 后缀） */
+  isRoot?: boolean;
+  /** 父节点在渲染器中注册的类名/标识符（v1.4.19 T16：Less/Sass 选择器嵌套归属） */
+  parentIdentifier?: string;
 }
+
+/**
+ * 同文件样式前导段（v1.4.19 T14/T15/T17）。
+ *
+ * styled-components 的 `const X = styled.div\`...\``、Emotion/Panda 的
+ * `const x = css({...})` 等与组件同文件、声明于组件之前的样式定义。
+ */
+export interface StylePreamble {
+  /** 注入主组件声明之前的完整代码 */
+  readonly code: string;
+  /** 前导代码所需的完整 import 语句（由生成器并入 imports 集合，再交 import-organizer 整理） */
+  readonly imports: readonly string[];
+}
+
+/**
+ * 类名绑定形态（v1.4.19 T16）。
+ * - 缺省：静态原子类字符串（tailwind/unocss）或组件常量表达式（panda，由 classNameIsExpression 区分）；
+ * - 'css-module'：经 styles['x']（React）/ $style['x']（Vue）间接访问，配合旁路文件。
+ */
+export type ClassBindingKind = 'css-module';
 
 /**
  * 组件级旁路文件（v1.4.18 T9）：与主组件同名的配套样式文件等。
@@ -94,6 +134,14 @@ export interface StyleSidecarFile {
   readonly fileName: string;
   /** 文件完整内容 */
   readonly content: string;
+  /** 样式语言（v1.4.19 T16：Vue style 块据此输出 lang="less"/"scss"；缺省 css） */
+  readonly lang?: 'css' | 'less' | 'scss' | 'ts';
+  /**
+   * React 管线引用该旁路文件的完整 import 语句（v1.4.19 T17）。
+   * 缺省由生成器按 `import styles from "./${fileName}"` 派生（CSS Modules 形态）；
+   * vanilla-extract 等需要命名空间导入的方案覆盖为 `import * as styles from "./Card.css"`。
+   */
+  readonly reactImport?: string;
 }
 
 /**
@@ -106,6 +154,11 @@ export interface StyleSidecarFile {
 export interface StyleRenderer {
   /** 样式方案标识 */
   readonly id: StyleFormat;
+  /**
+   * 类名绑定形态（v1.4.19 T16）：'css-module' 时生成器以 styles['x']/$style['x']
+   * 引用 renderNode 返回的类名，并消费 buildSidecar 旁路文件；缺省按原子类处理。
+   */
+  readonly classBinding?: ClassBindingKind;
   /**
    * 组件级配置建议（v1.4.18 T8）：如 uno.config 预设、virtual:uno.css 引入位置、
    * React attributify 的 TS shim。无建议的渲染器（tailwind）返回空数组。
@@ -126,4 +179,12 @@ export interface StyleRenderer {
    * @returns 旁路文件描述；无聚合产物时返回 undefined
    */
   buildSidecar?(componentName: string): StyleSidecarFile | undefined;
+  /**
+   * 组件树渲染结束后产出同文件前导样式段（v1.4.19 T14/T15/T17，可选）。
+   * 仅 React 管线消费（styled/emotion/panda 等不支持 Vue 的方案不会在 Vue 侧创建）。
+   *
+   * @param componentName - 当前组件名
+   * @returns 前导段（代码 + import）；无聚合产物时返回 undefined
+   */
+  buildPreamble?(componentName: string): StylePreamble | undefined;
 }

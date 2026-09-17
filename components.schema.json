@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://figma-dev-tools.com/components.schema.json",
+  "title": "figma-dev-tools custom component mappings",
+  "description": "Schema for project-level custom UI component mappings at .figma-dev/components.json. Custom rules take priority over built-in shadcn/ui, Ant Design and Element Plus mappings. Invalid files are reported (i18n) and ignored; code generation continues with built-in mappings.",
+  "type": "object",
+  "required": ["version", "components"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional editor schema reference."
+    },
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Mapping file format version."
+    },
+    "components": {
+      "type": "array",
+      "description": "Custom component rules evaluated before built-in tables (first keyword hit wins).",
+      "items": {
+        "type": "object",
+        "required": ["name", "importPath", "keywords"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Target component name, e.g. \"PrimaryButton\" or \"ElButton\"."
+          },
+          "library": {
+            "type": "string",
+            "enum": ["shadcn-ui", "ant-design", "element-plus"],
+            "description": "Target library. Omit to make the rule library-agnostic (applies to whichever library is detected)."
+          },
+          "importPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Import source: package name (\"antd\", \"element-plus\") or alias path (\"@/components/...\")."
+          },
+          "keywords": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Case-insensitive node-name keywords (Chinese or English), e.g. [\"button\", \"按钮\"]."
+          },
+          "usageExample": {
+            "type": "string",
+            "description": "Optional usage snippet shown in suggestions (JSX or Vue template)."
+          },
+          "suggestedProps": {
+            "type": "object",
+            "description": "Static props suggested on every match (values must be string or boolean).",
+            "additionalProperties": {
+              "type": ["string", "boolean"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -36,6 +36,8 @@ const HELP_PATHS: readonly string[] = [
   'lint',
   'structured',
   'jsx',
+  'vue',
+  'batch',
   'assets',
   'tutorial',
   'mcp',

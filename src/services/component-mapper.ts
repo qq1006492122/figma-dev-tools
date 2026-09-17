@@ -18,6 +18,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { getI18n } from '../i18n/index.js';
+import { getBuiltinDefsForLibrary } from './component-library-defs.js';
+
 interface ComponentMatchFill {
   type?: string;
 }
@@ -66,6 +69,45 @@ export interface LibraryDetectionResult {
   reason: string;
   /** 检测到的组件库版本 */
   version?: string;
+}
+
+// ============ 自定义映射（v1.4.19 T19） ============
+
+/** 项目自定义映射文件相对路径（<projectRoot>/.figma-dev/components.json） */
+export const CUSTOM_MAPPING_FILE_RELATIVE = path.join('.figma-dev', 'components.json');
+
+/**
+ * components.json 中的单条自定义组件规则
+ */
+export interface CustomComponentRule {
+  /** 目标库组件名 */
+  name: string;
+  /**
+   * 适用组件库；省略时对当前检测到的任意库生效（库无关规则）。
+   * 不允许填 'none'（schema 层与加载校验双重拒绝）。
+   */
+  library?: Exclude<ComponentLibrary, 'none'>;
+  /** import 路径（包名或别名路径） */
+  importPath: string;
+  /** 节点名关键词（小写匹配） */
+  keywords: readonly string[];
+  /** 使用示例（覆盖内建示例） */
+  usageExample?: string;
+  /** 静态建议 props（直接透传，不做节点名推断） */
+  suggestedProps?: Record<string, string | boolean>;
+}
+
+/** 自定义规则校验/解析的成功结果 */
+interface CustomRulesOk {
+  readonly ok: true;
+  readonly rules: readonly CustomComponentRule[];
+}
+
+/** 自定义规则校验/解析的失败结果（detail 为可直接展示的语言无关细节） */
+interface CustomRulesError {
+  readonly ok: false;
+  /** 失败细节（JSON 解析消息或字段路径），拼入 i18n 文案 */
+  readonly detail: string;
 }
 
 // ============ 组件定义 ============
@@ -261,6 +303,12 @@ export class ComponentMapper {
   private _projectRoot: string;
   /** 检测结果缓存 */
   private _detectionCache: LibraryDetectionResult | null = null;
+  /** i18n（v1.4.19 T19 自定义配置错误双语） */
+  private _i18n = getI18n();
+  /** 自定义规则缓存：null=尚未加载；空数组=文件不存在或已降级 */
+  private _customRules: readonly CustomComponentRule[] | null = null;
+  /** 最近一次自定义配置加载错误（已按当前语言翻译）；无错误为 null */
+  private _customConfigError: string | null = null;
 
   constructor(projectRoot: string = process.cwd()) {
     this._projectRoot = projectRoot;
@@ -324,6 +372,9 @@ export class ComponentMapper {
 
   /**
    * 匹配单个节点到组件
+   *
+   * v1.4.19 T19：自定义 .figma-dev/components.json 规则优先于内建表；
+   * 命中失败再按检测到的库查 shadcn/antd/element-plus 内建表。
    */
   matchComponent(node: ComponentMatchNode, library?: ComponentLibrary): ComponentMatch | null {
     const lib = library || this.detectLibrary().library;
@@ -331,12 +382,15 @@ export class ComponentMapper {
 
     const nodeName = (node.name || '').toLowerCase();
 
+    // 自定义规则优先（命中即返回，不回退内建）
+    const customMatch = this._matchCustomRule(nodeName, lib);
+    if (customMatch) return customMatch;
+
     if (lib === 'shadcn-ui') {
       return this._matchShadcnComponent(node, nodeName);
     }
 
-    // 其他组件库基础匹配（后续扩展）
-    return null;
+    return this._matchBuiltinComponent(node, nodeName, lib);
   }
 
   /**
@@ -365,7 +419,213 @@ export class ComponentMapper {
     if (library === 'shadcn-ui') {
       return SHADCN_COMPONENTS.map((c) => c.name);
     }
-    return [];
+    // v1.4.19 T19：antd / element-plus 内建表
+    return getBuiltinDefsForLibrary(library).map((def) => def.name);
+  }
+
+  /**
+   * 获取最近一次自定义映射配置的加载错误（v1.4.19 T19，TR-19.2）。
+   *
+   * 触发懒加载；文件不存在不算错误。错误消息已按当前 i18n 语言翻译。
+   * 调用方（CLI/MCP/测试）可据此提示用户，但生成主流程永不因此中断。
+   *
+   * @returns 翻译后的错误消息；无错误/无文件时返回 null
+   */
+  getCustomConfigError(): string | null {
+    this._loadCustomRules();
+    return this._customConfigError;
+  }
+
+  /**
+   * 懒加载并校验 .figma-dev/components.json（仅读一次，结果缓存）。
+   *
+   * @returns 自定义规则列表；文件不存在或非法时为空数组（降级）
+   */
+  private _loadCustomRules(): readonly CustomComponentRule[] {
+    if (this._customRules !== null) return this._customRules;
+
+    const file = path.join(this._projectRoot, CUSTOM_MAPPING_FILE_RELATIVE);
+    if (!fs.existsSync(file)) {
+      this._customRules = [];
+      this._customConfigError = null;
+      return this._customRules;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    } catch (error) {
+      this._markCustomRulesFailed(error instanceof Error ? error.message : String(error));
+      return this._customRules ?? [];
+    }
+
+    const result = parseCustomRules(parsed);
+    if (!result.ok) {
+      this._markCustomRulesFailed(result.detail);
+      return this._customRules ?? [];
+    }
+
+    this._customRules = result.rules;
+    this._customConfigError = null;
+    return this._customRules;
+  }
+
+  /**
+   * 记录自定义配置降级：空规则 + i18n 错误，并向 stderr 输出一次
+   * （MCP stdio 下不污染协议通道；CLI 下用户直接可见）。
+   *
+   * @param detail - 语言无关的失败细节（JSON 解析消息/字段路径）
+   */
+  private _markCustomRulesFailed(detail: string): void {
+    this._customRules = [];
+    this._customConfigError = this._i18n.t('componentMapper.customConfigInvalid', detail) as string;
+    console.error(this._customConfigError);
+  }
+
+  /**
+   * 按自定义规则匹配节点（优先于一切内建表）。
+   *
+   * @param nodeName - 已小写化的节点名
+   * @param library - 当前检测到的组件库
+   * @returns 匹配结果；未命中返回 null
+   */
+  private _matchCustomRule(
+    nodeName: string,
+    library: Exclude<ComponentLibrary, 'none'>,
+  ): ComponentMatch | null {
+    const rules = this._loadCustomRules();
+    for (const rule of rules) {
+      // 规则限定了库但与当前库不一致则跳过；未限定库的规则库无关
+      if (rule.library !== undefined && rule.library !== library) continue;
+      const keywordMatch = rule.keywords.some((kw) => nodeName.includes(kw.toLowerCase()));
+      if (!keywordMatch) continue;
+
+      return {
+        componentName: rule.name,
+        library,
+        importPath: rule.importPath,
+        // 显式配置即高置信，但不超过 0.9（仍建议人工确认）
+        confidence: 0.85,
+        suggestedProps: rule.suggestedProps ? { ...rule.suggestedProps } : undefined,
+        usageExample: rule.usageExample ?? `<${rule.name} />`,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * antd / element-plus 内建表匹配（置信度模型与 shadcn 对齐）。
+   *
+   * @param node - 待匹配节点
+   * @param nodeName - 已小写化的节点名
+   * @param library - 目标库（ant-design | element-plus）
+   * @returns 匹配结果；未命中返回 null
+   */
+  private _matchBuiltinComponent(
+    node: ComponentMatchNode,
+    nodeName: string,
+    library: 'ant-design' | 'element-plus',
+  ): ComponentMatch | null {
+    for (const comp of getBuiltinDefsForLibrary(library)) {
+      const keywordMatch = comp.keywords.some((kw) => nodeName.includes(kw.toLowerCase()));
+      if (!keywordMatch) continue;
+
+      // 与 shadcn 相同的特征置信度加权
+      let confidence = 0.7;
+      const features = comp.features;
+
+      if (
+        features.hasText &&
+        (node.characters || node.children?.some((c) => c.originalType === 'TEXT' || c.role === 'text'))
+      ) {
+        confidence += 0.1;
+      }
+      if (features.isInteractive) {
+        confidence += 0.1;
+      }
+      if (features.minChildren && node.children && node.children.length >= features.minChildren) {
+        confidence += 0.05;
+      }
+      if (features.hasBackground && node.fills?.some((f) => f.type === 'SOLID')) {
+        confidence += 0.05;
+      }
+
+      return {
+        componentName: comp.name,
+        library,
+        importPath: comp.importPath,
+        confidence: Math.min(1, confidence),
+        suggestedProps: this._suggestLibraryProps(library, comp.name, node),
+        usageExample: comp.usageExample,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * 为 antd / element-plus 命中组件推断建议 props（按节点名关键词）。
+   *
+   * @param library - 组件库
+   * @param componentName - 内建组件名
+   * @param node - 命中节点
+   * @returns props 键值（值仅 string/boolean）
+   */
+  private _suggestLibraryProps(
+    library: 'ant-design' | 'element-plus',
+    componentName: string,
+    node: ComponentMatchNode,
+  ): Record<string, string | boolean> {
+    const props: Record<string, string | boolean> = {};
+    const name = (node.name || '').toLowerCase();
+    const isButton =
+      componentName === 'Button' || componentName === 'ElButton';
+
+    if (isButton) {
+      if (library === 'ant-design') {
+        if (name.includes('primary') || name.includes('主要')) props.type = 'primary';
+        else if (name.includes('dashed') || name.includes('虚线')) props.type = 'dashed';
+        else if (name.includes('link') || name.includes('链接')) props.type = 'link';
+        else if (name.includes('text') || name.includes('文本')) props.type = 'text';
+        else props.type = 'default';
+        if (name.includes('danger') || name.includes('危险')) props.danger = true;
+        if (name.includes('small') || name.includes('sm')) props.size = 'small';
+        else if (name.includes('large') || name.includes('lg') || name.includes('大')) props.size = 'large';
+      } else {
+        if (name.includes('success') || name.includes('成功')) props.type = 'success';
+        else if (name.includes('warning') || name.includes('警告')) props.type = 'warning';
+        else if (name.includes('danger') || name.includes('危险')) props.type = 'danger';
+        else if (name.includes('info') || name.includes('信息')) props.type = 'info';
+        else if (name.includes('primary') || name.includes('主要')) props.type = 'primary';
+        if (name.includes('plain') || name.includes('朴素')) props.plain = true;
+        if (name.includes('round') || name.includes('圆角')) props.round = true;
+        if (name.includes('small') || name.includes('sm')) props.size = 'small';
+        else if (name.includes('large') || name.includes('lg') || name.includes('大')) props.size = 'large';
+      }
+      if (name.includes('disabled') || name.includes('禁用')) props.disabled = true;
+      if (name.includes('loading') || name.includes('加载')) props.loading = true;
+    }
+
+    if (
+      componentName === 'Input' ||
+      componentName === 'ElInput' ||
+      componentName === 'Textarea' ||
+      componentName === 'ElInputTextarea' ||
+      componentName === 'Select' ||
+      componentName === 'ElSelect'
+    ) {
+      if (name.includes('disabled') || name.includes('禁用')) props.disabled = true;
+      if (name.includes('error') || name.includes('invalid') || name.includes('错误')) {
+        props['aria-invalid'] = true;
+      }
+    }
+
+    if (componentName === 'Switch' || componentName === 'ElSwitch') {
+      if (name.includes('checked') || name.includes('on') || name.includes('开')) props.checked = true;
+      if (name.includes('disabled') || name.includes('禁用')) props.disabled = true;
+    }
+
+    return props;
   }
 
   /**
@@ -531,6 +791,106 @@ export class ComponentMapper {
         return `<${componentName} />`;
     }
   }
+}
+
+// ============ 自定义配置校验（v1.4.19 T19） ============
+
+/** 可在 components.json 中声明的组件库集合（不含 none） */
+const CUSTOM_RULE_LIBRARIES: readonly string[] = ['shadcn-ui', 'ant-design', 'element-plus'];
+
+/**
+ * 运行时类型守卫：值为普通对象（非数组、非 null）
+ *
+ * @param value - 任意值
+ * @returns 是否为 Record<string, unknown>
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 校验并解析 components.json 内容（不依赖 ajv；结构化校验与
+ * components.schema.json 保持同步）。
+ *
+ * 任一 entry 非法即整体失败（TR-19.2：调用方降级为空规则并给 i18n 提示）。
+ *
+ * @param parsed - JSON.parse 后的未知值
+ * @returns 成功携带规则；失败携带字段级 detail
+ */
+function parseCustomRules(parsed: unknown): CustomRulesOk | CustomRulesError {
+  if (!isRecord(parsed) || !Array.isArray(parsed.components)) {
+    return {
+      ok: false,
+      detail: 'root must be an object with a "components" array',
+    };
+  }
+
+  const rules: CustomComponentRule[] = [];
+  const entries: readonly unknown[] = parsed.components;
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const where = `components[${index}]`;
+
+    if (!isRecord(entry)) {
+      return { ok: false, detail: `${where} must be an object` };
+    }
+    if (typeof entry.name !== 'string' || entry.name.trim() === '') {
+      return { ok: false, detail: `${where}.name must be a non-empty string` };
+    }
+    if (typeof entry.importPath !== 'string' || entry.importPath.trim() === '') {
+      return { ok: false, detail: `${where}.importPath must be a non-empty string` };
+    }
+    if (
+      !Array.isArray(entry.keywords) ||
+      entry.keywords.length === 0 ||
+      !entry.keywords.every((kw) => typeof kw === 'string' && kw.trim() !== '')
+    ) {
+      return {
+        ok: false,
+        detail: `${where}.keywords must be a non-empty array of non-empty strings`,
+      };
+    }
+    if (
+      entry.library !== undefined &&
+      (typeof entry.library !== 'string' || !CUSTOM_RULE_LIBRARIES.includes(entry.library))
+    ) {
+      return {
+        ok: false,
+        detail: `${where}.library must be one of ${CUSTOM_RULE_LIBRARIES.join(', ')}`,
+      };
+    }
+    if (entry.usageExample !== undefined && typeof entry.usageExample !== 'string') {
+      return { ok: false, detail: `${where}.usageExample must be a string` };
+    }
+
+    let suggestedProps: Record<string, string | boolean> | undefined;
+    if (entry.suggestedProps !== undefined) {
+      if (!isRecord(entry.suggestedProps)) {
+        return { ok: false, detail: `${where}.suggestedProps must be an object` };
+      }
+      for (const [key, value] of Object.entries(entry.suggestedProps)) {
+        if (typeof value !== 'string' && typeof value !== 'boolean') {
+          return {
+            ok: false,
+            detail: `${where}.suggestedProps.${key} must be a string or boolean`,
+          };
+        }
+      }
+      suggestedProps = { ...(entry.suggestedProps as Record<string, string | boolean>) };
+    }
+
+    rules.push({
+      name: entry.name,
+      importPath: entry.importPath,
+      keywords: (entry.keywords as string[]).map((kw) => kw.toLowerCase()),
+      library: entry.library as CustomComponentRule['library'],
+      usageExample: typeof entry.usageExample === 'string' ? entry.usageExample : undefined,
+      suggestedProps,
+    });
+  }
+
+  return { ok: true, rules };
 }
 
 // ============ 工厂函数 ============

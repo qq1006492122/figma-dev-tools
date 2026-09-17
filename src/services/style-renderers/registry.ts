@@ -5,18 +5,19 @@
  * CLI 选项、MCP zod schema、help 文案、管线支持矩阵与"暂不支持"错误
  * 均由本注册表派生，新增方案只需在此登记并实现 StyleRenderer。
  *
- * 状态矩阵（v1.4.18）：
+ * 状态矩阵（v1.4.19）：
  * - available：tailwind（双管线）、unocss（preset-wind 兼容原子类，T8 深化）、
  *   css-modules（T9 起增强新管线完整支持：同名 .module.css + styles.x/$style.x + composes；
  *   legacy React 管线保持占位契约不变）、inline-styles（legacy React 管线）；
- * - planned v1.4.19：styled / emotion / less / sass / vanilla-extract / panda；
+ * - v1.4.19 起增强新管线新增：styled / emotion（React 专属）、less / sass（React+Vue）、
+ *   vanilla-extract / panda（React 专属，成熟度见 README 支持矩阵）；
  * - planned v1.5.0：css-variables（组件级渲染；tokens 提取的 CSS 变量输出已存在）。
  *
  * @module services/style-renderers/registry
  */
 
 import { I18n } from '../../i18n/index.js';
-import type { StyleFormat, StyleLanguage, StyleRendererDescriptor } from './types.js';
+import type { Framework, StyleFormat, StyleLanguage, StyleRendererDescriptor } from './types.js';
 
 // ============ 错误类型 ============
 
@@ -78,61 +79,55 @@ const REGISTRY_DATA: readonly StyleRendererDescriptor[] = [
     id: 'styled',
     labels: { 'zh-CN': 'Styled Components', 'en-US': 'Styled Components' },
     descriptions: {
-      'zh-CN': '模板字符串 styled 组件 + ThemeProvider 占位',
-      'en-US': 'Tagged-template styled components with ThemeProvider placeholder',
+      'zh-CN': '模板字符串 styled 组件 + ThemeProvider 占位（v1.4.19 起，仅 React）',
+      'en-US': 'Tagged-template styled components with ThemeProvider placeholder (v1.4.19, React only)',
     },
-    status: 'planned',
-    plannedVersion: '1.4.19',
+    status: 'available',
   },
   {
     id: 'emotion',
     labels: { 'zh-CN': 'Emotion', 'en-US': 'Emotion' },
     descriptions: {
-      'zh-CN': 'css prop / styled API / 对象样式',
-      'en-US': 'css prop / styled API / object styles',
+      'zh-CN': 'css prop / css() 对象样式常量（v1.4.19 起，仅 React）',
+      'en-US': 'css prop / css() object-style constants (v1.4.19, React only)',
     },
-    status: 'planned',
-    plannedVersion: '1.4.19',
+    status: 'available',
   },
   {
     id: 'less',
     labels: { 'zh-CN': 'Less', 'en-US': 'Less' },
     descriptions: {
-      'zh-CN': 'Less 变量、嵌套与 mixin 拆分',
-      'en-US': 'Less variables, nesting and mixins',
+      'zh-CN': 'Less 变量、嵌套与 mixin 拆分（v1.4.19 起，React/Vue）',
+      'en-US': 'Less variables, nesting and mixins (v1.4.19, React/Vue)',
     },
-    status: 'planned',
-    plannedVersion: '1.4.19',
+    status: 'available',
   },
   {
     id: 'sass',
     labels: { 'zh-CN': 'Sass/SCSS', 'en-US': 'Sass/SCSS' },
     descriptions: {
-      'zh-CN': 'Sass(SCSS) 变量、嵌套与 mixin 拆分',
-      'en-US': 'Sass(SCSS) variables, nesting and mixins',
+      'zh-CN': 'Sass(SCSS) 变量、嵌套与 mixin 拆分（v1.4.19 起，React/Vue）',
+      'en-US': 'Sass(SCSS) variables, nesting and mixins (v1.4.19, React/Vue)',
     },
-    status: 'planned',
-    plannedVersion: '1.4.19',
+    status: 'available',
   },
   {
     id: 'vanilla-extract',
     labels: { 'zh-CN': 'vanilla-extract', 'en-US': 'vanilla-extract' },
     descriptions: {
-      'zh-CN': '类型安全 style/sprinkles（零运行时）',
-      'en-US': 'Type-safe style/sprinkles (zero-runtime)',
+      'zh-CN': '类型安全 style() 零运行时 .css.ts 模块（v1.4.19 起，仅 React）',
+      'en-US': 'Type-safe zero-runtime style() .css.ts modules (v1.4.19, React only)',
     },
-    status: 'planned',
-    plannedVersion: '1.4.19',
+    status: 'available',
   },
   {
     id: 'panda',
     labels: { 'zh-CN': 'Panda CSS', 'en-US': 'Panda CSS' },
     descriptions: {
-      'zh-CN': 'Panda CSS style/sprinkles/cva 模式',
-      'en-US': 'Panda CSS style/sprinkles/cva patterns',
+      'zh-CN': 'css() 对象样式常量 + cva/recipe 建议（v1.4.19 起，仅 React）',
+      'en-US': 'css() object-style constants + cva/recipe hints (v1.4.19, React only)',
     },
-    status: 'planned',
-    plannedVersion: '1.4.19',
+    status: 'available',
   },
   {
     id: 'inline-styles',
@@ -164,10 +159,43 @@ const DESCRIPTOR_MAP: ReadonlyMap<StyleFormat, StyleRendererDescriptor> = new Ma
 
 /**
  * 增强新管线（figma_generate_jsx / figma_generate_vue，React 与 Vue 同源）
- * 当前支持的样式集合；T9 起追加 css-modules（同名 .module.css 旁路 + composes）。
+ * 支持的样式集合。
+ *
+ * v1.4.18：tailwind/unocss/css-modules；
+ * v1.4.19（T14–T17）：追加 styled/emotion/less/sass/vanilla-extract/panda；
+ * 其中 styled/emotion/vanilla-extract/panda 仅 React，框架矩阵见
+ * {@link NEW_PIPELINE_FRAMEWORK_SUPPORT}，由 {@link assertStyleFormatSupported} 二次拦截。
  * as const 保留字面量元组类型，供 CLI 泛型校验窄化与 zod 枚举复用。
  */
-export const STYLE_FORMATS_NEW_PIPELINE = ['tailwind', 'unocss', 'css-modules'] as const satisfies readonly StyleFormat[];
+export const STYLE_FORMATS_NEW_PIPELINE = [
+  'tailwind',
+  'unocss',
+  'css-modules',
+  'styled',
+  'emotion',
+  'less',
+  'sass',
+  'vanilla-extract',
+  'panda',
+] as const satisfies readonly StyleFormat[];
+
+/**
+ * 增强新管线各样式方案支持的框架矩阵（v1.4.19 T14–T17）。
+ * 未列入的方案默认 React+Vue 双支持（防御性缺省仅对未登记方案生效）。
+ */
+export const NEW_PIPELINE_FRAMEWORK_SUPPORT: Readonly<Record<StyleFormat, readonly Framework[]>> = {
+  tailwind: ['react', 'vue'],
+  unocss: ['react', 'vue'],
+  'css-modules': ['react', 'vue'],
+  styled: ['react'],
+  emotion: ['react'],
+  less: ['react', 'vue'],
+  sass: ['react', 'vue'],
+  'vanilla-extract': ['react'],
+  panda: ['react'],
+  'inline-styles': ['react'],
+  'css-variables': ['react', 'vue'],
+};
 
 /**
  * legacy React 管线（figma_generate_component）支持的样式集合（保持 1.4.17 契约）。
@@ -228,20 +256,24 @@ function formatChoices(formats: readonly string[], language: StyleLanguage): str
 /**
  * 校验样式方案在指定管线可用，否则抛双语 UnsupportedStyleFormatError。
  *
- * 三类失败：
+ * 四类失败：
  * 1. 值不在 11 枚举内 → unknownStyleFormat；
  * 2. 值为 planned 方案 → styleFormatPlanned（含计划版本）；
- * 3. 方案已可用但不在该管线集合 → styleFormatNotInPipeline。
+ * 3. 方案已可用但不在该管线集合 → styleFormatNotInPipeline；
+ * 4. 方案在管线内但不支持目标框架（v1.4.19：styled/emotion/vanilla-extract/panda 仅 React）
+ *    → styleFormatFrameworkUnsupported（显式拒绝，不静默降级）。
  *
  * @param format - 用户传入的原始值
  * @param supportedInPipeline - 该管线支持的集合
  * @param language - 错误语言（默认 en-US）
+ * @param framework - 目标框架（传入时追加框架矩阵校验）
  * @returns 校验通过的 StyleFormat
  */
 export function assertStyleFormatSupported(
   format: string,
   supportedInPipeline: readonly StyleFormat[],
   language: StyleLanguage = 'en-US',
+  framework?: Framework,
 ): StyleFormat {
   const i18n = new I18n(language);
   const supportedText = supportedInPipeline.join(', ');
@@ -255,6 +287,18 @@ export function assertStyleFormatSupported(
   }
 
   if (supportedInPipeline.includes(descriptor.id)) {
+    // v1.4.19（T14–T17）：框架矩阵二次校验（React 专属方案在 Vue 侧显式报错）
+    if (framework && !NEW_PIPELINE_FRAMEWORK_SUPPORT[descriptor.id].includes(framework)) {
+      throw new UnsupportedStyleFormatError(
+        format,
+        i18n.t(
+          'cli.errors.labels.styleFormatFrameworkUnsupported',
+          format,
+          framework,
+          NEW_PIPELINE_FRAMEWORK_SUPPORT[descriptor.id].join(', '),
+        ) as string,
+      );
+    }
     return descriptor.id;
   }
 

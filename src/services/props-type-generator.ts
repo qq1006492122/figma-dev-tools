@@ -174,6 +174,98 @@ export function generateVue3Props(
   };
 }
 
+// ============ Vue 2 Options API（v1.4.19 T18） ============
+
+/** Vue2 Options API props 生成结果 */
+export interface GeneratedVue2Props {
+  /** props 对象成员行（每行含尾逗号，不含外层缩进） */
+  readonly entries: readonly string[];
+  /** TS 模式是否需要从 vue 导入 PropType（存在 VARIANT/INSTANCE_SWAP 时） */
+  readonly needsPropType: boolean;
+  /** TS 模式是否需要从 vue 导入 Component 类型（存在 INSTANCE_SWAP 时） */
+  readonly needsComponentImport: boolean;
+}
+
+/**
+ * 生成 Vue2 Options API 的 props 选项成员（v1.4.19 T18）。
+ *
+ * - TS 模式：VARIANT 用 `String as PropType<'a' | 'b'>`，INSTANCE_SWAP 用
+ *   `Object as PropType<Component>`，在类型层保留变体约束；
+ * - 非 TS 模式：VARIANT 追加 `validator` 运行时白名单校验；
+ * - TEXT/BOOLEAN 按 required/default 输出 String/Boolean 构造器声明。
+ *
+ * @param props - 归一化属性列表
+ * @param options - typescript 决定是否带 PropType 注解
+ * @returns props 成员行与导入标记
+ */
+export function generateVue2Props(
+  props: readonly ProcessedComponentProperty[],
+  options: { typescript: boolean },
+): GeneratedVue2Props {
+  const needsComponentImport = props.some((prop) => prop.type === 'INSTANCE_SWAP');
+  const needsPropType =
+    options.typescript && props.some((prop) => prop.type === 'VARIANT' || prop.type === 'INSTANCE_SWAP');
+
+  const entries: string[] = [];
+  for (const prop of props) {
+    entries.push(toVue2PropEntry(prop, options.typescript));
+  }
+
+  return { entries, needsPropType, needsComponentImport };
+}
+
+/**
+ * 生成单个 Vue2 props 成员行（含尾逗号）。
+ *
+ * @param prop - 归一化属性
+ * @param useTs - 是否输出 PropType 注解
+ * @returns 如 `label: { type: String, required: true },`
+ */
+function toVue2PropEntry(prop: ProcessedComponentProperty, useTs: boolean): string {
+  /** 约束段：required 与 default（default 为 undefined 时省略） */
+  const constraintParts: string[] = [];
+  if (prop.required) constraintParts.push('required: true');
+
+  switch (prop.type) {
+    case 'TEXT': {
+      if (prop.defaultValue !== undefined) {
+        constraintParts.unshift(`type: String, default: ${toTsStringLiteral(String(prop.defaultValue))}`);
+      } else {
+        constraintParts.unshift('type: String');
+      }
+      break;
+    }
+    case 'BOOLEAN': {
+      if (prop.defaultValue !== undefined) {
+        constraintParts.unshift(`type: Boolean, default: ${String(prop.defaultValue)}`);
+      } else {
+        constraintParts.unshift('type: Boolean');
+      }
+      break;
+    }
+    case 'VARIANT': {
+      if (useTs) {
+        constraintParts.unshift(`type: String as PropType<${toVariantUnion(prop)}>`);
+      } else {
+        constraintParts.unshift('type: String');
+        const options = prop.variantOptions ?? (prop.defaultValue !== undefined ? [String(prop.defaultValue)] : []);
+        if (options.length > 0) {
+          const allowList = options.map((option) => toTsStringLiteral(option)).join(', ');
+          constraintParts.push(`validator: (value) => [${allowList}].includes(value)`);
+        }
+      }
+      break;
+    }
+    case 'INSTANCE_SWAP': {
+      // 可交换组件无法给出运行时默认值；TS 下收窄为 Component，JS 下降级为 Object
+      constraintParts.unshift(useTs ? 'type: Object as PropType<Component>' : 'type: Object');
+      break;
+    }
+  }
+
+  return `${prop.propName}: { ${constraintParts.join(', ')} },`;
+}
+
 // ============ 内部工具 ============
 
 /**

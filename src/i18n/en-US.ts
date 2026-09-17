@@ -144,6 +144,14 @@ export const enUS = {
   $ figma-dev jsx <design-url> --node 1:2 -o Button.tsx
   $ figma-dev jsx <url> --style unocss --unocss-attributify
   $ figma-dev jsx <url> --style css-modules --framework vue --typescript`,
+      vue: `Examples:
+  $ figma-dev vue <design-url> --node 1:2 -o Button.vue        # Vue 3 <script setup> (default)
+  $ figma-dev vue <url> --vue-version 2 --style less          # Vue 2 Options API + Less
+  $ figma-dev vue <url> --style css-modules                   # Vue 3 + CSS Modules`,
+      batch: `Examples:
+  $ figma-dev batch <page-url> --out ./src/components/landing  # Auto-split header/hero/... into files
+  $ figma-dev batch <url> --nodes 1:10,1:11 --framework vue    # Generate selected blocks only (Vue SFC)
+  $ figma-dev batch <url> --prefix Landing --style css-modules`,
       assets: `Examples:
   $ figma-dev assets <design-url> -o ./public/assets
   $ figma-dev assets <fileKey> --node 1:2 --format svg --bundler vite`,
@@ -441,8 +449,31 @@ export const enUS = {
           'setup hints (apply manually as needed; the tool never modifies your project files)',
         moduleCssSaved: 'Co-located CSS Modules file saved',
         moduleCssPreview: 'Co-located CSS Modules file (save it next to the component)',
+        // v1.4.19 T16: generalized co-located sidecar wording (also less/sass)
+        sidecarSaved: '✅ Co-located style sidecar file saved',
+        sidecarPreview: 'Co-located style sidecar file (save it next to the component)',
         failed: 'Component generation failed',
         lintWarning: '⚠️  Code restore quality notice',
+      },
+
+      // v1.4.19 T18: dedicated `figma-dev vue` command (Vue 2 Options API / Vue 3 script setup)
+      vue: {
+        description: 'Generate a Vue 2/3 SFC component (.vue single file, new in v1.4.19)',
+        vueVersion: 'Vue major version: 2 (Options API) | 3 (default, <script setup>)',
+        invalidVersion: 'Error: --vue-version accepts only 2 or 3',
+      },
+
+      // v1.4.19 T20: page batch generation
+      batch: {
+        description:
+          'Split a page into blocks and batch-generate multiple component files (with index.ts barrel and dependency graph, new in v1.4.19)',
+        nodes: 'Comma-separated block node ids (omit to auto-split the whole page)',
+        out: 'Multi-file output directory (default ./figma-generated)',
+        prefix: 'Prefix applied to every block component name (ASCII, e.g. Landing)',
+        noRootNode: 'Error: batch generation needs a page/frame root node (URL node-id or -n/--node)',
+        emptySelection: 'Error: none of the specified block nodes were found in the node tree; aborted (no files written)',
+        completed: (blocks: number, files: number) =>
+          `Batch generation complete: ${blocks} blocks, ${files} files (including index.ts barrel)`,
       },
 
       assets: {
@@ -640,6 +671,8 @@ export const enUS = {
           `Style format "${format}" is not supported yet (planned for v${version}). Available: ${supported}.`,
         styleFormatNotInPipeline: (format: string, supported: string) =>
           `Style format "${format}" is not available in this generation pipeline. Available: ${supported}.`,
+        styleFormatFrameworkUnsupported: (format: string, framework: string, supportedFrameworks: string) =>
+          `Style format "${format}" does not support the ${framework} framework (no silent fallback). Supported frameworks: ${supportedFrameworks}.`,
         networkError:
           'Figma API request failed: network connection error or request timeout. Please check network settings, HTTP_PROXY/HTTPS_PROXY env vars or proxy config.',
         networkErrorWithMessage: (msg: string) => `Figma API request failed: ${msg}`,
@@ -817,6 +850,22 @@ export const enUS = {
       lg: 'lg: (1024px+)',
       xl: 'xl: (1280px+)',
     },
+  },
+  // v1.4.19 T19: component mapper (custom .figma-dev/components.json)
+  componentMapper: {
+    customConfigInvalid: (detail: string) =>
+      `Error: .figma-dev/components.json is invalid (${detail}); all custom component mappings are ignored and built-in mappings are used. Code generation continues.`,
+  },
+
+  // ========== v1.4.19 T20 batch generation (figma_batch_generate / batch command) ==========
+  batchGenerate: {
+    emptySelection:
+      'Batch generation requires at least one block: provide a page/Frame node (auto-split) or specify block nodes via nodeIds (the current selection is empty or none were found in the node tree).',
+    title: 'Batch generation',
+    blocksHeading: 'Detected blocks',
+    filesHeading: 'Output file tree',
+    graphHeading: 'Dependency graph',
+    savedPrefix: 'Batch output written to',
   },
   gui: {
     title: 'GUI Setup Wizard',

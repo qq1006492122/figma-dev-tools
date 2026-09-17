@@ -5,12 +5,14 @@
  */
 
 export type {
+  ClassBindingKind,
   Framework,
   NodeStyleResult,
   StyleExtensionNeeded,
   StyleFormat,
   StyleHint,
   StyleLanguage,
+  StylePreamble,
   StyleRenderContext,
   StyleRenderer,
   StyleRendererDescriptor,
@@ -23,11 +25,12 @@ export {
   buildStyleFormatHelp,
   getStyleDescriptor,
   listStyleFormatsByStatus,
+  NEW_PIPELINE_FRAMEWORK_SUPPORT,
   STYLE_FORMATS_LEGACY_REACT,
   STYLE_FORMATS_NEW_PIPELINE,
   UnsupportedStyleFormatError,
 } from './registry.js';
-export { CssModulesRenderer, type CssDeclaration, extractCssDeclarations } from './css-modules-renderer.js';
+export { CssModulesRenderer, type CssDeclaration, extractCssDeclarations, nodeNameToClass } from './css-modules-renderer.js';
 export { AtomicStyleRenderer } from './tailwind-renderer.js';
 export { createStyleRenderer, type CreateStyleRendererOptions, type UnocssMode } from './factory.js';
 export {
@@ -37,3 +40,15 @@ export {
   UNOCSS_ATTRIBUTIFY_SAFE_RE,
   UnocssAttributifyRenderer,
 } from './unocss-renderer.js';
+export { StyledComponentsRenderer } from './styled-components-renderer.js';
+export { EmotionRenderer } from './emotion-renderer.js';
+export { PreprocessorRenderer, type PreprocessorSyntax } from './preprocessor-renderer.js';
+export { VanillaExtractRenderer } from './vanilla-extract-renderer.js';
+export { PandaRenderer } from './panda-renderer.js';
+export {
+  collectUnsupportedFillWarnings,
+  declarationsToObjectEntries,
+  resolveHtmlTag,
+  toCamelIdentifier,
+  toPascalIdentifier,
+} from './shared.js';
