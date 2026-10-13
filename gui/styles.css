@@ -329,6 +329,31 @@
   cursor: not-allowed;
 }
 
+/* P3-32：组件库偏好 chip 选择器 */
+.lib-chip {
+  padding: 6px 14px;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 999px;
+  background: white;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.lib-chip:hover {
+  border-color: #c7c7ff;
+  color: #4f46e5;
+}
+
+.lib-chip.selected {
+  border-color: #6366f1;
+  background: #f0f0ff;
+  color: #4338ca;
+  font-weight: 600;
+}
+
 .toast-success {
   background: var(--success-color);
 }

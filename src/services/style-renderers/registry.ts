@@ -184,9 +184,11 @@ export const STYLE_FORMATS_NEW_PIPELINE = [
  * 未列入的方案默认 React+Vue 双支持（防御性缺省仅对未登记方案生效）。
  */
 export const NEW_PIPELINE_FRAMEWORK_SUPPORT: Readonly<Record<StyleFormat, readonly Framework[]>> = {
-  tailwind: ['react', 'vue'],
-  unocss: ['react', 'vue'],
-  'css-modules': ['react', 'vue'],
+  // v1.4.20 WBS-P1-12：Svelte 一级支持 tailwind / unocss / css-modules 三组合
+  // （css-modules 在 Svelte 侧落地为 scoped <style>，不承诺 hash/composes）
+  tailwind: ['react', 'vue', 'svelte'],
+  unocss: ['react', 'vue', 'svelte'],
+  'css-modules': ['react', 'vue', 'svelte'],
   styled: ['react'],
   emotion: ['react'],
   less: ['react', 'vue'],

@@ -1,0 +1,57 @@
+{
+  "recordedAt": "2026-10-13T15:16:14.275Z",
+  "staticDeclaredCases": 916,
+  "actualExecutedTests": 1055,
+  "fileCount": 81,
+  "passed": 1055,
+  "failed": 0,
+  "todo": 0,
+  "parameterizedExpansion": 139,
+  "anomalies": [],
+  "domain": {
+    "asset": {
+      "files": 4,
+      "tests": 44
+    },
+    "compare": {
+      "files": 1,
+      "tests": 20
+    },
+    "component-library": {
+      "files": 4,
+      "tests": 62
+    },
+    "inference": {
+      "files": 6,
+      "tests": 57
+    },
+    "misc": {
+      "files": 27,
+      "tests": 300
+    },
+    "responsive": {
+      "files": 1,
+      "tests": 13
+    },
+    "smoke": {
+      "files": 4,
+      "tests": 67
+    },
+    "style-renderers": {
+      "files": 8,
+      "tests": 93
+    },
+    "svelte": {
+      "files": 2,
+      "tests": 32
+    },
+    "watch": {
+      "files": 6,
+      "tests": 52
+    },
+    "weapp": {
+      "files": 18,
+      "tests": 315
+    }
+  }
+}

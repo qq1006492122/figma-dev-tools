@@ -24,6 +24,15 @@ import type { Language } from '../i18n/index.js';
 import { createAssetDownloader } from '../services/asset-downloader.js';
 import { detectBundler, type BundlerKind } from '../services/bundler-detector.js';
 import {
+  loadProjectComponentLibrary,
+  loadProjectLibraryHints,
+  resolveLibrary,
+  type ComponentLibraryChoice,
+  type DetectHooks,
+  type PackageJsonLike,
+} from '../services/component-library/index.js';
+import { GLOBAL_OUTPUT_DEFAULT, resolveSubcommandOutput } from './sub-output.js';
+import {
   assertStyleFormatSupported,
   buildStyleFormatHelp,
   STYLE_FORMATS_LEGACY_REACT,
@@ -41,9 +50,21 @@ import { createFileWriter } from '../services/file-writer.js';
 import { createTokenStore } from '../services/token-store.js';
 import { createTokensExtractor } from '../services/tokens-extractor.js';
 import { createVueGenerator } from '../services/vue-generator.js';
+import { createSvelteGenerator } from '../services/svelte-generator.js';
 // v1.4.19 T20：整页批量生成
 import { createBatchGenerator } from '../services/batch-generator.js';
 import { selectBlocksByIds, splitPageIntoBlocks } from '../services/block-splitter.js';
+// v1.4.20：微信小程序生成
+import { createWeappGenerator } from '../services/weapp-generator.js';
+import { writeWeappLocalAssets } from '../services/weapp-asset-writer.js';
+import { measureMainPackage, MB } from '../services/weapp-compat/bundle-size.js';
+import {
+  buildAppJsonSuggestion,
+  buildProjectConfigSuggestion,
+  writeSuggestionSafely,
+  readProjectJson,
+  resolveSafeOutputPath,
+} from '../services/weapp-compat/project-config.js';
 import {
   canUseFallbackPackage,
   compareStableVersions,
@@ -103,7 +124,7 @@ program
 // 全局选项
 program
   .option('-t, --token <token>', i18n.t('cli.options.token') as string)
-  .option('-o, --output <dir>', i18n.t('cli.options.output') as string, './src/styles/figma')
+  .option('-o, --output <dir>', i18n.t('cli.options.output') as string, GLOBAL_OUTPUT_DEFAULT)
   .option('--no-backup', i18n.t('cli.options.noBackup') as string)
   .option('-l, --lang <lang>', i18n.t('cli.options.lang') as string)
   .option('-v, --ver', i18n.t('cli.options.ver') as string)
@@ -221,6 +242,42 @@ function resolveCliStyleFormat<T extends StyleFormat>(
   const value = (choice ?? 'tailwind').toLowerCase();
   // 已由注册表断言 membership，窄化为该管线的字面量联合（供 legacy 窄类型入参）
   return assertStyleFormatSupported(value, supportedInPipeline, i18n.getLanguage(), framework) as T;
+}
+
+/**
+ * WBS-P2-12/13：解析 --component-library（触网前校验枚举/框架匹配，auto 再读盘取证）。
+ *
+ * @returns 透传给 React/Vue 生成器的三件套；svelte/关闭时返回 null 包体
+ */
+async function resolveCliComponentLibrary(
+  raw: string | undefined,
+  framework: Framework,
+  startDir: string,
+): Promise<{
+  componentLibrary: ComponentLibraryChoice;
+  projectPackageJson: PackageJsonLike | null;
+  uiComponentExists?: DetectHooks['uiComponentExists'];
+} | null> {
+  // 优先级：--component-library 显式值 > figma-dev.config.json（GUI 向导写入）> none
+  let choice = raw as ComponentLibraryChoice | undefined;
+  if (choice === undefined) {
+    const fromConfig = await loadProjectComponentLibrary(startDir);
+    if (fromConfig && fromConfig !== 'none') choice = fromConfig;
+  }
+  if (!choice || choice === 'none') return null;
+  // svelte 无组件库映射：提示并忽略，不阻断生成
+  if (framework === 'svelte') {
+    console.warn(chalk.yellow('  ↳ ' + (i18n.t('cli.commands.jsx.componentLibraryIgnored') as string)));
+    return null;
+  }
+  // 显式非法值/跨框架选择在此快速失败（resolveLibrary 对 auto 以外值不读盘）
+  resolveLibrary(framework, choice, null);
+  const hints = await loadProjectLibraryHints(startDir);
+  return {
+    componentLibrary: choice,
+    projectPackageJson: hints.pkg,
+    uiComponentExists: hints.uiComponentExists,
+  };
 }
 
 // ============= 命令: 语言设置 (v1.2.0 新增) =============
@@ -682,6 +739,8 @@ program
   .option('--output <dir>', i18n.t('cli.commands.component.output') as string)
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
+    // 同名 --output 被全局选项吞入 opts.output 时回收（见 sub-output.ts）
+    const outputDirArg = resolveSubcommandOutput(cmdOptions.output, opts.output);
     const { fileKey, nodeId: urlNodeId } = parseTarget(target);
     const nodeId = cmdOptions.node || urlNodeId;
 
@@ -712,9 +771,9 @@ program
 
       const component = await generator.generateComponent(fileKey, nodeId);
 
-      if (cmdOptions.output) {
+      if (outputDirArg) {
         // 写入文件
-        const outputDir = path.resolve(cmdOptions.output);
+        const outputDir = path.resolve(outputDirArg);
         const writer = createFileWriter({ outputDir, backup: opts.backup !== false });
         const files = await writer.writeComponent(component);
 
@@ -993,8 +1052,10 @@ program
         console.log('');
       }
 
-      if (cmdOptions.output) {
-        const outPath = path.resolve(cmdOptions.output);
+      // 同名 --output 被全局选项吞入 opts.output 时回收（见 sub-output.ts）
+      const lintOutputArg = resolveSubcommandOutput(cmdOptions.output, opts.output);
+      if (lintOutputArg) {
+        const outPath = path.resolve(lintOutputArg);
         await fs.ensureDir(path.dirname(outPath));
         const outputContent = cmdOptions.format === 'json' ? JSON.stringify(result, null, 2) : result.markdownReport;
         await fs.writeFile(outPath, outputContent, 'utf-8');
@@ -1074,8 +1135,10 @@ program
       const structuredNode = toStructuredNode(context.node);
       const output = isJsonFormat ? JSON.stringify(structuredNode, null, 2) : formatStructuredPretty(structuredNode);
 
-      if (cmdOptions.output) {
-        const outPath = path.resolve(cmdOptions.output);
+      // 同名 --output 被全局选项吞入 opts.output 时回收（见 sub-output.ts）
+      const structuredOutputArg = resolveSubcommandOutput(cmdOptions.output, opts.output);
+      if (structuredOutputArg) {
+        const outPath = path.resolve(structuredOutputArg);
         await fs.ensureDir(path.dirname(outPath));
         await fs.writeFile(outPath, output, 'utf-8');
         spinner.succeed(
@@ -1236,6 +1299,11 @@ program
   .option('--framework <framework>', i18n.t('cli.commands.jsx.framework') as string, 'react')
   .option('--style <styleFormat>', buildStyleFormatHelp(i18n.getLanguage()), 'tailwind')
   .option(
+    '--component-library <name>',
+    i18n.t('cli.commands.jsx.componentLibrary') as string,
+    'none',
+  )
+  .option(
     '--attributify',
     i18n.t('cli.commands.jsx.attributify') as string,
     false,
@@ -1272,6 +1340,11 @@ program
   .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
   .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
   .option('--style <styleFormat>', buildStyleFormatHelp(i18n.getLanguage()), 'tailwind')
+  .option(
+    '--component-library <name>',
+    i18n.t('cli.commands.jsx.componentLibrary') as string,
+    'none',
+  )
   .option(
     '--attributify',
     i18n.t('cli.commands.jsx.attributify') as string,
@@ -1310,6 +1383,38 @@ program
     });
   });
 
+// ============= 命令: 生成 Svelte 组件 (v1.4.20 WBS-P1-1) =============
+
+program
+  .command('svelte <url-or-filekey>')
+  .description(i18n.t('cli.commands.svelte.description') as string)
+  .option('-n, --node <nodeId>', i18n.t('cli.commands.sync.node') as string)
+  .option('--name <name>', i18n.t('cli.commands.component.name') as string)
+  .option('--scene <scene>', i18n.t('cli.commands.jsx.scene') as string)
+  .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
+  .option('--output <file>', i18n.t('cli.commands.structured.output') as string)
+  // P1-12：Svelte 仅承诺 tailwind / unocss / css-modules（矩阵闸门触网前拒绝其他值）
+  .option('--style <styleFormat>', buildStyleFormatHelp(i18n.getLanguage()), 'tailwind')
+  .option('--attributify', i18n.t('cli.commands.jsx.attributify') as string, false)
+  .option('--bundler <bundler>', i18n.t('cli.commands.jsx.bundler') as string, 'auto')
+  .option('--no-ts', '输出无 lang="ts" 的纯 JS Svelte 4 组件 / Output plain JS Svelte 4 component')
+  .option('--skip-lint', i18n.t('cli.commands.jsx.skipLint') as string)
+  .option('--inline-svg', '内联渲染 SVG 图标节点（默认开启）', true)
+  .option(
+    '--no-smart-grid',
+    '关闭 T21 布局推断（Grid/sticky/fixed/absolute，默认开）/ Disable grid inference (v1.4.19)',
+  )
+  .option('--no-smart-icons', '关闭 T21 图标识别建议（默认开）/ Disable icon inference (v1.4.19)')
+  .option('--no-smart-dark', '关闭 T21 深色模式策略建议（默认开）/ Disable dark-mode inference (v1.4.19)')
+  .option('--no-smart-motion', '关闭 T21 交互动效建议（默认开）/ Disable motion inference (v1.4.19)')
+  .action((target, rawOptions) => {
+    const cmdOptions = rawOptions as GenerateCommandOptions;
+    return runGenerateCommand(target, cmdOptions, program.opts(), {
+      framework: 'svelte',
+      vueVersion: 3,
+    });
+  });
+
 // ============= 命令: 整页批量生成 (v1.4.19 T20) =============
 
 program
@@ -1322,6 +1427,11 @@ program
   .option('--depth <depth>', i18n.t('cli.commands.structured.depth') as string, '15')
   .option('--framework <framework>', i18n.t('cli.commands.jsx.framework') as string, 'react')
   .option('--style <styleFormat>', buildStyleFormatHelp(i18n.getLanguage()), 'tailwind')
+  .option(
+    '--component-library <name>',
+    i18n.t('cli.commands.jsx.componentLibrary') as string,
+    'none',
+  )
   .option('--attributify', i18n.t('cli.commands.jsx.attributify') as string, false)
   .option('--bundler <bundler>', i18n.t('cli.commands.jsx.bundler') as string, 'auto')
   .option('--vue-version <version>', i18n.t('cli.commands.vue.vueVersion') as string, '3')
@@ -1340,8 +1450,10 @@ program
       console.error(chalk.red(i18n.t('cli.commands.vue.invalidVersion') as string));
       process.exit(1);
     }
+    const batchFramework: Framework =
+      cmdOptions.framework === 'vue' ? 'vue' : cmdOptions.framework === 'svelte' ? 'svelte' : 'react';
     return runBatchCommand(target, cmdOptions, program.opts(), {
-      framework: cmdOptions.framework === 'vue' ? 'vue' : 'react',
+      framework: batchFramework,
       vueVersion: rawVersion === '2' ? 2 : 3,
     });
   });
@@ -1362,6 +1474,8 @@ interface BatchCommandOptions {
   framework?: string;
   /** --style 样式方案 */
   style?: string;
+  /** --component-library 组件库映射（WBS-P2-12/13，默认 none） */
+  componentLibrary?: string;
   /** --attributify（仅 unocss） */
   attributify?: boolean;
   /** --bundler */
@@ -1434,6 +1548,8 @@ async function runBatchCommand(
     if (unocssMode === 'attributify' && styleFormat !== 'unocss') {
       console.warn(chalk.yellow('  ↳ ' + (i18n.t('cli.commands.jsx.attributifyIgnored') as string)));
     }
+    // WBS-P2-12/13：组件库解析（触网前校验枚举/框架；auto 读 package.json/components.json 取证）
+    const uiOptions = await resolveCliComponentLibrary(cmdOptions.componentLibrary, force.framework, outputDir);
 
     const client = await getClient(globalOpts.token);
     const ctxService = createDesignContextService(client);
@@ -1461,6 +1577,13 @@ async function runBatchCommand(
       bundler: effectiveBundler,
       inference: resolveCliInference(cmdOptions),
       componentNamePrefix: cmdOptions.prefix,
+      ...(uiOptions
+        ? {
+            componentLibrary: uiOptions.componentLibrary,
+            projectPackageJson: uiOptions.projectPackageJson,
+            uiComponentExists: uiOptions.uiComponentExists,
+          }
+        : {}),
     });
 
     // 阶段三：多文件落盘（内容已由各区块生成器格式化；barrel 为静态生成）
@@ -1502,6 +1625,8 @@ interface GenerateCommandOptions {
   output?: string;
   /** --style 样式方案 */
   style?: string;
+  /** --component-library 组件库映射（WBS-P2-12/13，默认 none） */
+  componentLibrary?: string;
   /** --framework（仅 jsx 命令） */
   framework?: string;
   /** --attributify（仅 unocss 生效） */
@@ -1510,6 +1635,8 @@ interface GenerateCommandOptions {
   bundler?: string;
   /** --vue-version（仅 vue 命令，commander 驼峰化） */
   vueVersion?: string;
+  /** --no-ts（仅 svelte 命令：输出纯 JS 组件，commander 驼峰化） */
+  ts?: boolean;
   /** --skip-lint */
   skipLint?: boolean;
   /** T21 智能推断分项（commander --no-smart-* 解析，缺省 true） */
@@ -1530,12 +1657,14 @@ interface GenerateCommandOptions {
 async function runGenerateCommand(
   target: string,
   cmdOptions: GenerateCommandOptions,
-  globalOpts: { token?: string },
+  globalOpts: { token?: string; output?: string },
   force: { framework: Framework; vueVersion: 2 | 3 },
 ): Promise<void> {
   const opts = globalOpts;
   const framework = force.framework;
   const vueVersion = force.vueVersion;
+  // commander 父子同名 --output 冲突：子命令传入值被吞进全局袋，此处回收后统一读 outputArg
+  const outputArg = resolveSubcommandOutput(cmdOptions.output, globalOpts.output);
   const { fileKey, nodeId: urlNodeId } = parseTarget(target);
   const nodeId = cmdOptions.node ?? urlNodeId;
   // 默认深度提高到 15 层，支持深层嵌套节点（v1.4.0 优化）
@@ -1558,7 +1687,7 @@ async function runGenerateCommand(
   try {
     // v1.4.18（T4/T7）：本地参数解析先行——构建器检测仅文件 IO，样式注册表校验纯内存，
     // 均无网络依赖，非法值在任何 Figma 请求前快速失败
-    const bundlerDetectRoot = cmdOptions.output ? path.dirname(path.resolve(cmdOptions.output)) : process.cwd();
+    const bundlerDetectRoot = outputArg ? path.dirname(path.resolve(outputArg)) : process.cwd();
     const effectiveBundler = await resolveCliBundler(cmdOptions.bundler as string | undefined, bundlerDetectRoot);
     const styleFormat = resolveCliStyleFormat(
       cmdOptions.style as string | undefined,
@@ -1570,11 +1699,14 @@ async function runGenerateCommand(
     if (unocssMode === 'attributify' && styleFormat !== 'unocss') {
       console.warn(chalk.yellow('  ↳ ' + (i18n.t('cli.commands.jsx.attributifyIgnored') as string)));
     }
+    // WBS-P2-12/13：组件库解析（触网前校验枚举/框架；auto 读 package.json/components.json 取证）
+    const uiOptions = await resolveCliComponentLibrary(cmdOptions.componentLibrary, framework, bundlerDetectRoot);
 
     const client = await getClient(opts.token);
     const ctxService = createDesignContextService(client);
     const codeGen = createCodeGenerator(client);
     const vueGen = createVueGenerator(client);
+    const svelteGen = createSvelteGenerator(client);
     const componentMapper = createComponentMapper();
 
     // 1. 获取精简设计上下文
@@ -1620,7 +1752,7 @@ async function runGenerateCommand(
       }
     }
 
-    // 3. 生成代码（React 或 Vue）
+    // 3. 生成代码（React / Vue / Svelte）
     console.log(chalk.gray(`  ↳ Generating ${framework.toUpperCase()} code...`));
     let result: CodeGenResult;
 
@@ -1636,8 +1768,27 @@ async function runGenerateCommand(
         inference: resolveCliInference(cmdOptions),
         // v1.4.19 T18：vue 命令透传 --vue-version；jsx --framework vue 固定 3
         vueVersion,
+        ...(uiOptions
+          ? {
+              componentLibrary: uiOptions.componentLibrary,
+              projectPackageJson: uiOptions.projectPackageJson,
+            }
+          : {}),
       });
       result = vueResult as unknown as CodeGenResult;
+    } else if (framework === 'svelte') {
+      const svelteResult = await svelteGen.generateFromContext(ctx, {
+        componentName: cmdOptions.name,
+        sceneName: cmdOptions.scene,
+        usePublicCdn: true,
+        bundler: effectiveBundler,
+        // P1-12：样式矩阵已在 resolveCliStyleFormat 闸门收口为三组合
+        styleFormat: styleFormat as 'tailwind' | 'unocss' | 'css-modules',
+        unocssMode,
+        // --no-ts：输出纯 JS Svelte 组件
+        typescript: cmdOptions.ts !== false,
+      });
+      result = svelteResult as unknown as CodeGenResult;
     } else {
       result = (await codeGen.generateJsxFromContext(ctx, {
         componentName: cmdOptions.name,
@@ -1648,6 +1799,13 @@ async function runGenerateCommand(
         unocssMode,
         // v1.4.19 T21：智能推断分项开关（--no-smart-*，缺省全开）
         inference: resolveCliInference(cmdOptions),
+        ...(uiOptions
+          ? {
+              componentLibrary: uiOptions.componentLibrary,
+              projectPackageJson: uiOptions.projectPackageJson,
+              uiComponentExists: uiOptions.uiComponentExists,
+            }
+          : {}),
       })) as unknown as CodeGenResult;
     }
 
@@ -1786,8 +1944,8 @@ async function runGenerateCommand(
     console.log('');
     console.log(chalk.cyan('─'.repeat(70)));
 
-    if (cmdOptions.output) {
-      const outPath = path.resolve(cmdOptions.output);
+    if (outputArg) {
+      const outPath = path.resolve(outputArg);
       await fs.ensureDir(path.dirname(outPath));
       await fs.writeFile(outPath, result.code, 'utf-8');
       console.log(chalk.green((i18n.t('cli.commands.jsx.codeSaved') as string) + `: ${outPath}`));
@@ -1799,8 +1957,8 @@ async function runGenerateCommand(
     // v1.4.18 T9 / v1.4.19 T16：同名样式旁路文件（CSS Modules / Less / Sass）
     // --output 指定主组件路径时，旁路文件写入同目录（用户显式要求落盘）；否则仅在终端展示
     if (result.styleSidecar) {
-      if (cmdOptions.output) {
-        const sidecarPath = path.resolve(path.dirname(cmdOptions.output), result.styleSidecar.fileName);
+      if (outputArg) {
+        const sidecarPath = path.resolve(path.dirname(outputArg), result.styleSidecar.fileName);
         await fs.writeFile(sidecarPath, result.styleSidecar.content, 'utf-8');
         console.log(chalk.green((i18n.t('cli.commands.jsx.sidecarSaved') as string) + `: ${sidecarPath}`));
       } else {
@@ -1830,6 +1988,335 @@ async function runGenerateCommand(
     process.exit(1);
   }
 }
+
+// ============= 命令: 生成微信小程序组件 (v1.4.20) =============
+
+program
+  .command('weapp <url-or-filekey>')
+  .description('生成微信小程序组件代码（WXML + WXSS + JS + JSON）')
+  .option('-n, --node <nodeId>', '节点 ID')
+  .option('--name <name>', '组件名称（默认从节点名推断）')
+  .option('--scene <scene>', '场景名（用于资源路径）', 'default')
+  .option('--depth <depth>', '最大遍历深度', '15')
+  .option('--output <dir>', '输出目录（默认当前目录）', './')
+  .option('--design-width <width>', '设计稿宽度（px→rpx 基准；不传则按帧宽自动推断 375/750/其他）')
+  .option('--unit <unit>', '输出单位：rpx | px', 'rpx')
+  .option('--page', '生成页面组件（Page 而非 Component）', false)
+  .option('--skip-enhance', '跳过增强优化', false)
+  .option('--asset-mode <mode>', '位图资源模式：local（默认，下载到 --output/images）| cdn | base64')
+  .option('--icon-strategy <strategy>', '图标策略（P0-31）：image-local（默认）| image-cdn | base64')
+  .option('--public-base-url <url>', 'cdn 模式资源托管的稳定基址（如 https://cdn.example.com/app/）')
+  .option('--pixel-ratio <n>', '位图导出倍率 1 | 2 | 3', '2')
+  .option('--no-inference-list', '关闭重复组→wx:for 自动推断（默认开启）')
+  .option('--inference-conditions', '把 tab/modal 等名称信号直接绑定 hidden（默认仅输出建议，不猜测业务状态）', false)
+  .option('--renderer <renderer>', '目标渲染器：webview（默认）| skyline（按官方 109 属性矩阵降级 WXSS）', 'webview')
+  .action(async (target, cmdOptions) => {
+    const opts = program.opts();
+    // 同名 --output 被全局选项吞入 opts.output 时回收；weapp 子命令自身默认 './'（commander 丢默认值，这里兜底）
+    const weappOutput = resolveSubcommandOutput(cmdOptions.output, opts.output) ?? './';
+    const { fileKey, nodeId: urlNodeId } = parseTarget(target);
+    const nodeId = cmdOptions.node || urlNodeId;
+    const maxDepth = Number.parseInt(cmdOptions.depth, 10) || 15;
+    // P0-61：未传 --design-width 时由生成器按帧宽自动推断；显式传入必须是正整数
+    const designWidth =
+      cmdOptions.designWidth === undefined ? undefined : Number.parseInt(cmdOptions.designWidth, 10);
+    if (designWidth !== undefined && (!Number.isInteger(designWidth) || designWidth <= 0)) {
+      console.error(chalk.red('错误：--design-width 必须是正整数（px），或省略以自动推断'));
+      process.exit(1);
+    }
+    const isPage = cmdOptions.page === true;
+    const unit = cmdOptions.unit === 'px' ? 'px' : 'rpx';
+
+    // P0-22：资产三模式参数解析与校验
+    const assetMode = cmdOptions.assetMode === undefined ? 'local' : String(cmdOptions.assetMode);
+    if (assetMode !== 'local' && assetMode !== 'cdn' && assetMode !== 'base64') {
+      console.error(chalk.red('错误：--asset-mode 只能是 local | cdn | base64'));
+      process.exit(1);
+    }
+    const iconStrategy = cmdOptions.iconStrategy === undefined ? undefined : String(cmdOptions.iconStrategy);
+    if (
+      iconStrategy !== undefined &&
+      iconStrategy !== 'image-local' &&
+      iconStrategy !== 'image-cdn' &&
+      iconStrategy !== 'base64'
+    ) {
+      console.error(chalk.red('错误：--icon-strategy 只能是 image-local | image-cdn | base64'));
+      process.exit(1);
+    }
+    const publicBaseUrl = cmdOptions.publicBaseUrl === undefined ? undefined : String(cmdOptions.publicBaseUrl);
+    if (publicBaseUrl !== undefined) {
+      try {
+        const u = new URL(publicBaseUrl);
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('bad protocol');
+      } catch {
+        console.error(chalk.red('错误：--public-base-url 必须是合法 http(s) URL'));
+        process.exit(1);
+      }
+    }
+    const pixelRatio = Number.parseInt(cmdOptions.pixelRatio, 10);
+    if (pixelRatio !== 1 && pixelRatio !== 2 && pixelRatio !== 3) {
+      console.error(chalk.red('错误：--pixel-ratio 只能是 1 | 2 | 3'));
+      process.exit(1);
+    }
+    if (assetMode === 'cdn' && !publicBaseUrl) {
+      console.log(
+        chalk.yellow('提示：--asset-mode cdn 未提供 --public-base-url，CDN 资源将标记为 MISSING_PUBLIC_BASE_URL'),
+      );
+    }
+    const renderer: 'webview' | 'skyline' = cmdOptions.renderer === 'skyline' ? 'skyline' : 'webview';
+    if (cmdOptions.renderer !== 'webview' && cmdOptions.renderer !== 'skyline') {
+      console.error(chalk.red('错误：--renderer 只能是 webview | skyline'));
+      process.exit(1);
+    }
+
+    if (!nodeId) {
+      console.error(chalk.red('错误：请提供节点 ID（使用 -n 或 --node 参数）'));
+      process.exit(1);
+    }
+
+    const typeLabel = isPage ? '页面' : '组件';
+    const spinner = ora(chalk.blue(`生成微信小程序${typeLabel}代码...`)).start();
+    console.log(
+      chalk.gray(
+        `文件: ${fileKey}, 节点: ${nodeId}, 深度: ${maxDepth}, 设计宽度: ${designWidth === undefined ? '自动推断' : designWidth + 'px'}, 单位: ${unit}, 类型: ${typeLabel}`,
+      ),
+    );
+
+    const startTime = Date.now();
+
+    try {
+      const client = await getClient(opts.token);
+      const ctxService = createDesignContextService(client);
+      const weappGen = createWeappGenerator(client);
+
+      const ctx = await ctxService.getDesignContext(fileKey, nodeId, maxDepth);
+
+      const result = await weappGen.generateFromContext(ctx, {
+        componentName: cmdOptions.name,
+        sceneName: cmdOptions.scene,
+        designWidth,
+        unit,
+        isPage,
+        skipEnhancements: cmdOptions.skipEnhance,
+        assetMode: assetMode as 'local' | 'cdn' | 'base64',
+        iconStrategy: iconStrategy as 'image-local' | 'image-cdn' | 'base64' | undefined,
+        publicBaseUrl,
+        pixelRatio: pixelRatio as 1 | 2 | 3,
+        inference: { list: cmdOptions.inferenceList !== false, conditions: cmdOptions.inferenceConditions === true },
+        renderer,
+      });
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+      spinner.succeed(
+        chalk.green(`✓ 生成成功！耗时 ${elapsed}s，组件名: ${result.componentName}`),
+      );
+
+      // 输出目录
+      const projectRoot = path.resolve(weappOutput);
+      const outDir = path.resolve(weappOutput, result.componentName);
+
+      // P0-71：四件套写盘前做路径越权校验（componentName 已 sanitize，此处为纵深防御）
+      for (const rel of [
+        path.join(result.componentName, `${result.componentName}.wxml`),
+        path.join(result.componentName, `${result.componentName}.wxss`),
+        path.join(result.componentName, `${result.componentName}.js`),
+        path.join(result.componentName, `${result.componentName}.json`),
+      ]) {
+        const safe = resolveSafeOutputPath(projectRoot, rel.split(path.sep).join('/'));
+        if (!safe.resolved) {
+          spinner.fail(chalk.red(`输出路径越权，已拒绝写入：${rel}（${safe.error!.code}）`));
+          process.exit(1);
+        }
+      }
+      await fs.ensureDir(outDir);
+
+      // 写入四个文件
+      const wxmlPath = path.join(outDir, `${result.componentName}.wxml`);
+      const wxssPath = path.join(outDir, `${result.componentName}.wxss`);
+      const jsPath = path.join(outDir, `${result.componentName}.js`);
+      const jsonPath = path.join(outDir, `${result.componentName}.json`);
+
+      await Promise.all([
+        fs.writeFile(wxmlPath, result.wxml, 'utf-8'),
+        fs.writeFile(wxssPath, result.wxss, 'utf-8'),
+        fs.writeFile(jsPath, result.js, 'utf-8'),
+        fs.writeFile(jsonPath, result.json, 'utf-8'),
+      ]);
+
+      // P0-71：工程配置只出建议（*.suggestion.json），绝不自动改写 app.json/project.config.json
+      {
+        const pageRoute = isPage
+          ? `pages/${result.componentName}/${result.componentName}`
+          : null;
+        let existingApp: Record<string, unknown> | null = null;
+        try {
+          existingApp = readProjectJson(projectRoot, 'app.json');
+        } catch {
+          existingApp = null;
+        }
+        const appSuggestion = buildAppJsonSuggestion(existingApp, pageRoute ? [pageRoute] : []);
+        const appWrite = writeSuggestionSafely(projectRoot, 'app.json', appSuggestion.jsonText);
+        let existingProj: Record<string, unknown> | null = null;
+        try {
+          existingProj = readProjectJson(projectRoot, 'project.config.json');
+        } catch {
+          existingProj = null;
+        }
+        const projSuggestion = buildProjectConfigSuggestion(existingProj, {
+          projectName: result.componentName,
+        });
+        const projWrite = writeSuggestionSafely(projectRoot, 'project.config.json', projSuggestion.jsonText);
+        console.log(chalk.cyan('\n🧩 工程配置建议（不会自动改写你的工程文件，请人工合并）：'));
+        if (appWrite.path) {
+          console.log(`  - ${appWrite.path}${appSuggestion.alreadyExisted ? '（已合并你现有的 pages，去重追加）' : '（空工程最小 app.json）'}`);
+        }
+        if (projWrite.path) {
+          console.log(`  - ${projWrite.path}（libVersion 已按冻结基线 ${projSuggestion.jsonText.includes('3.1.5') ? '3.1.5' : ''} 建议）`);
+        }
+      }
+
+      // P0-22：local 资源写入小程序项目根（--output）之下的 images/，带路径越权校验
+      const localAssets = result.assetManifest.filter((e) => e.state === 'local-resolved');
+      if (localAssets.length > 0) {
+        const assetWrite = await writeWeappLocalAssets({
+          projectRoot,
+          entries: result.assetManifest,
+          bytes: result.assetBytes,
+        });
+        console.log(
+          chalk.cyan(`\n🖼️  已写入 ${assetWrite.written.length} 个本地资源到 ${path.join(projectRoot, 'images')}`),
+        );
+      }
+      const unresolvedAssets = result.assetManifest.filter((e) => e.state === 'unresolved');
+      if (unresolvedAssets.length > 0) {
+        console.log(
+          chalk.yellow(
+            `\n⚠️  ${unresolvedAssets.length} 个资源未解析（${[...new Set(unresolvedAssets.map((e) => e.reason))].join(', ')}），对应 <image> 已移除 src`,
+          ),
+        );
+      }
+
+      console.log(chalk.cyan('\n📁 生成文件：'));
+      console.log(`  📄 ${chalk.bold('WXML 模板')}: ${wxmlPath}`);
+      console.log(`  🎨 ${chalk.bold('WXSS 样式')}: ${wxssPath}`);
+      console.log(`  ⚙️  ${chalk.bold('JS 逻辑')}: ${jsPath}`);
+      console.log(`  ⚙️  ${chalk.bold('JSON 配置')}: ${jsonPath}`);
+
+      // 警告
+      if (result.warnings && result.warnings.length > 0) {
+        console.log(chalk.yellow(`\n⚠️  注意事项 (${result.warnings.length}):`));
+        result.warnings.slice(0, 10).forEach((w) => {
+          console.log(`  - ${w}`);
+        });
+        if (result.warnings.length > 10) {
+          console.log(`  - ... 还有 ${result.warnings.length - 10} 条`);
+        }
+      }
+
+      // P0-12：条件显隐候选建议（默认不自动绑定 wx:if，交由用户确认业务状态）
+      if (result.conditionSuggestions && result.conditionSuggestions.length > 0) {
+        console.log(chalk.cyan(`\n🔀 条件显隐候选 (${result.conditionSuggestions.length})（默认未绑定，请确认后处理）:`));
+        result.conditionSuggestions.slice(0, 10).forEach((s) => {
+          console.log(`  - [${s.signal}] data.${s.suggestedDataKey}：${s.reason}`);
+        });
+        if (result.conditionSuggestions.length > 10) {
+          console.log(`  - ... 还有 ${result.conditionSuggestions.length - 10} 条`);
+        }
+      }
+
+      // P0-81：WXSS 还原度覆盖率（方案 B 属性条数口径，发布闸门 ≥85%）
+      {
+        const f = result.fidelity;
+        const percent = (f.rate * 100).toFixed(1);
+        const color = f.rate >= 0.85 ? chalk.green : chalk.yellow;
+        console.log(chalk.cyan('\n📊 WXSS 还原度覆盖率（方案 B）：') + color(` ${percent}%（${f.matched}/${f.total} 条承诺属性）`));
+        if (f.missing.length > 0) {
+          console.log(chalk.yellow(`  缺口属性：${f.missing.join(', ')}`));
+        }
+        // R1 加固：值不匹配明细（错色/错尺寸），最多展示 8 条
+        const valueMisses = (f as { mismatched?: Array<{ nodeId: string; property: string; expected: string; actual: string | null }> }).mismatched ?? [];
+        const wrongValues = valueMisses.filter((m) => m.actual !== null);
+        if (wrongValues.length > 0) {
+          console.log(chalk.yellow(`  值不匹配（${wrongValues.length}，按节点核对）：`));
+          for (const m of wrongValues.slice(0, 8)) {
+            console.log(chalk.gray(`    - 节点 ${m.nodeId} ${m.property}：期望 ${m.expected}，实际 ${m.actual}`));
+          }
+          if (wrongValues.length > 8) console.log(chalk.gray(`    … 另有 ${wrongValues.length - 8} 条`));
+        }
+        if (f.excluded.length > 0) {
+          const byProp = new Map<string, number>();
+          for (const e of f.excluded) byProp.set(e.property, (byProp.get(e.property) ?? 0) + 1);
+          console.log(
+            chalk.gray(
+              `  排除项（不进分母，${f.excluded.length}）：${[...byProp.entries()].map(([p, n]) => `${p} ×${n}`).join('；')}`,
+            ),
+          );
+        }
+      }
+
+      // 待下载资源
+      if (result.pendingAssets && result.pendingAssets.length > 0) {
+        console.log(chalk.cyan(`\n🖼️  待下载资源 (${result.pendingAssets.length}):`));
+        result.pendingAssets.slice(0, 5).forEach((a) => {
+          console.log(`  - ${a.name} (${a.type})`);
+        });
+        if (result.pendingAssets.length > 5) {
+          console.log(`  - ... 还有 ${result.pendingAssets.length - 5} 个`);
+        }
+        console.log(
+          chalk.gray(
+            `   下载命令: figma-dev assets ${fileKey} --node ${nodeId} --scene ${cmdOptions.scene} --output ${path.join(outDir, 'images')}`,
+          ),
+        );
+      }
+
+      // 使用提示
+      console.log(chalk.green('\n💡 使用提示：'));
+      if (isPage) {
+        console.log('  1. 将生成的文件放入小程序 pages/ 目录');
+        console.log('  2. 在 app.json 的 pages 数组中注册页面路径');
+        console.log('  3. 修改 JS 中的页面逻辑和数据');
+      } else {
+        console.log('  1. 将生成的文件放入小程序 components/ 目录');
+        console.log('  2. 在页面 JSON 中注册组件');
+        console.log('  3. 在 properties 中添加组件属性');
+        console.log('  4. 在 methods 中实现组件方法');
+      }
+
+      // P0-23：主包体积核算（--output 即项目/输出根；含 app.json 才按全主包阈值阻断）
+      const bundle = measureMainPackage({ projectRoot: outDir });
+      console.log(chalk.cyan('\n📦 主包体积核算：'));
+      if (!bundle.isFullProject) {
+        console.log(chalk.yellow(`  ⚠️  ${bundle.scopeWarning}`));
+      }
+      console.log(`  主包：${(bundle.totalBytes / MB).toFixed(3)} MB（${bundle.totalBytes} 字节）`);
+      for (const [root2, bytes] of Object.entries(bundle.subPackageBytes)) {
+        console.log(`  分包 ${root2}：${(bytes / MB).toFixed(3)} MB`);
+      }
+      for (const w of bundle.warnings) {
+        console.log(chalk.yellow(`  ⚠️  [${w.code}] ${w.message}`));
+      }
+      if (bundle.subpackageSuggestions.length > 0) {
+        console.log(chalk.cyan('  建议外移到分包（不自动改写工程）：'));
+        bundle.subpackageSuggestions.slice(0, 8).forEach((s) => {
+          console.log(`    - ${s.path}（${(s.bytes / 1024).toFixed(1)} KB）→ ${s.suggestedRoot}/`);
+        });
+      }
+      if (bundle.blocked) {
+        spinner.fail(
+          chalk.red(`主包体积超过 2MB 上限（${bundle.errorCode}）。请按上方建议拆分分包后重新生成。`),
+        );
+        process.exit(2);
+      }
+    } catch (error) {
+      spinner.fail(
+        chalk.red(
+          '生成失败: ' + (error instanceof Error ? error.message : String(error)),
+        ),
+      );
+      process.exit(1);
+    }
+  });
 
 // ============= 命令: 下载资源 (v2.0) =============
 
@@ -2489,9 +2976,8 @@ if (rawArgs.includes('--update')) {
         throw new Error(i18n.t('update.invalidCurrentVersion', String(pkgJson.version)) as string);
       }
 
-      const latestVersion = await fetchLatestStableVersion(
-        'https://registry.npmjs.org/figma-dev-tools/latest',
-      );
+      // v1.4.20: fetchLatestStableVersion 自动检测 npm registry（含镜像）、代理、CA
+      const latestVersion = await fetchLatestStableVersion('figma-dev-tools');
 
       spinner.stop();
       console.log(chalk.gray(i18n.t('update.currentVersion', currentVersion) as string));

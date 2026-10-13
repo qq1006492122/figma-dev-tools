@@ -211,6 +211,7 @@ export function sanitizeClassName(name: string): string {
 
 /** Token 正则：匹配 figd_ 开头的 Token */
 const TOKEN_PATTERN = /figd_[a-zA-Z0-9_-]{20,}/g;
+const FIGMA_TOKEN_PATTERN = /figd_[^\\s]+/g;
 /** 通用密钥模式 */
 const SECRET_PATTERNS = [
   /(?:api[_-]?key|secret|token|password|passwd|pwd)["']?\s*[:=]\s*["']?([a-zA-Z0-9_-]{20,})/gi,

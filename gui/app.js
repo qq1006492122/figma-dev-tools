@@ -2,8 +2,8 @@ const I18N = {
   'zh-CN': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: '配置向导 v1.4.13',
-      footer: 'Figma Dev Tools v1.4.13 — 在 AI 编辑器中直接调用 MCP 工具',
+      subtitle: '配置向导 v{version}',
+      footer: 'Figma Dev Tools v{version} — 在 AI 编辑器中直接调用 MCP 工具',
     },
     steps: {
       welcome: '欢迎',
@@ -19,7 +19,7 @@ const I18N = {
       features: [
         '安全存储 Figma Access Token',
         '自动检测并配置 AI 编辑器',
-        '支持 React/Vue/HTML 多种框架',
+        '支持 React / Vue / Svelte / 微信小程序',
         '一键生成组件代码',
       ],
       startBtn: '开始配置',
@@ -85,12 +85,26 @@ const I18N = {
       react: 'React',
       reactDesc: 'React + TypeScript + Tailwind CSS（推荐，一级支持）',
       vue: 'Vue 3',
-      vueDesc: 'Vue 3 + <script setup lang="ts">（已支持）',
+      vueDesc: 'Vue 3 + &lt;script setup lang=&quot;ts&quot;&gt;（已支持）',
+      svelte: 'Svelte 4',
+      svelteDesc: 'Svelte 4 SFC（export let / on: 事件，样式限 Tailwind/UnoCSS/scoped CSS）',
+      weapp: '微信小程序',
+      weappDesc: 'WXML/WXSS/JS/JSON 四件套（含 Tailwind/UnoCSS/本地资源）',
       html: 'HTML/CSS',
       htmlDesc: '纯 HTML 和 CSS',
       outputDir: '设计 Tokens 输出目录',
       outputDirPlaceholder: './src/styles/figma',
       skipHint: '此步骤可跳过，后续可随时修改',
+      lib: {
+        title: '组件库偏好（可选）',
+        hint: '仅影响生成代码映射到哪个组件库；自动模式按项目 package.json 真实依赖判定，无证据时保持原生标签',
+        auto: '自动检测',
+        none: '不使用',
+        shadcn: 'shadcn/ui',
+        antd: 'Ant Design',
+        element: 'Element Plus',
+        antdv: 'Ant Design Vue',
+      },
     },
     complete: {
       title: '配置完成！',
@@ -124,8 +138,8 @@ const I18N = {
   'en-US': {
     app: {
       title: 'Figma Dev Tools',
-      subtitle: 'Setup Wizard v1.4.13',
-      footer: 'Figma Dev Tools v1.4.13 — Use MCP tools directly in AI editors',
+      subtitle: 'Setup Wizard v{version}',
+      footer: 'Figma Dev Tools v{version} — Use MCP tools directly in AI editors',
     },
     steps: {
       welcome: 'Welcome',
@@ -142,7 +156,7 @@ const I18N = {
       features: [
         'Securely store Figma Access Token',
         'Auto-detect and configure AI editors',
-        'Support React/Vue/HTML frameworks',
+        'React / Vue / Svelte / WeChat Mini Program',
         'One-click component generation',
       ],
       startBtn: 'Start Setup',
@@ -209,12 +223,26 @@ const I18N = {
       react: 'React',
       reactDesc: 'React + TypeScript + Tailwind CSS (Recommended, first-class support)',
       vue: 'Vue 3',
-      vueDesc: 'Vue 3 + <script setup lang="ts"> (Supported)',
+      vueDesc: 'Vue 3 + &lt;script setup lang=&quot;ts&quot;&gt; (Supported)',
+      svelte: 'Svelte 4',
+      svelteDesc: 'Svelte 4 SFC (export let / on: events; Tailwind/UnoCSS/scoped CSS)',
+      weapp: 'WeChat Mini Program',
+      weappDesc: 'WXML/WXSS/JS/JSON four-file output (Tailwind/UnoCSS/local assets)',
       html: 'HTML/CSS',
       htmlDesc: 'Plain HTML and CSS',
       outputDir: 'Design Tokens output directory',
       outputDirPlaceholder: './src/styles/figma',
       skipHint: 'This step can be skipped, you can change it later',
+      lib: {
+        title: 'Component library (optional)',
+        hint: 'Only affects which library generated code maps to; Auto detects real dependencies in package.json and falls back to native tags without evidence',
+        auto: 'Auto detect',
+        none: 'None',
+        shadcn: 'shadcn/ui',
+        antd: 'Ant Design',
+        element: 'Element Plus',
+        antdv: 'Ant Design Vue',
+      },
     },
     complete: {
       title: 'Setup Complete!',
@@ -262,6 +290,7 @@ class App {
   constructor() {
     this.currentStep = 0;
     this.lang = 'zh-CN';
+    this.version = document.documentElement.dataset.version || 'unknown';
     this.steps = ['welcome', 'language', 'token', 'editors', 'framework', 'complete'];
     this.state = {
       token: '',
@@ -271,6 +300,7 @@ class App {
       installedEditors: new Set(),
       framework: 'react',
       outputDir: './src/styles/figma',
+      componentLibrary: 'auto', // P3-32：随框架联动的组件库偏好
       configComplete: false,
       globalInstalling: false, // 是否正在全局安装
       globalInstalled: false, // 是否已全局安装
@@ -281,19 +311,36 @@ class App {
     this.init();
   }
 
-  t(key) {
+  t(key, params = {}) {
     const keys = key.split('.');
     let value = I18N[this.lang];
     for (const k of keys) {
       value = value?.[k];
       if (value === undefined) return key;
     }
-    return value;
+    // 非字符串文案（如 welcome.features 数组）原样返回，由调用方按结构消费
+    if (typeof value !== 'string') return value;
+    return value.replace(/\{(\w+)\}/g, (match, name) =>
+      Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match,
+    );
   }
 
   async init() {
-    await this.fetchStatus();
-    this.render();
+    try {
+      await this.fetchStatus();
+      this.render();
+    } catch (error) {
+      console.error('[GUI] init/render failed:', error);
+      const content = document.getElementById('content');
+      if (content) {
+        content.innerHTML =
+          '<div class="text-center py-10 text-red-600">' +
+          (this.lang === 'zh-CN' ? '向导初始化失败' : 'Wizard init failed') +
+          ': ' +
+          String(error && error.message ? error.message : error) +
+          '</div>';
+      }
+    }
   }
 
   async api(url, options = {}) {
@@ -314,10 +361,12 @@ class App {
     const data = await this.api('/api/status');
     if (data.success) {
       this.lang = data.language || 'zh-CN';
+      this.version = data.version || this.version;
       this.state.hasExistingToken = data.hasToken;
       if (data.config) {
         this.state.framework = data.config.framework || 'react';
         this.state.outputDir = data.config.outputDir || './src/styles/figma';
+        if (data.config.componentLibrary) this.state.componentLibrary = data.config.componentLibrary;
       }
     }
   }
@@ -525,7 +574,7 @@ class App {
 
     const newTokenHtml =
       '<div class="mb-4"><div class="relative">' +
-      '<input type="password" id="token-input" class="input-field pr-24" placeholder="' +
+      '<input type="password" id="token-input" class="input-field pr-24" aria-label="Figma Access Token" placeholder="' +
       this.t('token.placeholder') +
       '" value="' +
       this.state.token +
@@ -600,7 +649,7 @@ class App {
       '<p class="text-gray-500 mb-6">' +
       this.t('framework.subtitle') +
       '</p>' +
-      '<div class="flex gap-4 mb-6">' +
+      '<div class="flex flex-wrap gap-4 mb-6">' +
       '<div class="framework-option ' +
       (this.state.framework === 'react' ? 'selected' : '') +
       '" data-framework="react">' +
@@ -622,6 +671,26 @@ class App {
       this.t('framework.vueDesc') +
       '</div></div>' +
       '<div class="framework-option ' +
+      (this.state.framework === 'svelte' ? 'selected' : '') +
+      '" data-framework="svelte">' +
+      '<div class="text-3xl mb-2">🔥</div>' +
+      '<div class="font-semibold text-gray-900">' +
+      this.t('framework.svelte') +
+      '</div>' +
+      '<div class="text-xs text-gray-500 mt-1">' +
+      this.t('framework.svelteDesc') +
+      '</div></div>' +
+      '<div class="framework-option ' +
+      (this.state.framework === 'weapp' ? 'selected' : '') +
+      '" data-framework="weapp">' +
+      '<div class="text-3xl mb-2">📱</div>' +
+      '<div class="font-semibold text-gray-900">' +
+      this.t('framework.weapp') +
+      '</div>' +
+      '<div class="text-xs text-gray-500 mt-1">' +
+      this.t('framework.weappDesc') +
+      '</div></div>' +
+      '<div class="framework-option ' +
       (this.state.framework === 'html' ? 'selected' : '') +
       '" data-framework="html">' +
       '<div class="text-3xl mb-2">🌐</div>' +
@@ -631,16 +700,66 @@ class App {
       '<div class="text-xs text-gray-500 mt-1">' +
       this.t('framework.htmlDesc') +
       '</div></div></div>' +
-      '<div><label class="block text-sm font-medium text-gray-700 mb-2">' +
+      '<div><label for="output-dir" class="block text-sm font-medium text-gray-700 mb-2">' +
       this.t('framework.outputDir') +
-      '</label>' +
-      '<input type="text" id="output-dir" class="input-field" placeholder="' +
+      '</label><input type="text" id="output-dir" class="input-field" placeholder="' +
       this.t('framework.outputDirPlaceholder') +
       '" value="' +
       this.state.outputDir +
       '"></div>' +
+      this.renderComponentLibraryPicker() +
       '<p class="text-xs text-gray-400 mt-4">' +
       this.t('framework.skipHint') +
+      '</p></div>'
+    );
+  }
+
+  /**
+   * P3-32：组件库选择器（仅 react/vue 显示；svelte/weapp/html 不适用）。
+   * 选项随框架变化；写入 figma-dev.config.json 的 componentLibrary，
+   * CLI/MCP 未显式传参时读取该默认值。
+   */
+  renderComponentLibraryPicker() {
+    const options =
+      this.state.framework === 'react'
+        ? [
+            { value: 'auto', labelKey: 'framework.lib.auto' },
+            { value: 'shadcn-ui', labelKey: 'framework.lib.shadcn' },
+            { value: 'ant-design', labelKey: 'framework.lib.antd' },
+            { value: 'none', labelKey: 'framework.lib.none' },
+          ]
+        : this.state.framework === 'vue'
+          ? [
+              { value: 'auto', labelKey: 'framework.lib.auto' },
+              { value: 'element-plus', labelKey: 'framework.lib.element' },
+              { value: 'ant-design-vue', labelKey: 'framework.lib.antdv' },
+              { value: 'none', labelKey: 'framework.lib.none' },
+            ]
+          : [];
+    if (options.length === 0) return '';
+    // 当前值若不属于该框架的选项（如切换框架后），回退 auto
+    const currentValue = options.some((o) => o.value === this.state.componentLibrary)
+      ? this.state.componentLibrary
+      : 'auto';
+    const chips = options
+      .map(
+        (o) =>
+          '<button type="button" class="lib-chip' +
+          (currentValue === o.value ? ' selected' : '') +
+          '" data-lib="' +
+          o.value +
+          '">' +
+          this.t(o.labelKey) +
+          '</button>',
+      )
+      .join('');
+    return (
+      '<div class="mt-5"><div class="block text-sm font-medium text-gray-700 mb-2">' +
+      this.t('framework.lib.title') +
+      '</div><div class="flex flex-wrap gap-2" id="component-library-picker">' +
+      chips +
+      '</div><p class="text-xs text-gray-400 mt-2">' +
+      this.t('framework.lib.hint') +
       '</p></div>'
     );
   }
@@ -1035,14 +1154,12 @@ class App {
       this.renderFooter();
     } else {
       input?.classList.add('error');
+      const category = data.category || 'auth';
       const errorMsg = data.error || this.t('token.validateFailed');
+      const label = category === 'auth' ? this.t('token.validateFailed') : (this.lang === 'zh-CN' ? '网络/代理/TLS 连接失败' : 'Network/proxy/TLS connection failed');
       if (statusEl)
-        statusEl.innerHTML = '<span class="status-badge error">✗ ' + this.t('token.validateFailed') + '</span>';
+        statusEl.innerHTML = '<span class="status-badge error">✗ ' + label + '</span>';
       this.showToast(errorMsg, 'error');
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = this.t('token.validateBtn');
-      }
     }
   }
 
@@ -1062,6 +1179,7 @@ class App {
       body: JSON.stringify({
         framework: this.state.framework,
         outputDir,
+        componentLibrary: this.state.componentLibrary,
       }),
     });
     this.state.configComplete = true;
@@ -1086,9 +1204,17 @@ class App {
 
   render() {
     document.documentElement.lang = this.lang;
+    this.renderBrand();
     this.renderStepIndicator();
     this.renderContent();
     this.renderFooter();
+  }
+
+  renderBrand() {
+    document.querySelectorAll('[data-i18n^="app."]').forEach((element) => {
+      const key = element.getAttribute('data-i18n');
+      if (key) element.textContent = this.t(key, { version: this.version });
+    });
   }
 
   bindEvents() {
@@ -1164,9 +1290,32 @@ class App {
     if (step === 'framework') {
       document.querySelectorAll('.framework-option:not(.disabled)').forEach((el) => {
         el.addEventListener('click', () => {
-          document.querySelectorAll('.framework-option').forEach((e) => e.classList.remove('selected'));
-          el.classList.add('selected');
+          // 重绘前先回写输出目录输入值，避免丢失用户已输入内容
+          const dirInput = document.getElementById('output-dir');
+          if (dirInput) this.state.outputDir = dirInput.value;
           this.state.framework = el.dataset.framework || 'react';
+          // P3-32：切换框架后当前组件库值可能不属于新框架，回退 auto
+          const LIB_BY_FRAMEWORK = {
+            react: ['auto', 'shadcn-ui', 'ant-design', 'none'],
+            vue: ['auto', 'element-plus', 'ant-design-vue', 'none'],
+          };
+          const allowed = LIB_BY_FRAMEWORK[this.state.framework];
+          if (!allowed || !allowed.includes(this.state.componentLibrary)) {
+            this.state.componentLibrary = 'auto';
+          }
+          // 框架卡片选中态与组件库选项均由 state 驱动，整体重绘保证联动
+          this.renderContent();
+        });
+      });
+      // P3-32：组件库 chip 选择（react/vue 步骤才存在）
+      document.querySelectorAll('#component-library-picker .lib-chip').forEach((el) => {
+        el.addEventListener('click', () => {
+          const value = el.dataset.lib;
+          if (!value) return;
+          this.state.componentLibrary = value;
+          document.querySelectorAll('#component-library-picker .lib-chip').forEach((e) => {
+            e.classList.toggle('selected', e === el);
+          });
         });
       });
     }

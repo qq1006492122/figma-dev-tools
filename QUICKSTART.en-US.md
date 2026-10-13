@@ -1,13 +1,13 @@
-# ⚡ figma-dev-tools Quick Start Guide v1.4.18
+# ⚡ figma-dev-tools Quick Start Guide v1.4.20
 
 > [中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md) / English
-> From install to your first Figma → React/Vue component in ~5 minutes. This is the merged & simplified version of the former `INTEGRATION_GUIDE` / `QUICKSTART` / landing overview, aligned with the actual v1.4.18 implementation.
+> From install to your first Figma → React/Vue component in ~5 minutes.
 
 ---
 
 ## What it is, in one minute
 
-A **MCP Server** + **CLI** + **GUI wizard** that runs underneath your AI editor (Trae / VS Code / Cursor / Windsurf / Claude Desktop / Zed / Cline / Roo Code, 8+). Feed it a Figma link and it generates frontend code (React / Vue / HTML), auto-downloads images / SVG, and extracts design tokens.
+A **MCP Server** + **CLI** + **GUI wizard** that runs underneath your AI editor (Trae / VS Code / Cursor / Windsurf / Claude Desktop / Zed / Cline / Roo Code, 8 editors). Feed it a Figma link and it generates frontend code (React / Vue / HTML), downloads images / SVG, and extracts design tokens.
 
 ---
 
@@ -16,49 +16,38 @@ A **MCP Server** + **CLI** + **GUI wizard** that runs underneath your AI editor 
 | Method | Command | Who it's for |
 |--------|---------|-------------|
 | **① GUI wizard** ⭐ | `npx figma-dev-tools gui` | Beginners, click-through in browser |
-| **② Zero-config npx** | `npx -y figma-dev-tools --figma-api-key=figd_xxx` | Quick trial, no install |
+| **② Zero-config npx** | `npx -y figma-dev-tools --figma-api-key=figd_xxx` | Quick trial |
 | **③ One-click install** | `npx figma-dev-tools install` | Long-term use, auto-configures editor MCP |
 | **④ Project dependency** | `npm i -D figma-dev-tools` | Use in a single project |
 
-To make `figma-dev` available globally (run from anywhere):
-
-```bash
-npm i -g figma-dev-tools
-```
-
-> 💡 The `install` script auto-detects installed editors (Trae / VS Code / Cursor / Windsurf / Claude Desktop / Zed / Cline / Roo Code, 8+) and writes the matching MCP config; the `GUI` way does it for you visually.
+> Global access (`figma-dev` from anywhere): `npm i -g figma-dev-tools`
 
 ---
 
 ## 2. Get and configure a Figma Token
 
-### 1. Get the token
-1. Sign in to [Figma](https://www.figma.com/), avatar (top-right) → **Settings** → **Account**
-2. Find **Personal access tokens** → **Generate new token**
-3. Check **File content (Read only)** permission → **Generate** → **copy immediately** (shown only once!)
+### Get the token
+Sign in to [Figma](https://www.figma.com/) → avatar (top-right) → **Settings** → **Account** → **Personal access tokens** → **Generate new token** → Check **File content (Read only)** → **Generate** → **copy immediately** (shown only once!)
 
-### 2. Configure (pick one)
+### Configure (pick one)
 
 **A. GUI (recommended)**
 ```bash
 figma-dev gui
 ```
-Enter the token in the browser — it's validated on the fly and safely stored in the OS keychain.
 
 **B. CLI secure store**
 ```bash
-# Save to OS keychain / encrypted file
 figma-dev token set default -t figd_xxx
-# Validate
 figma-dev validate
 ```
 
-**C. `.env` environment variable**
+**C. Environment variable**
 ```env
 FIGMA_ACCESS_TOKEN=figd_xxx
 ```
 
-**D. MCP config env (inside AI editor)**
+**D. Advanced: MCP config injection**
 ```json
 {
   "mcpServers": {
@@ -71,8 +60,7 @@ FIGMA_ACCESS_TOKEN=figd_xxx
 }
 ```
 
-3. ❗ **Restart your AI editor** after configuring so the MCP server loads the new config.
-   ⚠️ Never commit your token to Git; make sure `.env` is in `.gitignore`.
+> ❗ **Restart your AI editor** after configuring. ⚠️ Never commit your token to Git; add `.env` to `.gitignore`.
 
 ---
 
@@ -80,100 +68,63 @@ FIGMA_ACCESS_TOKEN=figd_xxx
 
 ### Way A: Inside the AI editor (MCP automation)
 
-Just paste a Figma link to the AI, e.g.:
+Paste a Figma link to the AI, e.g.:
 
 ```
-Use figma-dev-tools to convert this design. Component name: HeroSection, scene: landing-page
+Use figma-dev-tools to convert this design. Component: HeroSection, scene: landing-page
 https://www.figma.com/design/{fileKey}/{name}?node-id={nodeId}
 ```
 
-The AI runs the standard pipeline automatically:
+The AI runs: `figma_parse_url` → `figma_get_metadata` → `figma_get_screenshot` → `figma_generate_jsx` → `figma_download_assets`
 
-```
-figma_parse_url parse the link
-  → figma_get_metadata     page structure overview (avoids context explosion)
-  → figma_get_screenshot   visual reference
-  → figma_generate_jsx     generate the component (React/Vue × Tailwind/UnoCSS/CSS Modules; auto TS Props)
-  → figma_download_assets  download images/SVG (placed by bundler into public/<scene>/ or src/assets/)
-```
-
-### Way B: CLI (no AI needed)
+### Way B: CLI
 
 ```bash
-# ① Inspect the file structure
+# ① Inspect file structure
 figma-dev info "<figma-url>"
 
-# ② High-level overview
-figma-dev metadata "<figma-url>"
+# ② Generate component (--framework vue for Vue3; --style tailwind|unocss|css-modules)
+figma-dev jsx "<figma-url>" --name HeroSection --scene landing-page --style tailwind
 
-# ③ Design lint (optional)
-figma-dev lint "<figma-url>"
-
-# ④ Generate a component (React default; --framework vue for Vue 3)
-#    Since v1.4.18 --style accepts tailwind | unocss | css-modules
-figma-dev jsx "<figma-url>" --name HeroSection --scene landing-page --framework react --style tailwind
-# UnoCSS attributify: add --attributify; CSS Modules: emits HeroSection.module.css sidecar
-figma-dev jsx "<figma-url>" --name HeroSection --style unocss --attributify
-figma-dev jsx "<figma-url>" --name HeroSection --style css-modules
-
-# ⑤ Download assets (since v1.4.18 placed by bundler into public/ or src/assets/; override with --bundler)
+# ③ Download assets (auto-placed into public/ or src/assets/ by bundler)
 figma-dev assets "<figma-url>" --scene landing-page --scale 2
 
-# ⑥ Sync design tokens → Tailwind @theme CSS
+# ④ Sync design tokens (supports --output-format dtcg for W3C DTCG)
 figma-dev sync "<figma-url>" --format oklch --output ./src/styles/figma
-#    v1.4.18 new: W3C DTCG standard tokens (design-tokens.tokens.json)
-figma-dev sync "<figma-url>" --output-format dtcg --output ./src/styles/figma
 
-# ⑦ Framework-agnostic structured JSON (for Vue/Svelte/HTML, etc.)
+# ⑤ Output framework-agnostic JSON (for Vue/Svelte/HTML, etc.)
 figma-dev structured "<figma-url>"
 ```
 
 ---
 
-## 4. Common commands
+## 4. Command reference
 
 | Command | Description |
 |---------|-------------|
-| `figma-dev gui` | Launch the visual config wizard (browser) |
-| `figma-dev wizard` / `figma-dev init --gui` | Interactive CLI / GUI wizard |
+| `figma-dev gui` | Visual config wizard |
 | `figma-dev install` / `uninstall` | One-click install / uninstall editor MCP config |
 | `figma-dev validate` | Validate the token |
-| `figma-dev token set/get/list/delete/default` | Token management |
+| `figma-dev token set/get/list/delete` | Token management |
 | `figma-dev info <url>` / `metadata <url>` | File info / high-level overview |
-| `figma-dev lint <url>` | Code-fidelity pre-check |
-| `figma-dev jsx <url>` | Generate React/Vue component (`--style tailwind\|unocss\|css-modules`, `--attributify`, auto TS Props/import organizing, v1.4.18) |
+| `figma-dev lint <url>` | Design-fidelity pre-check |
+| `figma-dev jsx <url>` | Generate React/Vue component |
+| `figma-dev assets <url>` | Download images / SVG |
+| `figma-dev sync <url>` | Sync tokens → theme CSS / DTCG JSON |
 | `figma-dev structured <url>` | Output framework-agnostic JSON |
-| `figma-dev assets <url>` | Download images/SVG to the project (placed by bundler, v1.4.18) |
-| `figma-dev sync <url>` | Sync tokens → theme CSS / JSON / W3C DTCG (`--output-format dtcg`, v1.4.18) |
-| `figma-dev cache status/clear` | View / clear local cache |
-| `figma-dev lang set zh-CN|en-US` / `lang switch` | Switch UI language |
-| `figma-dev tutorial` | Open the tutorial |
-| `figma-dev privacy` | View the privacy statement |
 
-> Full commands & options in `README.md` → "CLI Commands"; or run `figma-dev --help` locally.
+> Full commands: `README.md` or `figma-dev --help`.
 
 ---
 
-## 5. Layout & Docs navigation
-
-```txt
-figma-dev-tools/
-├── README.md / README.en-US.md         # Highlights + 19 tools + CLI commands
-├── SKILL.md                             # AI-agent usage + high-fidelity checklist
-├── QUICKSTART.md / QUICKSTART.en-US.md # This guide (quick start)
-├── install.mjs / install.sh             # one-click install scripts
-├── bin/ + dist/                         # executable entry + compiled output
-└── gui/                                 # wizard frontend
-```
+## 5. Docs navigation
 
 | Looking for | See |
 |-------------|-----|
-| All features / 20 MCP tools / CLI commands | `README.md` |
+| All features / MCP tools / CLI commands | `README.md` |
 | AI usage & high-fidelity checklist | `SKILL.md` |
-| Per-editor / per-framework config | `README.md` → editors / config |
-| Design tokens → token mapping rules | `FIGMA-DESIGN-GUIDELINES.md` |
-| Competitor comparison & roadmap | `OPTIMIZATION-ANALYSIS.md` |
+| Per-editor / per-framework config | `README.md` → config |
+| Design token mapping rules | `FIGMA-DESIGN-GUIDELINES.md` |
 
 ---
-
-*Stuck? Run `figma-dev tutorial` for the online docs, or file an issue at the Gitee repo.*
+*Stuck? File an issue at the Gitee repo.*

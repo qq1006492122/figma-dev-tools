@@ -562,7 +562,9 @@ export class TailwindMapper {
    * @param padding - 四边内边距数据
    * @param classes - 类名数组（输出参数）
    */
-  private _mapPadding(padding: ProcessedPadding, classes: string[]): void {
+  private _mapPadding(padding: ProcessedPadding | undefined, classes: string[]): void {
+    // 精简节点/最小 fixture 可能只声明 layout.mode 而无 padding，按无内边距处理
+    if (!padding) return;
     const { top, right, bottom, left } = padding;
     const allEqual = top === right && right === bottom && bottom === left;
 

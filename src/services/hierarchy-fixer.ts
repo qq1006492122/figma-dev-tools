@@ -259,6 +259,11 @@ export class HierarchyFixer {
   private _maxFixedDepth = 0;
   private _autoFixedCount = 0;
 
+  /** 硬递归上限：超过 maxDepth+10 后停止继续下钻，防止脏数据导致栈溢出 */
+  private get _hardMaxDepth(): number {
+    return this._options.maxDepth + 10;
+  }
+
   constructor(options: Partial<HierarchyFixOptions> = {}) {
     this._options = { ...DEFAULT_OPTIONS, ...options };
   }
@@ -342,7 +347,7 @@ export class HierarchyFixer {
     const nodeId = node.figmaId || node.id;
     const nodeName = node.name || 'Unknown';
 
-    // 循环引用检测
+    // P3-12：路径式 visited（add/finally-delete），消除每子节点 Set 复制（O(n²)→O(n)）
     if (nodeId) {
       if (visited.has(nodeId)) {
         this._issues.push({
@@ -358,13 +363,36 @@ export class HierarchyFixer {
       visited.add(nodeId);
     }
 
-    // 过深层级检测
+    try {
+      this._walkProcessedNodeInner(node, depth, visited);
+    } finally {
+      if (nodeId) visited.delete(nodeId);
+    }
+  }
+
+  private _walkProcessedNodeInner(node: ProcessedNode, depth: number, visited: Set<string>): void {
+    const nodeId = node.figmaId || node.id;
+    const nodeName = node.name || 'Unknown';
+
+    // 过深层级检测；硬上限处立即停止递归，避免深层/自环脏数据造成栈溢出
+    if (depth > this._hardMaxDepth) {
+      this._issues.push({
+        type: 'nested_too_deep',
+        nodeId,
+        nodeName,
+        severity: 'error',
+        message: `嵌套层级超过安全上限: "${nodeName}" 位于第 ${depth} 层，已停止继续遍历`,
+        suggestion: '检查节点树是否异常深或存在循环引用',
+        autoFixable: false,
+      });
+      return;
+    }
     if (depth > this._options.maxDepth) {
       this._issues.push({
         type: 'nested_too_deep',
         nodeId,
         nodeName,
-        severity: depth > this._options.maxDepth + 10 ? 'error' : 'warning',
+        severity: 'warning',
         message: `嵌套层级过深: "${nodeName}" 位于第 ${depth} 层（建议不超过 ${this._options.maxDepth} 层）`,
         suggestion: '合并无意义的包裹层，使用组件复用减少嵌套',
         autoFixable: false,
@@ -395,14 +423,18 @@ export class HierarchyFixer {
     // 冗余包裹链检测（连续多个只有一个子节点的容器）
     let wrapperChain = 0;
     let current: ProcessedNode | undefined = node;
+    const wrapperSeen = new Set<ProcessedNode>();
     while (
+      wrapperChain <= this._options.maxWrapperDepth &&
       current &&
+      !wrapperSeen.has(current) &&
       current.children &&
       current.children.length === 1 &&
       !current.fills &&
       !current.strokes &&
       !current.effects
     ) {
+      wrapperSeen.add(current);
       wrapperChain++;
       current = current.children[0];
     }
@@ -421,13 +453,14 @@ export class HierarchyFixer {
     // 递归处理子节点
     if (node.children && node.children.length > 0) {
       for (const child of node.children) {
-        this._walkProcessedNode(child, depth + 1, new Set(visited));
+        this._walkProcessedNode(child, depth + 1, visited);
       }
     }
   }
 
   /**
-   * 统计节点总数
+   * 统计节点总数。
+   * P3-12：路径式 visited（add/finally-delete），消除每子节点 Set 复制。
    */
   private _countNodes(node: HierarchyNode, depth: number, visited: Set<string>): number {
     const nodeId = node.id || node.figmaId;
@@ -438,19 +471,25 @@ export class HierarchyFixer {
       visited.add(nodeId);
     }
 
-    this._maxOriginalDepth = Math.max(this._maxOriginalDepth, depth);
+    try {
+      this._maxOriginalDepth = Math.max(this._maxOriginalDepth, depth);
 
-    let count = 1;
-    if (node.children && Array.isArray(node.children)) {
-      for (const child of node.children) {
-        count += this._countNodes(child, depth + 1, new Set(visited));
+      let count = 1;
+      if (depth >= this._hardMaxDepth) return count;
+      if (node.children && Array.isArray(node.children)) {
+        for (const child of node.children) {
+          count += this._countNodes(child, depth + 1, visited);
+        }
       }
+      return count;
+    } finally {
+      if (nodeId) visited.delete(nodeId);
     }
-    return count;
   }
 
   /**
-   * 测量树深度
+   * 测量树深度。
+   * P3-12：路径式 visited（add/finally-delete），消除每子节点 Set 复制。
    */
   private _measureDepth(node: HierarchyNode, depth: number, visited: Set<string>): number {
     const nodeId = node.id || node.figmaId;
@@ -459,14 +498,19 @@ export class HierarchyFixer {
       visited.add(nodeId);
     }
 
-    let maxChildDepth = depth;
-    if (node.children && Array.isArray(node.children)) {
-      for (const child of node.children) {
-        const childDepth = this._measureDepth(child, depth + 1, new Set(visited));
-        maxChildDepth = Math.max(maxChildDepth, childDepth);
+    try {
+      let maxChildDepth = depth;
+      if (depth >= this._hardMaxDepth) return maxChildDepth;
+      if (node.children && Array.isArray(node.children)) {
+        for (const child of node.children) {
+          const childDepth = this._measureDepth(child, depth + 1, visited);
+          maxChildDepth = Math.max(maxChildDepth, childDepth);
+        }
       }
+      return maxChildDepth;
+    } finally {
+      if (nodeId) visited.delete(nodeId);
     }
-    return maxChildDepth;
   }
 
   /**
@@ -498,13 +542,25 @@ export class HierarchyFixer {
       this._visitedNodes.add(nodeId);
     }
 
-    // 检测过深层级
+    // 检测过深层级；硬上限处停止继续下钻
+    if (depth > this._hardMaxDepth) {
+      this._issues.push({
+        type: 'nested_too_deep',
+        nodeId,
+        nodeName,
+        severity: 'error',
+        message: `嵌套层级超过安全上限: "${nodeName}" 位于第 ${depth} 层，已停止继续遍历`,
+        suggestion: '检查节点树是否异常深或存在循环引用',
+        autoFixable: false,
+      });
+      return;
+    }
     if (depth > this._options.maxDepth) {
       this._issues.push({
         type: 'nested_too_deep',
         nodeId,
         nodeName,
-        severity: depth > this._options.maxDepth + 10 ? 'error' : 'warning',
+        severity: 'warning',
         message: `嵌套层级过深: "${nodeName}" 位于第 ${depth} 层（建议不超过 ${this._options.maxDepth} 层）`,
         suggestion: '合并无意义的 GROUP/FRAME 包裹层，使用组件复用减少嵌套',
         autoFixable: false,
@@ -592,12 +648,16 @@ export class HierarchyFixer {
     if (this._options.detectRedundantWrappers) {
       let wrapperChain = 0;
       let current: HierarchyNode | undefined = node;
+      const wrapperSeen = new Set<HierarchyNode>();
       while (
+        wrapperChain <= this._options.maxWrapperDepth &&
         current &&
+        !wrapperSeen.has(current) &&
         (current.type === 'FRAME' || current.type === 'GROUP') &&
         !hasVisualProps(current) &&
         current.children?.length === 1
       ) {
+        wrapperSeen.add(current);
         wrapperChain++;
         current = current.children[0];
       }
@@ -701,16 +761,24 @@ export class HierarchyFixer {
     node: HierarchyNode,
     parent: HierarchyNode | null,
     map: Map<string, { node: HierarchyNode; parent: HierarchyNode | null }>,
+    seen: Set<HierarchyNode> = new Set(),
+    depth = 0,
   ): void {
-    const nodeId = node.id || node.figmaId;
-    if (nodeId) {
-      map.set(nodeId, { node, parent });
-    }
-
-    if (node.children && Array.isArray(node.children)) {
-      for (const child of node.children) {
-        this._buildNodeMap(child, node, map);
+    if (depth > this._hardMaxDepth || seen.has(node)) return;
+    seen.add(node);
+    try {
+      const nodeId = node.id || node.figmaId;
+      if (nodeId) {
+        map.set(nodeId, { node, parent });
       }
+
+      if (node.children && Array.isArray(node.children)) {
+        for (const child of node.children) {
+          this._buildNodeMap(child, node, map, seen, depth + 1);
+        }
+      }
+    } finally {
+      seen.delete(node);
     }
   }
 }

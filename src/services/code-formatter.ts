@@ -69,14 +69,8 @@ export async function formatCode(code: string, options: FormatCodeOptions = {}):
       }
     }
 
-    const configPath = await findPrettierConfig(projectRoot);
-
-    let resolvedConfig: prettier.Options | null = null;
-    if (configPath) {
-      resolvedConfig = await prettier.resolveConfig(configPath, {
-        editorconfig: true,
-      });
-    }
+    // P3-12：配置发现按项目根记忆化（批量生成多文件只扫描/解析一次）
+    const { resolvedConfig } = await resolveProjectPrettierConfig(projectRoot);
 
     const defaultConfig: prettier.Options = {
       parser,
@@ -114,6 +108,40 @@ export async function formatCode(code: string, options: FormatCodeOptions = {}):
  */
 export function formatCodeSync(code: string, _options: FormatCodeOptions = {}): string {
   return code;
+}
+
+/**
+ * P3-12：按项目根缓存 Prettier 配置发现结果。
+ * 每次 formatCode 原本都做最多 10 层 ×（package.json + 6 个配置名）的同步 stat
+ * 与一次异步 resolveConfig（含 editorconfig 解析）；批量生成 N 个文件时重复 N 遍。
+ * 配置在单次 CLI/MCP 进程生命周期内不会变化，缓存 Promise 同时合并并发调用。
+ */
+const prettierConfigCache = new Map<
+  string,
+  Promise<{ configPath: string | null; resolvedConfig: prettier.Options | null }>
+>();
+
+/**
+ * 发现（或从缓存取）项目的 Prettier 配置；configPath/resolvedConfig 均可能为 null。
+ */
+function resolveProjectPrettierConfig(projectRoot: string): Promise<{
+  configPath: string | null;
+  resolvedConfig: prettier.Options | null;
+}> {
+  const cached = prettierConfigCache.get(projectRoot);
+  if (cached) return cached;
+  const pending = (async () => {
+    const configPath = await findPrettierConfig(projectRoot);
+    let resolvedConfig: prettier.Options | null = null;
+    if (configPath) {
+      resolvedConfig = await prettier.resolveConfig(configPath, {
+        editorconfig: true,
+      });
+    }
+    return { configPath, resolvedConfig };
+  })();
+  prettierConfigCache.set(projectRoot, pending);
+  return pending;
 }
 
 /**

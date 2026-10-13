@@ -1,7 +1,7 @@
 {
   "name": "figma-dev-tools",
-  "version": "1.4.19",
-  "description": "Figma Dev Tools MCP Server v1.4.19 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, paywall browser fallback, visual approximation mode, fidelity pixel-diff verification, OCR text extraction (native + tesseract.js fallback), SSRF hardening for remote images, zero `any` types for type safety, and one-click installation across 8+ editors.",
+  "version": "1.4.20",
+  "description": "Figma Dev Tools MCP Server v1.4.20 - Bridge Figma designs to code with AI-powered token extraction, framework-agnostic structured data, React/Vue/HTML component generation, asset downloads, XSS security protection, smart hierarchy fixing, SVG inline rendering, animation detection, paywall browser fallback, visual approximation mode, fidelity pixel-diff verification, OCR text extraction (native + tesseract.js fallback), SSRF hardening for remote images, zero `any` types for type safety, and one-click installation across 8 editors.",
   "keywords": [
     "a11y",
     "accessibility",
@@ -50,8 +50,8 @@
     "url": "git+https://gitee.com/shanxi-youcha/figma-dev-tools.git"
   },
   "bin": {
-    "figma-dev": "./bin/figma-dev.js",
-    "figma-dev-tools": "./bin/figma-dev.js"
+    "figma-dev": "bin/figma-dev.js",
+    "figma-dev-tools": "bin/figma-dev.js"
   },
   "files": [
     "dist",
@@ -84,13 +84,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "vitest run test/smoke",
-    "test:perf": "node test/perf/run-bench.mjs",
+    "test:perf": "node --expose-gc test/perf/run-bench.mjs",
+    "test:reconcile": "node scripts/test-reconcile.mjs",
+    "check:consistency": "node scripts/check-release-consistency.mjs",
     "setup": "node install.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "secret-scan": "npm run build && node scripts/secret-scan.mjs"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
     "@modelcontextprotocol/sdk": "^1.6.1",
+    "@types/tar": "^6.1.13",
     "axios": "^1.7.9",
     "boxen": "^8.0.1",
     "chalk": "^5.3.0",
@@ -115,6 +119,7 @@
     "@types/node": "^22.10.0",
     "@types/prettier": "^3.0.0",
     "@types/sanitize-html": "^2.16.1",
+    "svelte": "^4.2.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

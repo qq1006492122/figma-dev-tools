@@ -133,6 +133,24 @@ interface RateLimitState {
 /**
  * 请求元数据（用于重试计数）
  */
+export interface NetworkFailureDetail {
+  code: 'NETWORK_ERROR' | 'TIMEOUT_ERROR' | 'PROXY_ERROR' | 'TLS_ERROR' | 'DNS_ERROR';
+  message: string;
+  category: 'network' | 'timeout' | 'proxy' | 'tls' | 'dns';
+  retriable: boolean;
+  nextAction: string;
+}
+
+export function classifyNetworkFailure(error: Error & { code?: string }): NetworkFailureDetail {
+  const code = error.code ?? '';
+  const message = error.message || code || 'network failure';
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT' || /timeout/i.test(message)) return { code: 'TIMEOUT_ERROR', category: 'timeout', message, retriable: true, nextAction: '检查网络延迟或增大 timeout' };
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || /dns/i.test(message)) return { code: 'DNS_ERROR', category: 'dns', message, retriable: true, nextAction: '检查 DNS 和目标域名解析' };
+  if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || /proxy|ECONNREFUSED/i.test(message)) return { code: 'PROXY_ERROR', category: 'proxy', message, retriable: true, nextAction: '检查 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 或改用直连' };
+  if (code.startsWith('ERR_TLS') || code.startsWith('CERT_') || /certificate|tls|ssl/i.test(message)) return { code: 'TLS_ERROR', category: 'tls', message, retriable: false, nextAction: '检查系统证书、企业 CA 或 ssl.caCertPath' };
+  return { code: 'NETWORK_ERROR', category: 'network', message, retriable: true, nextAction: '检查网络连接和代理设置' };
+}
+
 interface RequestMetadata {
   retryCount?: number;
   authRetryCount?: number;
@@ -282,6 +300,10 @@ export class FigmaClient {
   private readonly _staleCacheFallback: boolean;
   /** 陈旧缓存最大年龄 */
   private readonly _staleCacheMaxAgeMs: number;
+  /** 同一 GET 请求的 in-flight 合并表 */
+  private readonly _inflight = new Map<string, Promise<unknown>>();
+  /** 429/Retry-After 全局等待截止时间 */
+  private _rateLimitedUntil = 0;
   /** 上一次请求的降级警告 */
   private _lastWarning?: string;
 
@@ -341,11 +363,27 @@ export class FigmaClient {
    * 计算重试延迟（指数退避）
    */
   private _calculateRetryDelay(retryCount: number, retryAfter?: number): number {
-    if (retryAfter) {
-      return retryAfter * 1000;
+    const maxDelayMs = 30_000;
+    if (retryAfter !== undefined && Number.isFinite(retryAfter)) {
+      return Math.min(Math.max(0, retryAfter * 1000), maxDelayMs);
     }
     const baseDelay = this._retryConfig.initialDelayMs;
-    return Math.min(baseDelay * Math.pow(2, retryCount), 30_000);
+    return Math.min(baseDelay * Math.pow(2, retryCount), maxDelayMs);
+  }
+
+  /**
+   * 合并并发的同参 GET 请求，避免 Watch/批量生成触发重复请求风暴。
+   * 失败也会共享同一个 rejection，随后从 in-flight 表移除。
+   */
+  private _coalesce<T>(key: string, request: () => Promise<T>): Promise<T> {
+    const existing = this._inflight.get(key);
+    if (existing) return existing as Promise<T>;
+
+    const pending = request().finally(() => {
+      if (this._inflight.get(key) === pending) this._inflight.delete(key);
+    });
+    this._inflight.set(key, pending);
+    return pending;
   }
 
   /**
@@ -371,10 +409,12 @@ export class FigmaClient {
     const now = Date.now();
     const timeSinceLastRequest = now - this._rateLimitState.lastRequestAt;
     const minInterval = this._rateLimitConfig.minIntervalMs;
+    const rateLimitedDelay = Math.max(0, this._rateLimitedUntil - now);
 
     // 基础间隔控制
-    if (timeSinceLastRequest < minInterval) {
-      await this._delay(minInterval - timeSinceLastRequest);
+    const baseDelay = Math.max(minInterval - timeSinceLastRequest, rateLimitedDelay);
+    if (baseDelay > 0) {
+      await this._delay(baseDelay);
     }
 
     // 如果接近速率限制，增加延迟
@@ -406,10 +446,13 @@ export class FigmaClient {
   private _getRetryAfter(error: AxiosError<FigmaApiErrorResponse>): number | undefined {
     if (!error.response?.headers) return undefined;
     const retryAfter = error.response.headers['retry-after'];
-    if (retryAfter) {
-      const parsed = Number.parseInt(retryAfter, 10);
-      return Number.isNaN(parsed) ? undefined : parsed;
-    }
+    if (!retryAfter) return undefined;
+
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds);
+
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) return Math.max(0, (retryAt - Date.now()) / 1000);
     return undefined;
   }
 
@@ -426,7 +469,7 @@ export class FigmaClient {
   /**
    * 切换到下一个可用 Token。
    */
-  private _rotateToken(requestConfig?: InternalAxiosRequestConfig): boolean {
+  private _rotateToken(requestConfig: InternalAxiosRequestConfig): boolean {
     if (!this._enableTokenRotation || this._tokens.length <= 1) return false;
 
     const nextIndex = (this._tokenIndex + 1) % this._tokens.length;
@@ -436,17 +479,6 @@ export class FigmaClient {
     const nextToken = this._tokens[nextIndex]!;
     this._accessToken = nextToken;
 
-    // 清除旧的认证头
-    delete this._client.defaults.headers.common['Authorization'];
-    delete this._client.defaults.headers.common['X-Figma-Token'];
-    // 根据 Token 类型设置正确的认证头
-    if (nextToken.startsWith('figd_')) {
-      delete this._client.defaults.headers.common['Authorization'];
-      this._client.defaults.headers.common['X-Figma-Token'] = nextToken;
-    } else {
-      this._client.defaults.headers.common['Authorization'] = `Bearer ${nextToken}`;
-      this._client.defaults.headers.common['X-Figma-Token'] = nextToken;
-    }
     if (requestConfig) {
       requestConfig.headers.delete('Authorization');
       requestConfig.headers.delete('X-Figma-Token');
@@ -743,6 +775,7 @@ export class FigmaClient {
       headers['Authorization'] = `Bearer ${this._accessToken}`;
       headers['X-Figma-Token'] = this._accessToken;
     }
+    const defaultHeaders: Record<string, string> = { ...headers };
     const axiosConfig: AxiosRequestConfig = {
       baseURL,
       timeout: config.timeout || DEFAULT_TIMEOUT,
@@ -752,6 +785,10 @@ export class FigmaClient {
     };
 
     this._client = axiosCreate(axiosConfig);
+    this._client.interceptors.request.use((requestConfig: InternalAxiosRequestConfig) => {
+      requestConfig.headers.set('Content-Type', defaultHeaders['Content-Type']);
+      return requestConfig;
+    });
 
     // ============ 请求拦截器 - 速率控制 ============
     this._client.interceptors.request.use(async (requestConfig: InternalAxiosRequestConfig) => {
@@ -800,6 +837,9 @@ export class FigmaClient {
               this._requestStats.retried++;
               const retryAfter = this._getRetryAfter(error);
               const delay = this._calculateRetryDelay(retryCount, retryAfter);
+              if (error.response?.status === 429) {
+                this._rateLimitedUntil = Math.max(this._rateLimitedUntil, Date.now() + delay);
+              }
               await this._delay(delay);
               requestConfig.retryCount = retryCount + 1;
               return this._client.request(requestConfig);
@@ -809,30 +849,18 @@ export class FigmaClient {
           throw this._createApiError(status, data, classification);
         }
 
-        if (error.request) {
-          // 请求已发出但未收到响应（网络问题、DNS 失败、超时等）。交给陈旧缓存降级逻辑处理。
-          const i18n = getI18n();
-          const labels = i18n.t('cli.errors.labels') as { networkError: string };
-          throw new Error(labels.networkError);
-        }
-
-        const i18n = getI18n();
-        const labels = i18n.t('cli.errors.labels') as { networkErrorWithMessage: (msg: string) => string };
-        throw new Error(labels.networkErrorWithMessage(error.message));
+        const network = classifyNetworkFailure(error as Error & { code?: string });
+        throw new FigmaApiError(network.code, 0, {
+          reason: network.message,
+          solution: network.nextAction,
+          retriable: network.retriable,
+          staleCacheRecoverable: network.retriable,
+        });
       },
     );
   }
 
   // ============ 认证相关 ============
-
-  /**
-   * 获取当前配置的 Access Token
-   *
-   * @returns Figma Personal Access Token 字符串
-   */
-  getAccessToken(): string {
-    return this._accessToken;
-  }
 
   /**
    * 获取请求统计信息
@@ -971,8 +999,8 @@ export class FigmaClient {
     if (version) params.version = version;
     if (depth !== undefined) params.depth = depth;
 
-    const response = await this._withStaleCache(cacheKey, () =>
-      this._client.get<FigmaFileResponse>(`/v1/files/${fileKey}`, { params }),
+    const response = await this._coalesce(`GET:/v1/files/${fileKey}:${version ?? ''}:${depth ?? ''}`, () =>
+      this._withStaleCache(cacheKey, () => this._client.get<FigmaFileResponse>(`/v1/files/${fileKey}`, { params })),
     );
 
     if (cache && cacheKey) {
@@ -980,6 +1008,37 @@ export class FigmaClient {
     }
 
     return response.data;
+  }
+
+  /**
+   * Watch 粗筛探针（WBS-P1-22）：GET /v1/files/:key?depth=1，**绕过缓存**
+   * （决策 3：watch 链路不允许命中 latest 缓存键），只取 lastModified/version。
+   * 429 归一化为 rate-limited 供轮询器退避；其余错误抛出由调用方处理。
+   *
+   * @param fileKey - Figma 文件 Key
+   */
+  async probeFileMeta(fileKey: string): Promise<
+    | { kind: 'ok'; lastModified: string; version: string | null }
+    | { kind: 'rate-limited'; retryAfterMs?: number }
+  > {
+    try {
+      const response = await this._coalesce(`PROBE:/v1/files/${fileKey}`, () =>
+        this._client.get<FigmaFileResponse>(`/v1/files/${fileKey}`, {
+          params: { depth: 1, branch_data: false },
+        }),
+      );
+      return { kind: 'ok', lastModified: response.data.lastModified, version: response.data.version ?? null };
+    } catch (error) {
+      const status = (error as { response?: { status?: number; headers?: { 'retry-after'?: string } } })?.response
+        ?.status;
+      if (status === 429) {
+        const retryAfter = error as { response?: { headers?: Record<string, string | undefined> } };
+        const retryAfterHeader = retryAfter.response?.headers?.['retry-after'];
+        const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
+        return { kind: 'rate-limited', retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : undefined };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1022,10 +1081,13 @@ export class FigmaClient {
     if (options.geometry) params.geometry = options.geometry;
     if (options.plugin_data) params.plugin_data = options.plugin_data;
 
-    const response = await this._withStaleCache(cacheKey, () =>
-      this._client.get<{ nodes: Record<string, { document: FigmaNode }> }>(`/v1/files/${fileKey}/nodes`, {
-        params,
-      }),
+    const requestKey = `GET:/v1/files/${fileKey}/nodes:${JSON.stringify(params)}`;
+    const response = await this._coalesce(requestKey, () =>
+      this._withStaleCache(cacheKey, () =>
+        this._client.get<{ nodes: Record<string, { document: FigmaNode }> }>(`/v1/files/${fileKey}/nodes`, {
+          params,
+        }),
+      ),
     );
 
     if (cache && cacheKey) {
@@ -1205,7 +1267,7 @@ export class FigmaClient {
   }
 
   /**
-   * 单批获取图片 URL（内部方法，带缓存）
+   * 单批获取图片 URL（内部方法，不缓存临时签名 URL）。
    */
   private async _getImagesSingleBatch(
     fileKey: string,
@@ -1214,17 +1276,6 @@ export class FigmaClient {
     scale: number,
     useAbsoluteBounds: boolean,
   ): Promise<{ images: Record<string, string | null>; err?: string }> {
-    // 尝试从缓存获取
-    if (this._cache) {
-      const cacheKey =
-        FigmaCache.generateImageCacheKey(fileKey, nodeIds, format, scale) + (useAbsoluteBounds ? ':abs' : '');
-      const cached = await this._cache.get<{ images: Record<string, string | null>; err?: string }>(cacheKey);
-      if (cached) {
-        this._requestStats.cached++;
-        return cached;
-      }
-    }
-
     const params: Record<string, string | number | boolean> = {
       ids: nodeIds.join(','),
       format,
@@ -1235,21 +1286,12 @@ export class FigmaClient {
       params.use_absolute_bounds = true;
     }
 
-    const response = await this._client.get<{ images: Record<string, string | null>; err?: string }>(
-      `/v1/images/${fileKey}`,
-      { params },
+    const requestKey = `GET:/v1/images/${fileKey}:${JSON.stringify(params)}`;
+    const response = await this._coalesce(requestKey, () =>
+      this._client.get<{ images: Record<string, string | null>; err?: string }>(`/v1/images/${fileKey}`, { params }),
     );
-
-    // 写入缓存（图片URL缓存时间稍短，5分钟）
-    if (this._cache) {
-      const cacheKey =
-        FigmaCache.generateImageCacheKey(fileKey, nodeIds, format, scale) + (useAbsoluteBounds ? ':abs' : '');
-      await this._cache.set(cacheKey, response.data, Math.min(this._cacheTTL, 5 * 60 * 1000));
-    }
-
     return response.data;
   }
-
   /**
    * 分批获取图片 URL（内部方法，自动分批并合并结果）
    *

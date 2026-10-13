@@ -445,6 +445,11 @@ export const zhCN = {
           'UnoCSS attributify 模式（v1.4.18新增，仅配合 --style unocss；原子类以元素属性输出，默认关闭=wind 模式）',
         attributifyIgnored:
           '--attributify 仅在 --style unocss 时生效，本次已忽略该参数（继续使用 wind 原子类）。',
+        // WBS-P2-12/13：组件库映射开关（保守门控，默认关闭保持原生标签）
+        componentLibrary:
+          '组件库映射: auto (按 package.json/components.json 自动检测) | none (默认，原生标签) | shadcn-ui | ant-design（React）；element-plus | ant-design-vue（Vue）',
+        componentLibraryIgnored:
+          '--component-library 仅支持 react/vue 产物，本次 svelte 生成已忽略该参数。',
         styleHintsSuffix: '配置指引（请按需手动落地，工具不会修改你的项目文件）',
         moduleCssSaved: '同名 CSS Modules 文件已保存',
         moduleCssPreview: '同名 CSS Modules 文件（请保存为与组件同目录）',
@@ -460,6 +465,11 @@ export const zhCN = {
         description: '一键生成 Vue 2/3 SFC 组件（.vue 单文件，v1.4.19 新增）',
         vueVersion: 'Vue 大版本: 2 (Options API) | 3 (默认，<script setup>)',
         invalidVersion: '错误: --vue-version 仅支持 2 或 3',
+      },
+
+      // v1.4.20 WBS-P1-1：figma-dev svelte 一级命令（Svelte 4 默认）
+      svelte: {
+        description: '一键生成 Svelte 4 组件（.svelte 单文件；样式仅 tailwind/unocss/css-modules，v1.4.20 新增）',
       },
 
       // v1.4.19 T20：整页批量生成
@@ -851,6 +861,30 @@ export const zhCN = {
     filesHeading: '产物文件树',
     graphHeading: '依赖图',
     savedPrefix: '批量产物已写入目录',
+  },
+
+  // v1.4.20 WBS-P1-2/P1-3：Watch 与 Compare 冻结错误码文案
+  watch: {
+    title: 'Watch 会话',
+    started: 'Watch 会话已启动（10s 内粗筛检测，会话仅存在于本 MCP 进程，重启需重新 start）',
+    stopped: 'Watch 会话已停止（幂等）',
+    none: '当前没有运行中的 watch 会话',
+    errors: {
+      'missing-output': 'FDT-WATCH-MISSING-OUTPUT：write=true 时必须提供 outputDir',
+      'output-without-write': 'FDT-WATCH-OUTPUT-WITHOUT-WRITE：write=false 时不允许传 outputDir（MCP 默认不落盘）',
+      'too-many-sessions': 'FDT-WATCH-TOO-MANY-SESSIONS：单个客户端最多 5 个并发 watch 会话，请先 stop 无用会话',
+      'framework-unavailable': 'FDT-WATCH-FRAMEWORK-UNAVAILABLE：该框架的 watch 适配未就绪',
+      'session-not-found': 'FDT-WATCH-SESSION-NOT-FOUND：会话不存在、已停止或不属于当前客户端',
+    },
+  },
+  compare: {
+    title: '代码差异对比',
+    errors: {
+      'path-traversal': 'FDT-COMPARE-PATH-TRAVERSAL：文件路径越权，拒绝读取',
+      'input-too-large': 'FDT-COMPARE-INPUT-TOO-LARGE：输入总大小超过 512KB 上限',
+      'binary-unsupported': 'FDT-COMPARE-BINARY-UNSUPPORTED：不支持二进制文件对比',
+      'missing-current': '必须提供 currentCode / currentFilePath / currentFiles 之一作为现状侧',
+    },
   },
   gui: {
     title: 'GUI 配置向导',

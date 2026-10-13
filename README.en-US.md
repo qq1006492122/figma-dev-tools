@@ -1,722 +1,180 @@
-# 🎨 Figma Dev Tools v1.4.19
+# 🎨 Figma Dev Tools v1.4.20
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
 **English** | **[中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/README.md)**
 
-A **complete toolchain bridging Figma design and frontend development**, supporting 🖥️ GUI visual configuration wizard, intelligent design token extraction, high-fidelity component generation (React/Vue/Svelte/HTML, etc.), automatic asset downloading, and cross-editor MCP integration. Optimized for AI Agents, solving core pain points like div soup, context explosion, hardcoded hex colors, asset path handling, Flex layout deformation, accessibility gaps, responsive adaptation, and **paywall fallback**.
+A **complete toolchain bridging Figma design and frontend development** — GUI visual configuration wizard, intelligent design token extraction, high-fidelity component generation (React/Vue/Svelte/HTML), automatic asset downloading, and cross-editor MCP integration. Optimized for AI Agents.
 
 ---
 
-## ✨ v1.4.4 Paywall Fallback + High-Fidelity Restoration + Performance Optimization
+## ✨ Key Features by Version
 
-### Core Fallback & Restoration
+### v1.4.4 — Paywall Fallback + Fidelity Restoration + Performance
 
-| Feature                          | Description                                                                                                                          | Version   |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| 🧱 **Paywall Browser Fallback**  | New `BrowserFallbackService`: When Figma REST API fails due to paywall/permissions, automatically launches Playwright headless browser to load the design page and capture a screenshot as fallback | **v1.4.4** |
-| 🤖 **Visual Approximation Mode** | New `VisualApproximationService`: When node JSON cannot be obtained, feeds the screenshot to VLM to generate approximate code skeleton, clearly marked "Approximate mode ~75%" + TODO list | **v1.4.4** |
-| 📏 **DPR/Screen Size Awareness** | Screenshots output at 1x/2x/3x based on user's actual `devicePixelRatio`, matching different OS rendering differences                                                | **v1.4.4** |
-| 🎯 **Fidelity Scoring Tool**     | New `figma_verify_fidelity` MCP tool: Pixel diff between Figma screenshot and generated code screenshot, outputs a quantified similarity score                    | **v1.4.4** |
-| 📐 **Absolute Position Restore** | Fix `layoutMode=NONE` nodes losing `relativeTransform`, floating element rotation/offset correctly mapped                                                          | **v1.4.4** |
-| 🎨 **Gradient/Multi-shadow/Inner Shadow** | Fix loss of linear/radial gradient fills, multiple shadows, inner shadows all degrading to solid colors                                                       | **v1.4.4** |
-| ✂️ **mask/clip-path Restore**   | Fix circular avatar, irregular clipping distortion, mapped to `overflow:hidden` + `border-radius` or `clip-path`                                                    | **v1.4.4** |
-| ➖ **strokeDash Dashed/Dotted**   | Fix dashed and dotted borders all becoming solid lines                                                                                                              | **v1.4.4** |
-| 🔤 **Rich Text Multi-segment Styles** | Fix `styleOverrideTable` not being parsed, causing entire text to use the same style                                                                          | **v1.4.4** |
-| 🌍 **i18n Error Internationalization** | All hardcoded Chinese error messages in `figma-client.ts` changed to i18n key references, output based on GUI-selected language (zh-CN/en-US), default Chinese | **v1.4.4** |
+| Feature | Description |
+| --- | --- |
+| 🧱 **Paywall Browser Fallback** | `BrowserFallbackService`: Playwright auto-captures screenshot when REST API hits paywall |
+| 🤖 **Visual Approximation** | VLM generates ~75% code skeleton from screenshot when node JSON unavailable |
+| 🎯 **Fidelity Scoring** | `figma_verify_fidelity`: pixel diff + heatmap + quantified score (0-100%) |
+| 📏 **DPR Awareness** | 1x/2x/3x screenshots matching user's `devicePixelRatio` |
+| 📐 **Position/Style Restoration** | Absolute positioning, gradients, multi-shadow, clip-path, dashed borders, rich text |
+| 🌍 **i18n Errors** | Error messages output in GUI-selected language (zh-CN/en-US) |
+| 🚀 **Performance** | Browser instance pool, screenshot LRU cache, tiered timeouts, exponential backoff retry, warmup |
 
-### Performance Optimization (New in v1.4.4)
+### v1.4.18 — Component Props + DTCG Tokens + Enterprise Network
 
-| Feature                          | Description                                                                                                                          | Version   |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| 🚀 **Browser Instance Pool**     | New `BrowserPool`: Maintains reusable Playwright browser instances, subsequent screenshots skip the 1-3 second startup phase, auto-recycle after 60s idle | **v1.4.4** |
-| 💾 **Screenshot Cache**          | New `ScreenshotCache`: Caches screenshot results based on `url+nodeId+dpr`, LRU eviction + TTL expiry, repeated requests return in milliseconds                  | **v1.4.4** |
-| ⏱️ **Tiered Timeouts**           | Navigation/render/screenshot timeouts configured separately (default 20s/10s/5s), precisely locate timeout phase                                                  | **v1.4.4** |
-| 🧠 **Hybrid Smart Wait Strategy** | `domcontentloaded` + canvas element visible + network idle detection, solves Figma SPA `networkidle` never being reached                                          | **v1.4.4** |
-| 🔁 **Exponential Backoff Retry** | Network errors and timeout errors automatically retry (default 2 times, initial delay 500ms, exponential backoff), parameter errors not retried                  | **v1.4.4** |
-| 🔥 **Warmup Mechanism**          | `warmup()` pre-launches browser instance at service startup, eliminating first-call latency                                                                       | **v1.4.4** |
-| 📊 **Performance Metrics**       | `getPerformanceStats()` exposes browser pool and screenshot cache statistics (hit rate/instance count/usage count)                                              | **v1.4.4** |
-| 🐛 **Logic Bug Fixes**           | Fixed 9 logic bugs: screenshot selector mismatch, hardcoded dimensions, devModeCss injection risk, fidelityScore not clamped, dependency check order, etc.       | **v1.4.4** |
-| 🧪 **Test Coverage**             | Added 35 test cases (BrowserPool + ScreenshotCache + performance optimization config), total 95 tests all passing                                                | **v1.4.4** |
+| Feature | Description |
+| --- | --- |
+| 🧩 **TS Props Inference** | Figma component properties → JSDoc/`defineProps` interfaces |
+| 🪙 **W3C DTCG Tokens** | Standard `$type`/`$value` JSON for color/dimension/shadow/typography |
+| 🏢 **Enterprise Network** | `FIGMA_CA_CERT_PATH` for custom CA; auto bundler detection for asset placement |
+| 📐 **Import Organizing** | Auto add missing / remove unused imports before Prettier |
 
-### Performance Comparison (Before vs After v1.4.4)
+### v1.4.19 — Multi-style + Vue + Batch + Smart Inference
 
-| Scenario                    | Before    | After          | Improvement   |
-| --------------------------- | --------- | -------------- | ------------- |
-| Subsequent (same session)   | 5-8s      | 1-2s           | **3-4x**      |
-| Repeated (cache hit)        | 5-8s      | <100ms         | **50x+**      |
-| Network jitter recovery     | Fail      | Auto retry     | **Availability** |
+| Feature | Description |
+| --- | --- |
+| 🎻 **11 Style Renderers** | Tailwind, UnoCSS, CSS Modules, Styled Components, Emotion, Less, Sass, vanilla-extract, Panda CSS (9 enhanced, React & Vue) |
+| 💚 **First-class Vue** | `figma_generate_vue`: Vue3 `<script setup>` / Vue2 Options API, 5 styles, TS Props |
+| 🧩 **Component Mapping** | Built-in shadcn/ui, Ant Design, Element Plus; `.figma/components.json` overrides |
+| 📦 **Batch Generation** | `figma_batch_generate`: semantic block splitting (Header/Hero/Footer…) + barrel index |
+| 🧠 **Smart Inference** | Grid/icons/dark-mode/motion hints, interaction scaffolds, TS interfaces + mock data (advisory comments only) |
 
-### Performance Optimization Configuration (Optional, Backward Compatible)
+### v1.4.20 — WeApp, Watch, Compare, Direct Component-Library Generation
 
-```typescript
-// Configure via BrowserFallbackService
-const service = new BrowserFallbackService({
-  navigationTimeout: 20000,    // Navigation timeout (ms)
-  renderTimeout: 10000,        // Render wait timeout (ms)
-  screenshotTimeout: 5000,     // Screenshot operation timeout (ms)
-  waitStrategy: 'hybrid',      // Wait strategy: hybrid/conservative/aggressive
-  maxRetries: 2,               // Max retry attempts
-  retryBaseDelay: 500,         // Initial retry delay (ms)
-  enableScreenshotCache: true, // Enable screenshot cache
-  screenshotCacheTtl: 3600000, // Cache TTL (ms, default 1 hour)
-  browserIdleTimeout: 60000,   // Browser idle timeout (ms, default 60s)
-});
-```
-
-## 📜 Version History Summary
-
-| Version | Theme                          | Highlights                                                                                                 |
-| ------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| v1.4.19 | Multi-framework × Multi-style × Batch × Intelligence | 1) Six new style renderers — Styled Components (`styled`), Emotion, Less, Sass, vanilla-extract, Panda CSS (`panda`) — land in the enhanced pipeline (the batch's "seven styles" work also deepened CSS Modules); React/Vue gated by NEW_PIPELINE_FRAMEWORK_SUPPORT (registry holds 11 descriptors, 9 available in the new pipeline); 2) first-class Vue (MCP `figma_generate_vue` + CLI `figma-dev vue`; Vue3 `<script setup>` / Vue2 Options API via `vueVersion`); 3) deeper component-library mapping (built-in shadcn/ui, Ant Design, Element Plus + project-level `.figma-dev/components.json` overrides with draft-07 `components.schema.json`); 4) `figma_batch_generate` semantic page-block splitting (Header/Hero/Features/Footer etc. + barrel index + dependency graph; CLI `figma-dev batch`); 5) two batches of smart inference — T21 Grid/sticky/positioning, Lucide/Iconify icons, dark surfaces, hover/pressed/spinner motion (per-category `inference` switches / CLI `--no-smart-*`), T22 interactions (form submit + validation scaffolds, Modal open/close, Carousel, Tabs, Accordion), repeated children → TS interface + mock + `.map()`/`v-for` data examples (advisory only), and PascalCase semantic naming for `Frame N` layers. All smart output stays advisory (header comments / structuredContent reports); `skipEnhancements` is the master switch. Full suite 39 files / 493 tests + 4 smoke files / 73 cases green |
-| v1.4.18 | Multi-framework/Style Foundation + P0 Wrap-up | 1) Pluggable style architecture (`style-renderers` registry/factory with 11 descriptors); 2) UnoCSS deepened across React/Vue (preset-wind + attributify mode, `--attributify` / MCP `unocssAttributify`); 3) full CSS Modules support (canonical declaration ordering, shared class merging, collision de-duplication, maximal strict-subset `composes`, React `styles['x']` / Vue `<style module>` sidecar output); 4) Figma Component Properties → TS Props inference (React interfaces extending HTMLAttributes with JSDoc; Vue3 `defineProps<Props>()` + `withDefaults`; all four property kinds TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP); 5) W3C DTCG Design Tokens output (`outputFormat:'dtcg'` / `sync --output-format dtcg`) with a built-in structural validator; 6) custom CA via `FIGMA_CA_CERT_PATH` (effective for both API calls and OCR image downloads); 7) bundler detection with asset-path correction (Vite/Webpack/Next.js/Remix, five placement shapes); 8) automatic React/Vue import organizing before Prettier (idempotent); 9) bilingual `--help` examples for every CLI command (29-path snapshot smoke); 10) smoke/full/perf three-tier test infrastructure (21,845-node makeLargeTree fixture, MCP stdio harness). Full suite 27 files / 375 tests green (323 unit + 68 smoke); `npm audit` 0 vulnerabilities |
-| v1.4.17 | MCP Concurrency Reliability + OCR SSRF Hardening + Update Double Verification | 1) BrowserPool gains a `poolKey` snapshot and an idempotent `release`, fixing pool cross-talk and double-release under concurrent requests; 2) OCR remote-image SSRF now blocks the RFC2544 `198.19.0.0/16` benchmark range, rejects DNS answers containing ANY private/reserved address (multi-A-record bypass), and forces `redirect:'error'`; injectable DNS/fetch seams add rebinding/redirect unit tests (residual TOCTOU risk documented in code); 3) `--update`/GUI fallback first resolves and PINS the latest stable version (floating `@latest` removed) and strictly verifies BOTH the source tgz and the on-disk package.json — a failed verification can no longer report success; 4) CLI/GUI temp install directories are always cleaned via try/finally; fallback errors are fully i18n (5 new zh-CN/en-US keys) with `update.hint`; 5) GUI listens on 127.0.0.1 only with an Origin allowlist and OPTIONS preflight; 6) the McpServer handshake version is read from package.json at runtime, ending version drift; tests 134→152 green |
-| v1.4.16 | npm Version Placeholder Release | Version-slot publish; code identical to v1.4.15 with no functional changes; version-history documentation reconciled from this release onward |
-| v1.4.15 | `--update` EBUSY Fallback Hardening | Fix v1.4.14 `figma-dev --update` failing after EBUSY even the robocopy fallback on Windows Git Bash/MINGW64: 1) Use `npm.cmd` / `cmd.exe` instead of `npm` / `cmd` — MSYS `npm` returns `/c/Users/...` style paths that `path.join` + robocopy can't parse; 2) robocopy `/MIR` → `/E` (overwrite-only, don't delete locked files; Trae holds file handles and deletion fails the whole command) + add `/XF *.ps1`; 3) Add `shell: true` to all `execFileSync` for cross-shell robustness; 4) gui-server.ts EBUSY fallback path fixed the same way; 5) New i18n key `update.restartHint` |
-| v1.4.14 | OCR Text Extraction + Version Consistency Fix | 20th MCP tool `figma_ocr_extract`: native Figma TEXT node extraction (zero-dependency, 100% accurate) + tesseract.js image OCR fallback (chi_sim+eng, PSM/OEM tunable, SSRF-protected remote images); new `OcrService` with singleton + optional-dynamic-import + i18n error messages; tesseract.js added to optionalDependencies; 22 OCR unit tests; fix McpServer.version stuck at v1.4.4 in src/index.ts |
-| v1.4.13 | Release-Grade Regression Hardening + getErrorInfo Defensive Normalization | Add 4 smoke regressions (i18n path / codes null-pointer / error formatting); harden getErrorInfo entry against null/undefined so title/reason are always strings; tsc 0 errors + 99 tests green |
-| v1.4.12 | --update EBUSY Fallback Hardening + Windows robocopy Fix | Treat robocopy rc<8 as success; Windows `cp`→`copy /Y` for package.json; upgrade extracts latest tgz from npm pack then overwrites global dir, bypasses EBUSY rename locks caused by running editor processes |
-| v1.4.11 | i18n Path Fix + Token Input Enhancement | Fix Token validation i18n path error (cli.errors.labels), getErrorInfo codes null-pointer, README QUICKSTART 404 links; add FIGMA_ACCESS_TOKEN env fallback + password→input graceful degradation |
-| v1.4.10 | Version Unification + figd_ Token Auth Fix | Fix figd_ token auth (X-Figma-Token header), CLI/GUI version read from package.json, sync all docs version numbers |
-| v1.4.9  | figd_ Token Auth Fix       | Fix figd_ token compatibility: must use X-Figma-Token header instead of Authorization header, token validation fully working |
-| v1.4.8  | --update EBUSY + Docs           | --update auto-detects EBUSY, robocopy fallback, CLI docs (-v/--ver/--update), fix double icon, error detail display |
-| v1.4.7  | Token Validation + i18n        | Token validation shows specific error reasons (HTTP 401/403/429), GUI error detail display, CLI error capture improvements, full i18n for error messages |
-| v1.4.4  | Paywall Fallback + Performance | Browser fallback screenshot, visual approximation mode, fidelity scoring, performance optimization (pool/cache/tiered timeout) |
-| v1.4.3  | Stability & Security Hardening  | GUI request body guard, circular reference detection, recursion depth protection, cache consistency         |
-| v1.4.1  | Code Quality Optimization      | Zero any types, oxlint zero warnings, code style unification                                               |
-| v1.4.0  | Major Update                   | XSS security, smart hierarchy fix, SVG inline rendering, animation detection, encrypted cache, scoring algorithm, H5 adaptation, token secure storage |
-| v1.3.x  | Foundation                     | GUI wizard, i18n, accessibility, Flex fix, design system alignment, responsive inference, design lint      |
-
----
-
-## ✨ Feature Highlights
-
-| Feature                         | Description                                                                                                          | Version        |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------- |
-| 🖥️ **GUI Visual Config Wizard** | Browser graphical interface configuration, welcome page → language selection → Token config + real-time validation → editor detection → one-click install → framework preference → completion page, zero barriers for beginners | **v1.3.0**     |
-| 🔗 **22 MCP tools**             | Full coverage: URL parsing → Token extraction → component generation (React/Vue/batch) → asset download → paywall fallback → fidelity verification | v1.4.19        |
-| 🧠 **Framework-agnostic Structured Data** | Outputs id/name/role/type/size/layout/styles/text/asset/children JSON, supports Vue/Svelte/HTML/Angular/Solid and any framework | v1.1.0         |
-| ⚛️ **React + Tailwind First-class Support** | Semantic tag selection + Tailwind mapping + cn() merging + TODO markers, one-click high-fidelity TSX generation | v1.3.2         |
-| 🔧 **Flex Layout Auto-fix**     | Smart fix for icon deformation, text truncation, overflow and other Flex issues                                       | v1.3.2         |
-| ♿ **Accessibility Enhancement** | Auto-adds semantic tags, alt, ARIA attributes                                                                          | v1.3.2         |
-| 🎨 **Design System Alignment**   | Auto-matches color/spacing/font/border-radius/shadow variables                                                        | v1.3.2         |
-| 📱 **Responsive Inference**      | Intelligently infers breakpoints, provides responsive prefix suggestions                                              | v1.3.2         |
-| ✅ **Design Spec Pre-check**     | Checks design quality and provides fix suggestions before code generation                                            | v1.3.2         |
-| 🧠 **Smart Hierarchy Simplification** | Auto-flattens redundant GROUP/FRAME, eliminates ~60% meaningless nested divs                                       | v1             |
-| 📊 **Progressive Context**       | metadata overview (~4KB) → designContext details, avoids context explosion                                            | v1.2            |
-| 🎯 **Multi-level Token Matching** | codeSyntax.WEB → exact hex → CIE76 color difference fuzzy → @theme extension suggestions                              | v1             |
-| 🖼️ **Asset Auto Pipeline**       | Detects images/SVG → downloads to public/ → SVGO optimization → generates publicCdnUrl() references                   | v1.2            |
-| 🧩 **SVG Sprite Generation**     | Batch icon merging into Sprite, supports CSS color control                                                            | v1.3.2         |
-| 🌍 **i18n Internationalization** | Chinese/English bilingual support, `figma-dev lang switch` to toggle                                                   | v1.3.2         |
-| 🔐 **Secure Token Storage**      | System keychain secure Token storage                                                                                  | v1.3.2         |
-| 💻 **CLI Command Line**          | Supports script and CI/CD integration, usable without MCP, new gui/structured/lint/lang/token commands                | v1 (gui v1.3.0) |
-| 🔄 **8+ Editor Support**          | Trae, VS Code, Cursor, Windsurf, Claude Desktop, Zed, Cline, Roo Code one-click install (GUI auto-detect)            | v1 (gui v1.3.0) |
-| 🚀 **Zero-config Startup**        | Supports `npx -y figma-dev-tools --figma-api-key=xxx` direct run, no pre-install config needed                         | v1.2           |
-| 🔍 **OCR Text Extraction**        | **⭐ v1.4.14 new: native Figma TEXT node extraction (zero-dependency, 100% accurate) + tesseract.js image OCR fallback (chi_sim+eng bilingual, PSM/OEM tunable, SSRF-protected remote images)** | **v1.4.14**     |
-| 🎴 **Pluggable Style Pipelines**  | **⭐ v1.4.18 new: style-renderer registry/factory; both React and Vue support Tailwind, UnoCSS (incl. attributify mode) and CSS Modules (with auto-generated `.module.css` sidecar)** | **v1.4.18**     |
-| 🧩 **Component Properties → TS Props** | **⭐ v1.4.18 new: reads Figma component properties (text/boolean/variant/instance-swap); React gets JSDoc Props interfaces, Vue3 gets `defineProps<Props>()` + `withDefaults`** | **v1.4.18**     |
-| 🪙 **W3C DTCG Tokens**            | **⭐ v1.4.18 new: `figma_generate_styles` / `figma_sync_to_project` emit standard DTCG (`$type`/`$value`) JSON covering color/dimension/shadow/typography with built-in structural validation** | **v1.4.18**     |
-| 🏢 **Enterprise-network Ready**   | **⭐ v1.4.18 new: `FIGMA_CA_CERT_PATH` custom root CA (private PKI / HTTPS-decrypting proxies); auto bundler detection (Vite/Webpack/Next.js/Remix) placing assets into `public/` or `src/assets/` correctly** | **v1.4.18**     |
-| 📐 **Import Organizing + Help Examples** | **⭐ v1.4.18 new: React/Vue output organizes imports before Prettier (add missing, remove unused, idempotent); every CLI `--help` ships bilingual examples, switchable per invocation with `-l`** | **v1.4.18**     |
-| 🎻 **Multi-style × React/Vue**   | **⭐ v1.4.19 new: the registry holds 11 style descriptors; 9 are available in the enhanced pipeline — Tailwind / UnoCSS (incl. attributify) / CSS Modules / Styled Components / Emotion / Less / Sass / vanilla-extract / Panda CSS (all 9 on React, 5 on Vue); inline-styles stays on the legacy React pipeline, css-variables is planned for 1.5.0** | **v1.4.19**     |
-| 💚 **First-class Vue**           | **⭐ v1.4.19 new: MCP `figma_generate_vue` and CLI `figma-dev vue`; Vue3 `<script setup>` / Vue2 Options API (`vueVersion: 2`), same template/sidecar fidelity as React** | **v1.4.19**     |
-| 🧩 **Deeper Component Mapping**  | **⭐ v1.4.19 new: built-in shadcn/ui, Ant Design and Element Plus mappings; project-root `.figma-dev/components.json` overrides import sources and prop passthrough by node name / component key (validated against a draft-07 schema)** | **v1.4.19**     |
-| 📦 **Batch Generation + Semantic Blocks** | **⭐ v1.4.19 new: MCP `figma_batch_generate` / CLI `figma-dev batch` splits a page into Header/Hero/Features/Footer-style semantic blocks, generates one file per block and emits a barrel index (React & Vue)** | **v1.4.19**     |
-| 🧠 **Smart Inference (advisory only)** | **⭐ v1.4.19 new: per-category toggles for Grid/sticky/positioning hints, Lucide/Iconify icons, dark surfaces and hover/pressed/spinner motion; T22 adds form-validation scaffolds, Modal/Carousel/Tabs/Accordion interaction skeletons, repeated children → TS interface + mock + `.map()`/`v-for` data examples, and `Frame N` → PascalCase semantic naming. Everything surfaces as header comments / structuredContent reports; `skipEnhancements` turns it all off** | **v1.4.19**     |
+| Feature | Description |
+| --- | --- |
+| 📱 **WeChat Mini Program** | `figma_generate_weapp`: WXML/WXSS/JS/JSON, rpx, bind/catch events, rich-text nodes, fidelity gate |
+| 🧩 **Direct component-library output** | New `componentLibrary` option (`--component-library` on CLI) replaces semantic nodes with real library tags + imports: `shadcn-ui` / `ant-design` for React, `element-plus` / `ant-design-vue` for Vue. `auto` detects from package.json dependencies and the shadcn `components/ui` directory; conservative gate (role+name evidence, zero false replacements); cross-framework values fail before any network call (`FDT-UI-LIB-*`). Not applicable to Svelte. |
+| 🔄 **Watch mode** | `figma_watch_*`: 5-session cap, 429 backoff, write-safe JSON merge, preserve markers |
+| 📝 **Code compare** | `figma_compare_code`: unified diff, Prettier-normalized, 512KB cap, path traversal blocked |
 
 ---
 
 ## 🚀 Quick Start
 
-> 📚 Want a condensed, version-synced walkthrough? See **[QUICKSTART.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md)** (中文) / **[QUICKSTART.en-US.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)** (English). The sections below cover the details.
+> 📚 Full walkthrough: **[QUICKSTART.en-US.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)**
 
-### Option 0: GUI Visual Configuration (Beginner Recommended ⭐)
-
-**No need to memorize any commands**, complete all configuration through the browser graphical interface:
+### 1. Install & Configure
 
 ```bash
-# Launch GUI configuration panel directly
+# GUI wizard (beginner-friendly)
 npx figma-dev-tools gui
 
-# Or after global install
-figma-dev gui
-```
-
-After launching, it will automatically open the browser (default port **54321**, auto-tries 54322/54323 if occupied), follow the guided steps:
-
-1. **Welcome Page** - Learn about figma-dev-tools features
-2. **Language Selection** - Chinese/English bilingual toggle
-3. **Token Configuration** - Enter Figma Token, real-time validation
-4. **Editor Detection** - Auto-detects 8+ installed editors, check and one-click install MCP config
-5. **Framework Preference** - Choose commonly used framework (React/Vue/HTML)
-6. **Completion Page** - Configuration success, provides usage tutorial links
-
-> 💡 You can also launch GUI mode via the wizard command:
->
-> ```bash
-> figma-dev wizard --gui
-> figma-dev init --gui
-> ```
-
----
-
-### Option 1: Zero-config npx Direct Run (Fastest)
-
-No installation needed, start MCP server with one command:
-
-```bash
-# Run directly via npx, passing API Key
-npx -y figma-dev-tools --figma-api-key=your-figma-token-here
-```
-
-Use in editor MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "figma-dev-tools": {
-      "command": "npx",
-      "args": ["-y", "figma-dev-tools", "--figma-api-key=figd_your_token_here"]
-    }
-  }
-}
-```
-
-### Option 2: One-click Install (Recommended for Long-term Use)
-
-```bash
-# npm
+# Or one-click install MCP config to 8 editors
 npx figma-dev-tools install
 
-# pnpm
-pnpm dlx figma-dev-tools install
-
-# yarn
-yarn dlx figma-dev-tools install
-
-# bun
-bunx figma-dev-tools install
+# Or zero-config npx run
+npx -y figma-dev-tools --figma-api-key=your-token
 ```
 
-The install script will automatically:
-
-- Detect installed AI editors (Trae/VS Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code, 8+)
-- Auto-detect package manager (npm/pnpm/yarn/bun)
-- Download/compile the tool
-- Configure the corresponding editor's MCP settings (Zed uses mcp_servers field)
-- Generate `.env.example` template
-
-> 💡 **Easier way**: Run `figma-dev gui`
-> Use the graphical interface to one-click detect and install editor configurations.
-
-### Option 3: Project Dependency Install
+### 2. Set Figma Token
 
 ```bash
-# npm
-npm install figma-dev-tools --save-dev
-
-# pnpm
-pnpm add figma-dev-tools -D
-
-# yarn
-yarn add figma-dev-tools --dev
-
-# bun
-bun add figma-dev-tools -d
+figma-dev token set                          # interactive keychain save
+# or pass via CLI: npx figma-dev-tools -t figd_xxx
+# or via .env: FIGMA_ACCESS_TOKEN=figd_xxx
 ```
 
-### Option 4: Install from Local Source
+### 3. Generate Code
+
+In your AI editor, paste a Figma URL and ask the agent to use `figma-dev-tools`. The agent will automatically run the pipeline: `figma_parse_url` → `figma_get_metadata` → `figma_get_design_context` → `figma_get_screenshot` → `figma_generate_jsx` → `figma_download_assets`.
 
 ```bash
-# Clone or copy figma-dev-tools directory to project
-cp -r figma-dev-tools/ your-project/tools/
-cd your-project/tools/figma-dev-tools
-npm install   # or pnpm install / yarn install / bun install
-npm run build # or pnpm build / yarn build / bun run build
-```
-
----
-
-### 1. Get Figma Access Token
-
-1. Log in to [Figma](https://www.figma.com/)
-2. Click avatar in top right → **Settings** → **Account**
-3. Find **Personal access tokens** → **Generate new token**
-4. Enter a name, check **File content (Read only)** permission
-5. Copy the generated Token (⚠️ only shown once)
-
-> 💡 When using GUI configuration, simply paste the Token in the browser interface for automatic validation and secure storage.
-
-### 2. Configure Token
-
-**Method A: GUI Visual Configuration (Recommended v1.3.0+)**
-
-```bash
-figma-dev gui
-```
-
-Enter the Token in the browser interface, after real-time validation it will be auto-securely stored.
-
-**Method B: Secure Storage (Recommended v1.3.2+)**
-
-```bash
-# Interactively save Token to system keychain
-figma-dev token set
-
-# Or directly via parameter
-figma-dev token set -t figd_your_token_here
-```
-
-**Method C: Via Command Line Parameters**
-
-```bash
-npx figma-dev-tools --figma-api-key=your-figma-token-here
-# or short parameter
-npx figma-dev-tools -t your-figma-token-here
-```
-
-**Method D: Via .env File**
-
-Create a `.env` file in the `figma-dev-tools/` directory:
-
-```env
-FIGMA_ACCESS_TOKEN=your-figma-token-here
-```
-
-**Method E: MCP Config env**
-
-Add to editor MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "figma-dev-tools": {
-      "command": "node",
-      "args": ["<path>/dist/index.js"],
-      "env": {
-        "FIGMA_ACCESS_TOKEN": "your-figma-token-here"
-      }
-    }
-  }
-}
-```
-
-### 3. First Figma → Code Example
-
-**React + Tailwind (Recommended, v1.4.0 enhanced):**
-
-In AI editor (like Trae), just chat:
-
-```
-Help me use figma-dev-tools to restore this Figma design:
-https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032
-
-Scene name: landing-page
-```
-
-The AI will automatically call the MCP tool to complete the full pipeline:
-
-1. `figma_parse_url` parse URL
-2. `figma_get_metadata` get high-level structure overview (~4KB)
-3. `figma_get_design_context` get detailed context (hierarchy flattening + semantic annotation)
-4. `figma_get_screenshot` get visual baseline screenshot
-5. `figma_generate_jsx` one-click generate TSX code (with Flex fix, a11y enhancement, design system alignment, responsive inference)
-6. `figma_download_assets` download image assets (SVGO auto-optimization)
-
-**Other frameworks (Vue/Svelte/HTML, etc.):**
-
-Use the `figma_get_structured_data` tool to get framework-agnostic JSON structure:
-
-```
-Help me use figma_get_structured_data to get the structured data for this Figma node, then generate a Vue component:
-https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032
-```
-
-### CLI Quick Start
-
-```bash
-# 🖥️ Launch GUI visual configuration panel (v1.3.0 new, beginner recommended)
-npx figma-dev-tools gui
-
-# View file info
-npx figma-dev info "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032"
-
-# Design spec pre-check (v1.3.2 new)
-npx figma-dev lint "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032"
-
-# Generate React component (enhanced)
-npx figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
+# CLI: generate React component
+figma-dev jsx "https://www.figma.com/design/xxx/MyProject?node-id=23-11032" \
   --name HeroSection --scene landing-page
 
-# Get framework-agnostic structured data (v1.1.0 new)
-npx figma-dev structured "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --format json --output ./hero-structured.json
+# CLI: generate Vue SFC
+figma-dev vue "https://www.figma.com/design/xxx/MyProject?node-id=23-11032" \
+  --name HeroSection --style sass
 
-# Sync Design Tokens
-npx figma-dev sync "https://www.figma.com/design/xxxxx/MyProject" \
+# CLI: full-page batch generation
+figma-dev batch "https://www.figma.com/design/xxx/MyProject?node-id=1-2" \
+  --prefix Landing --out src/components/landing
+
+# CLI: sync design tokens
+figma-dev sync "https://www.figma.com/design/xxx/MyProject" \
   --format oklch --output ./src/styles
-
-# Language settings (v1.3.2 new)
-npx figma-dev lang switch  # Interactive Chinese/English toggle
-npx figma-dev lang set zh-CN
-
-# Token secure management (v1.3.2 new)
-npx figma-dev token set     # Save Token to keychain
-npx figma-dev token list    # List saved Tokens
 ```
 
 ---
 
 ## 🔧 MCP Tool Reference
 
-**22 MCP tools** in total, arranged by usage flow:
+23 tools organized by usage flow:
 
-| #   | Tool Name                   | Function                                                                            | Key Parameters                           | Version     |
-| --- | --------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------- | ----------- |
-| 1   | `figma_parse_url`           | Parse Figma URL, extract fileKey/nodeId                                             | `url`                                    | v1          |
-| 2   | `figma_validate_token`      | Validate Figma Access Token                                                         | `accessToken`                            | v1          |
-| 3   | `figma_get_file`            | Get basic file info (page list, component count)                                    | `fileKey` / `figmaUrl`                   | v1          |
-| 4   | `figma_list_components`     | List Components/ComponentSets in file                                               | `fileKey`                                | v1.2         |
-| 5   | `figma_get_metadata`        | **High-level structure overview** (~4KB, avoids context explosion)                  | `fileKey/nodeId/depth`                   | v1.2         |
-| 6   | `figma_get_design_context`  | **Simplified design context** (hierarchy flatten + semantic annotation + asset list) | `fileKey/nodeId/maxDepth`               | v1.2         |
-| 7   | `figma_get_screenshot`      | Get high-res node screenshot                                                       | `fileKey/nodeId/scale`                   | v1          |
-| 8   | `figma_get_structured_data` | **⭐ Framework-agnostic structured data** (id/name/role/type/size/layout/styles/text/asset/children) | `fileKey/nodeId/maxDepth` | v1.1.0      |
-| 9   | `figma_lint_design`         | **⭐ v1.3.2 new: Code restoration quality pre-check**                              | `fileKey/nodeId/maxDepth`                | **v1.3.2**  |
-| 10  | `figma_generate_jsx`        | **⭐ One-click React TSX generation** (Flex/a11y/design system/responsive; 9 pluggable styles in the enhanced pipeline, TS Props inference, smart-inference advice) | `fileKey/nodeId/componentName/sceneName/styleFormat/unocssAttributify/typescript/inference` | v1.4.19 enhanced |
-| 11  | `figma_generate_component`  | Basic component generation (legacy, recommend generate_jsx)                          | `fileKey/nodeId/styleFormat`             | v1          |
-| 12  | `figma_download_assets`     | **Download assets + SVGO optimization + publicCdnUrl; v1.4.18 places by bundler (src/assets etc., five shapes)** | `fileKey/sceneName/assetNodeIds/bundler` | v1.4.18 enhanced |
-| 13  | `figma_create_icon_sprite`  | **⭐ v1.3.2 new: Generate SVG Sprite**                                               | `svgDir/outputPath/typesPath`            | **v1.3.2**  |
-| 14  | `figma_extract_tokens`      | Extract design tokens (Variables+Styles)                                             | `fileKey/colorFormat`                    | v1          |
-| 15  | `figma_generate_styles`     | Generate CSS Variables / Tailwind v4 @theme / raw JSON / **W3C DTCG (v1.4.18)**      | `tokens/outputFormat` (css-variables/tailwind-v4/json/dtcg) | **v1.4.18** enhanced |
-| 16  | `figma_sync_to_project`     | Write tokens to project files (auto-backup; v1.4.18 adds dtcg/all writing `.tokens.json`) | `tokens/outputDir/format` (css/tailwind/json/dtcg/all) | **v1.4.18** enhanced |
-| 17  | `figma_dev_fallback_status` | **⭐ v1.4.4 new: Query paywall fallback system status** (Playwright availability, config, fallback priority) | none | **v1.4.4**  |
-| 18  | `figma_dev_fallback_capture`| **⭐ v1.4.4 new: Trigger browser fallback screenshot** (paywall screenshot + Dev Mode CSS + visual approximation mode) | `figmaUrl/devicePixelRatio/framework` | **v1.4.4**  |
-| 19  | `figma_verify_fidelity`     | **⭐ v1.4.4 new: Fidelity verification** (pixel diff + diff heatmap + quantified score 0-100%) | `figmaUrl/codeContent/threshold` | **v1.4.4**  |
-| 20  | `figma_ocr_extract`         | **⭐ v1.4.14 new: OCR text extraction** (native node JSON first + tesseract.js image OCR fallback) | `figmaUrl/imagePath/language/psm/oem` | **v1.4.14** |
-| 21  | `figma_generate_vue`        | **⭐ v1.4.19 new: One-click Vue SFC generation** (Vue3 `<script setup>` / Vue2 Options API; 5 Vue styles, TS Props, style sidecars, smart inference shared with React) | `fileKey/nodeId/componentName/vueVersion(2\|3)/styleFormat/inference` | **v1.4.19** |
-| 22  | `figma_batch_generate`      | **⭐ v1.4.19 new: Batch generation** (splits a page into Header/Hero/Features/Footer-style semantic blocks, one React/Vue file per block + barrel index + dependency graph) | `fileKey/nodeId/nodeIds/framework/styleFormat/vueVersion/componentNamePrefix/inference` | **v1.4.19** |
+| # | Tool | Function | Version |
+| --- | --- | --- | --- |
+| 1 | `figma_parse_url` | Parse Figma URL → fileKey/nodeId | v1 |
+| 2 | `figma_validate_token` | Validate Access Token | v1 |
+| 3 | `figma_get_file` | Basic file info (pages, components) | v1 |
+| 4 | `figma_list_components` | List Components/ComponentSets | v1.2 |
+| 5 | `figma_get_metadata` | High-level structure overview (~4KB) | v1.2 |
+| 6 | `figma_get_design_context` | Simplified design context (flatten + annotation) | v1.2 |
+| 7 | `figma_get_screenshot` | High-res node screenshot | v1 |
+| 8 | `figma_get_structured_data` | Framework-agnostic structured JSON | v1.1.0 |
+| 9 | `figma_lint_design` | Design spec pre-check | **v1.3.2** |
+| 10 | `figma_generate_jsx` | One-click React TSX (9 styles, TS Props, smart inference) | **v1.4.19** |
+| 11 | `figma_generate_component` | Basic component (legacy; prefer `generate_jsx`) | v1 |
+| 12 | `figma_download_assets` | Download + SVGO optimize assets | **v1.4.18** |
+| 13 | `figma_create_icon_sprite` | Generate SVG Sprite | **v1.3.2** |
+| 14 | `figma_extract_tokens` | Extract design tokens (Variables+Styles) | v1 |
+| 15 | `figma_generate_styles` | CSS/Tailwind/JSON/DTCG token output | **v1.4.18** |
+| 16 | `figma_sync_to_project` | Write tokens to project files (auto-backup) | **v1.4.18** |
+| 17 | `figma_dev_fallback_status` | Query paywall fallback status | **v1.4.4** |
+| 18 | `figma_dev_fallback_capture` | Trigger browser fallback screenshot | **v1.4.4** |
+| 19 | `figma_verify_fidelity` | Fidelity verification (pixel diff + heatmap) | **v1.4.4** |
+| 20 | `figma_ocr_extract` | OCR text extraction (native + tesseract.js) | **v1.4.14** |
+| 21 | `figma_generate_vue` | One-click Vue SFC (Vue3/Vue2, 5 styles) | **v1.4.19** |
+| 22 | `figma_generate_svelte` | One-click Svelte 4 SFC (tailwind/unocss/css-modules only) | **v1.4.20** |
+| 23 | `figma_batch_generate` | Batch generation (semantic blocks + barrel index; react/vue/svelte) | **v1.4.19** |
+| 24 | `figma_generate_weapp` | WeChat Mini Program (WXML/WXSS/JS/JSON, dev preview) | **v1.4.20-dev** |
 
----
-
-### Tool Parameter Details
-
-#### `figma_ocr_extract` (new in v1.4.14, OCR Text Extraction)
-
-```typescript
-{
-  figmaUrl?: string;           // Figma design URL (preferred native extraction when provided)
-  imagePath?: string;          // Image source: local path / http(s) URL / base64 data URI
-  language?: string;           // OCR language (tesseract format, '+' combinable), default 'chi_sim+eng'
-  psm?: number;                // Page segmentation mode 1-13, default 3 = auto
-  oem?: number;                // OCR engine mode 0-3, default 1 = LSTM
-  autoScreenshot?: boolean;    // Auto screenshot fallback when native extraction yields no text, default true
-  screenshotScale?: number;    // Auto screenshot scale 1-4, default 2
-  accessToken?: string;        // Optional, prefers env var
-}
-```
-
-**Hybrid Strategy:**
-1. **Native first** (when figmaUrl provided): Traverses Figma TEXT nodes reading `characters` field, zero-dependency, 100% accurate
-2. **Screenshot fallback**: When native extraction yields no text, automatically calls Figma image export API to download PNG for OCR
-3. **Image OCR** (when imagePath provided): tesseract.js performs optical character recognition on local/remote/base64 images
-
-**Dependencies:** tesseract.js is an optional dependency (only needed for image OCR path), with install hint when missing. Remote image URLs have SSRF protection (rejects private network addresses).
-
-#### `figma_generate_jsx` (v1.4.19 enhanced, most commonly used)
-
-```typescript
-{
-  figmaUrl?: string;           // Figma URL (alternative to fileKey+nodeId)
-  fileKey?: string;            // Figma file key
-  nodeId?: string;             // Target node ID
-  componentName?: string;      // Component name (e.g. HeroSection)
-  sceneName?: string;          // Scene name used for asset paths
-  maxDepth?: number;           // Max traversal depth, default 15 (1-30)
-  // v1.4.19: 9 styles available in the enhanced pipeline
-  // (registry has 11; inline-styles is legacy-only, css-variables planned for 1.5.0)
-  styleFormat?: 'tailwind' | 'unocss' | 'css-modules' | 'styled'
-              | 'emotion' | 'less' | 'sass'
-              | 'vanilla-extract' | 'panda';
-  unocssAttributify?: boolean; // UnoCSS attributify mode (text="sm center"), unocss only
-  typescript?: boolean;        // Emit TypeScript, default true
-  // v1.4.19 T21: per-category smart-inference switches (all default on; advisory only)
-  inference?: {
-    grid?: boolean;            // Grid rows/columns, sticky/fixed/absolute positioning hints
-    icons?: boolean;           // Lucide/Iconify icon suggestions
-    darkMode?: boolean;        // Dark-surface dark: variant hints
-    motion?: boolean;          // hover/pressed/spinner/transition motion hints
-  };
-  skipEnhancements?: boolean;  // Master switch: skips Flex/a11y/design-system/responsive and T21/T22 inference
-  skipLintCheck?: boolean;     // Skip design-lint hints
-  accessToken?: string;        // Optional; env var takes precedence otherwise
-}
-```
-
-**v1.4.19 output behavior:**
-
-- 🎻 **New style renderers**: `styled` (Styled Components), `emotion`, `less`, `sass`, `vanilla-extract`, `panda` join the enhanced pipeline (the batch's "seven styles" work also deepened CSS Modules); unsupported framework×style combinations fail fast via dual zod/registry validation with a readable error (matrix below)
-- 💚 **For Vue use the dedicated `figma_generate_vue` tool** (below): Vue3 `<script setup>` or Vue2 Options API SFC
-- 📦 **For full pages use `figma_batch_generate`** (below) with automatic semantic block splitting
-- 🧠 **Smart-inference advice (comments only, never rewrites output code)**: the TSX header comment lists Grid/icons/dark/motion hints (T21), form-validation / Carousel / Accordion / Tabs / Modal interaction scaffolds, repeated-children → TS interface + mock + `.map()` data examples, and PascalCase naming for `Frame N` nodes (T22); full structured results are in `structuredContent.reports`
-
-**v1.4.18 output behavior:**
-
-- 🎴 **Multi-style pipeline**: `styleFormat:'css-modules'` emits a sidecar `X.module.css` (React uses `styles['class']`); `unocss` with `unocssAttributify:true` emits attributify-style attributes
-- 🧩 **TS Props inference**: reads Component Properties (TEXT/BOOLEAN/VARIANT/INSTANCE_SWAP) and emits a JSDoc `XxxProps` interface (with `@default` / swap-key docs); components without properties emit no empty interface
-- 🧹 **Import organizing**: before Prettier, used imports are added and unused ones removed (including statement-level `import type`); the result is idempotent
-- 🖼️ Asset reference paths are corrected per target bundler (Vite/Webpack/Next.js/Remix auto-detected; CLI `--bundler` overrides)
-
-#### `figma_generate_vue` (new in v1.4.19, first-class Vue SFC entry)
-
-```typescript
-{
-  figmaUrl?: string;           // Figma URL (alternative to fileKey+nodeId)
-  fileKey?: string;
-  nodeId?: string;
-  componentName?: string;      // Inferred (PascalCase) from node name by default
-  sceneName?: string;          // Asset sub-path
-  projectRoot?: string;        // Used for bundler auto-detection
-  bundler?: 'auto' | 'vite' | 'webpack' | 'nextjs' | 'remix';
-  maxDepth?: number;           // Default 15 (1-30)
-  vueVersion?: 2 | 3;          // Default 3: <script setup lang="ts">; 2: Options API (defineComponent + PropType/validator)
-  // 5 styles on Vue: tailwind / unocss / css-modules / less / sass
-  // styled/emotion/vanilla-extract/panda are React-only and fail before any network call
-  styleFormat?: 'tailwind' | 'unocss' | 'css-modules' | 'less' | 'sass';
-  unocssAttributify?: boolean; // Default false, unocss only
-  typescript?: boolean;        // Default true
-  inference?: { grid?: boolean; icons?: boolean; darkMode?: boolean; motion?: boolean };
-  skipEnhancements?: boolean;  // Default false (master switch for all T21/T22 advice)
-  skipLintCheck?: boolean;
-  accessToken?: string;
-}
-```
-
-**Output:** a single `.vue` SFC (`<template>` + `<script setup lang="ts">` / Options API + `<style>`) running the same enhancement pipeline and T21/T22 advice as React (interaction scaffolds appear as advisory comments on Vue; list-data examples use `v-for`); `css-modules/less/sass` produce a style sidecar (`<style module src="./X.module.css">` or `<style lang="less/scss">`).
-
-#### `figma_batch_generate` (new in v1.4.19, full-page batch generation)
-
-```typescript
-{
-  figmaUrl?: string;
-  fileKey?: string;
-  nodeId: string;              // Root page/large frame (the auto-split target), required
-  nodeIds?: string[];          // Explicit block IDs; omit to auto-split the whole page (tree-order normalized, deterministic)
-  componentNamePrefix?: string;// ASCII prefix for every block name, e.g. 'Landing' → LandingHeader / LandingHero
-  sceneName?: string;
-  projectRoot?: string;
-  bundler?: 'auto' | 'vite' | 'webpack' | 'nextjs' | 'remix';
-  maxDepth?: number;           // Default 15
-  framework?: 'react' | 'vue'; // Default react
-  vueVersion?: 2 | 3;          // Default 3 (framework=vue only)
-  styleFormat?: StyleFormat;   // Same as single-component tools; unsupported combos fail before network calls
-  unocssAttributify?: boolean;
-  inference?: { grid?: boolean; icons?: boolean; darkMode?: boolean; motion?: boolean };
-  skipEnhancements?: boolean;
-  accessToken?: string;
-}
-```
-
-**Output:** a block manifest (header / hero / features / section / sticky / footer semantic types), one complete component file per block (the same pipeline as `figma_generate_jsx`/`figma_generate_vue`), an `index.ts` barrel, a file dependency graph (barrel → component → style sidecar) and aggregated pending assets. MCP calls never write to disk; CLI `figma-dev batch` writes a multi-file directory directly.
-
-**Custom component-library mapping (v1.4.19 T19):** place `.figma-dev/components.json` at the project root (JSON Schema draft-07; `components.schema.json` ships with the package) to map Figma node names / component keys to library components (e.g. shadcn/ui, Ant Design, Element Plus) with prop passthrough. Without it, built-in mappings apply (a root `components.json` is treated as shadcn/ui; the two files never conflict). Custom rules take priority and the first keyword hit wins; an invalid file is reported (i18n) and ignored without interrupting generation. Template:
-
-```json
-{
-  "$schema": "https://figma-dev-tools.com/components.schema.json",
-  "version": 1,
-  "components": [
-    {
-      "name": "ElButton",
-      "library": "element-plus",
-      "importPath": "element-plus",
-      "keywords": ["button", "按钮"],
-      "suggestedProps": { "type": "primary" },
-      "usageExample": "<el-button type=\"primary\">Get started</el-button>"
-    },
-    {
-      "name": "PrimaryButton",
-      "importPath": "@/components/primary-button",
-      "keywords": ["cta", "primary action"]
-    }
-  ]
-}
-```
-
-#### `figma_generate_styles` / `figma_sync_to_project` (W3C DTCG new in v1.4.18)
-
-- `figma_generate_styles` `outputFormat`: `css-variables` | `tailwind-v4` | `json` | **`dtcg`**
-- `figma_sync_to_project` `format`: `css` | `tailwind` | `json` | **`dtcg`** | `all` (`all` additionally writes `design-tokens.tokens.json`)
-- DTCG mapping: colors → `$type:'color'`; spacing/radii → `dimension` (px/rem); shadows → `shadow` (incl. inset detection); text styles → nested `typography` groups (font-family/font-size/font-weight/line-height/letter-spacing); empty groups are omitted; a structural validation runs before writing and every invalid node is reported with its full path (e.g. `color.primary-500`)
-
-### 🧭 Framework × Style Support Matrix (v1.4.19)
-
-The registry (single source of truth at `src/services/style-renderers/registry.ts`) holds **11 descriptors**; 9 are available in the v1.4.19 enhanced pipeline:
-
-| Style option (`styleFormat`) | React | Vue 3 | Vue 2 | Notes |
-| --- | --- | --- | --- | --- |
-| Tailwind (`tailwind`, default) | ✅ | ✅ | ✅ | tailwind-v4 mapping; React merges via `cn()` (clsx + tailwind-merge) |
-| UnoCSS preset-wind (`unocss`) | ✅ | ✅ | ✅ | Utilities isomorphic to Tailwind; `unocssAttributify` enables attributify mode |
-| CSS Modules (`css-modules`) | ✅ | ✅ | ✅ | Sidecar `*.module.css`; semantic class names, shared-declaration merging, collision de-dup, `composes` reuse |
-| Styled Components (`styled`) | ✅ | — | — | New in v1.4.19; tagged-template styled components + ThemeProvider placeholder |
-| Emotion (`emotion`) | ✅ | — | — | New in v1.4.19; `css` prop / `css()` object-style constants |
-| Less (`less`) | ✅ | ✅ | ✅ | New in v1.4.19; variables, nesting, mixins; `.less` sidecar |
-| Sass/SCSS (`sass`) | ✅ | ✅ | ✅ | New in v1.4.19; variables, nesting, mixins; `.scss` sidecar |
-| vanilla-extract (`vanilla-extract`) | ✅ | — | — | New in v1.4.19; type-safe zero-runtime `.css.ts` |
-| Panda CSS (`panda`) | ✅ | — | — | New in v1.4.19; `css()` object styles + cva/recipe hints |
-| inline-styles (`inline-styles`) | ✅¹ | — | — | Contract retained only in the legacy `figma_generate_component` pipeline |
-| CSS variables component styles (`css-variables`) | 🔜 | 🔜 | 🔜 | Planned for v1.5.0; `:root` token extraction already exists today |
-
-> ¹ The legacy React pipeline (`figma_generate_component`) supports tailwind / css-modules / inline-styles; use `figma_generate_jsx` for new components.
-> Unsupported combinations (e.g. Vue + styled/emotion/vanilla-extract/panda, or css-variables in any pipeline) fail before any network call via dual zod/registry validation — no silent degradation. WeChat mini-program / uni-app / Taro are planned for v1.4.20.
+> 📖 Run `figma-dev --help <tool>` or see [QUICKSTART.en-US.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md) for detailed parameters.
 
 ---
 
 ## 💻 CLI Command Reference
 
-```bash
-# After global install
-figma-dev <command> [options]
-
-# Or run via npx
-npx figma-dev-tools <command> [options]
-```
-
-### Core Commands
-
-| Command  | Description                                                | Common Options                                                              | Version     |
-| -------- | ---------------------------------------------------------- | --------------------------------------------------------------------------- | ----------- |
-| `figma-dev gui`              | 🖥️ Launch GUI visual configuration panel           | `--port <n>` specify port (default 54321)                                   | **v1.3.0** |
-| `figma-dev install`          | One-click install MCP config to editors            | -                                                                           | v1          |
-| `figma-dev uninstall`        | Uninstall installed MCP config                     | -                                                                           | v1          |
-| `figma-dev validate <token>` | Validate Token                                     | -                                                                           | v1          |
-| `figma-dev wizard`           | Interactive configuration wizard                   | `--gui` launch GUI mode                                                     | v1.3.0      |
-| `figma-dev init`             | Initialize project configuration (interactive)     | `--gui` launch GUI mode                                                     | v1.3.0      |
-| `figma-dev lang`             | **🌍 Language settings** (set/list/switch)         | `set <lang>` / `switch`                                                     | **v1.3.2** |
-| `figma-dev token`            | **🔐 Token secure management** (set/get/list/delete/default) | `set -t <token>`                                                  | **v1.3.2** |
-| `figma-dev info <url>`       | View Figma file info                               | -                                                                           | v1          |
-| `figma-dev lint <url>`       | **✅ Design spec pre-check**                       | `--node <id>` `--depth <n>` `--format md/json` `--output <file>`           | **v1.3.2** |
-| `figma-dev metadata <url>`   | Get metadata overview                              | `--node <id>` `--depth <n>`                                                 | v1.1.0      |
-| `figma-dev structured <url>` | **Get framework-agnostic structured data**         | `--node <id>` `--depth <n>` `--format pretty/json` `--output <file>`        | v1.1.0      |
-| `figma-dev jsx <url>`        | **Generate React TSX components** (Flex/a11y/design system/responsive; v1.4.19 brings 9 enhanced-pipeline styles, TS Props, import organizing, `--no-smart-*` toggles) | `--name` `--scene` `--depth` `--style <9 options>` `--attributify` `--typescript/--no-typescript` `--bundler` `--no-smart-grid/icons/dark/motion` `--skip-lint` | **v1.4.19** |
-| `figma-dev vue <url>`        | **⭐ v1.4.19 new: Generate a Vue SFC** (Vue3 `<script setup>` default / Vue2 Options API; 5 Vue styles + sidecars) | `--name` `--scene` `--vue-version 2\|3` `--style tailwind\|unocss\|css-modules\|less\|sass` `--attributify` `--bundler` `--no-smart-grid/icons/dark/motion` | **v1.4.19** |
-| `figma-dev batch <url>`      | **⭐ v1.4.19 new: Full-page batch generation** (semantic block splitting, one file per block + barrel index) | `--node/--nodes <ids>` `--out <dir>` (default `figma-generated`) `--prefix <Prefix>` `--framework react\|vue` `--vue-version 2\|3` `--style` `--no-smart-grid/icons/dark/motion` | **v1.4.19** |
-| `figma-dev component <url>`  | Generate basic component (legacy React pipeline, recommend jsx/vue) | `--name <name>` `--node <id>` `--js` `--style tailwind|css-modules|inline-styles` `--no-children` `--output <dir>` | v1          |
-| `figma-dev assets <url>`     | Download assets (SVGO optimized; v1.4.18 places by bundler into public/ or src/assets/) | `--node <id>` `--nodes <id1,id2>` `--scene <name>` `--scale <n>` `--svg-format svg|png` `--bundler auto|vite|webpack|nextjs|remix|none` `--project-root <dir>` | **v1.4.18** |
-| `figma-dev sync <url>`       | Sync Design Tokens (v1.4.18 adds dtcg/all)         | `--node <id>` `--format oklch` `--spacing-unit px|rem` `--prefix <name>` `--output-format css|tailwind|json|dtcg|all` `--file-name <name>` | **v1.4.18** |
-| `figma-dev screenshot <url>` | Get screenshot                                     | `--node <id>` `--format png` `--scale 2` `--download <dir>`                 | v1          |
-| `figma-dev mcp`              | Start MCP server (stdio)                          | -                                                                           | v1          |
-| `figma-dev tutorial`         | View tutorial docs (alias `help`, auto-opens browser) | `--no-browser`                                                           | v1.3.0      |
-| `figma-dev cache`            | **📦 Cache management** (status/clear)             | `status` / `clear -f`                                                       | v1.4.0      |
-| `figma-dev privacy`          | **🔒 Privacy statement** (data safety + .gitignore check) | -                                                              | v1.4.0      |
-| `figma-dev -v` / `--ver`    | **📌 View current version**                        | -                                                                     | **v1.4.8** |
-| `figma-dev --update`        | **🔄 Check and update to latest version** (auto-handles EBUSY file lock) | -                                                           | **v1.4.8** |
-
-### Common Examples
-
-```bash
-# 🖥️ Launch GUI visual configuration panel (v1.3.0 new, beginner recommended)
-figma-dev gui
-
-# Specify port for GUI
-figma-dev gui --port 8080
-
-# Launch GUI mode via wizard command
-figma-dev wizard --gui
-
-# 📌 View current version (new in v1.4.8)
-figma-dev -v
-
-# 🔄 Check and update to latest version (new in v1.4.8, auto-handles EBUSY file lock)
-figma-dev --update
-
-# Design spec pre-check (v1.3.2 new)
-figma-dev lint "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032"
-
-# One-click generate Hero section React component (enhanced)
-figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --name HeroSection --scene landing-page --depth 8
-
-# 🎴 v1.4.18 new: UnoCSS + attributify mode (React and Vue)
-figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --name HeroSection --framework vue --style unocss --attributify
-
-# 🎴 v1.4.18 new: CSS Modules (emits HeroSection.module.css sidecar)
-figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --name HeroSection --style css-modules
-
-# 💚 v1.4.19 new: Vue3 SFC (<script setup lang="ts">; 5 styles incl. Tailwind/Sass)
-figma-dev vue "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --name HeroSection --style sass
-
-# 💚 v1.4.19 new: Vue2 Options API (defineComponent + PropType/validator)
-figma-dev vue "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --name HeroSection --vue-version 2
-
-# 🎻 v1.4.19 new: new style renderers (styled/emotion/less/sass/vanilla-extract/panda)
-figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --name PricingCard --style vanilla-extract
-
-# 📦 v1.4.19 new: full-page batch generation (auto semantic split, writes figma-generated/)
-figma-dev batch "https://www.figma.com/design/xxxxx/MyProject?node-id=1-2" \
-  --prefix Landing --out src/components/landing
-# Vue2 batch: add --framework vue --vue-version 2
-
-# 🧠 v1.4.19 new: disable smart-inference advice as needed (all four default on;
-# the MCP skipEnhancements input is the master switch)
-figma-dev jsx "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --name HeroSection --no-smart-dark --no-smart-motion
-
-# 🪙 v1.4.18 new: sync W3C DTCG tokens (design-tokens.tokens.json)
-figma-dev sync "https://www.figma.com/design/xxxxx/MyProject" --output-format dtcg
-
-# 🏢 v1.4.18 new: custom CA for corporate networks (also via .env / MCP env)
-$env:FIGMA_CA_CERT_PATH="C:\certs\corporate-root-ca.pem"   # PowerShell
-export FIGMA_CA_CERT_PATH=/etc/ssl/corp-ca.pem              # bash/zsh
-
-# 🌐 v1.4.18 new: explicit bundler placement (default: auto-detect)
-figma-dev assets "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --scene landing-page --bundler webpack
-
-# ❓ v1.4.18 new: every command --help ships localized examples (-l per invocation)
-figma-dev jsx --help
-figma-dev -l en-US sync --help
-
-# Get framework-agnostic structured data (JSON output to file)
-figma-dev structured "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --depth 8 --format json --output ./hero-structured.json
-
-# Batch download assets (auto SVGO optimization)
-figma-dev assets "https://www.figma.com/design/xxxxx/MyProject?node-id=23-11032" \
-  --scene landing-page \
-  --nodes "23-11032,23-11050,23-11080" \
-  --scale 2
-
-# Generate SVG Sprite (v1.3.2 new, requires icons downloaded first)
-# Via MCP tool figma_create_icon_sprite
-
-# Save Token to system keychain (v1.3.2 new)
-figma-dev token set -t figd_your_token_here
-
-# Switch to English interface (v1.3.2 new)
-figma-dev lang set en-US
-```
+| Command | Description | Version |
+| --- | --- | --- |
+| `figma-dev gui` | Launch GUI configuration panel | **v1.3.0** |
+| `figma-dev install` | One-click install MCP config to editors | v1 |
+| `figma-dev wizard` | Interactive config wizard (`--gui` for GUI) | v1.3.0 |
+| `figma-dev lang` | Language settings (set/list/switch) | **v1.3.2** |
+| `figma-dev token` | Token secure management (set/get/list/delete) | **v1.3.2** |
+| `figma-dev lint <url>` | Design spec pre-check | **v1.3.2** |
+| `figma-dev jsx <url>` | Generate React TSX (9 styles, TS Props, smart inference) | **v1.4.19** |
+| `figma-dev vue <url>` | Generate Vue SFC (Vue3/Vue2, 5 styles) | **v1.4.19** |
+| `figma-dev svelte <url>` | Generate Svelte 4 SFC (tailwind/unocss/css-modules only) | **v1.4.20** |
+| `figma-dev batch <url>` | Full-page batch generation (semantic split) | **v1.4.19** |
+| `figma-dev structured <url>` | Framework-agnostic structured data | v1.1.0 |
+| `figma-dev sync <url>` | Sync Design Tokens (css/tailwind/json/dtcg) | **v1.4.18** |
+| `figma-dev assets <url>` | Download assets (SVGO optimized) | **v1.4.18** |
+| `figma-dev info <url>` | View Figma file info | v1 |
+| `figma-dev screenshot <url>` | Get screenshot | v1 |
+| `figma-dev mcp` | Start MCP server (stdio) | v1 |
+| `figma-dev cache` | Cache management (status/clear) | v1.4.0 |
+| `figma-dev -v` / `--update` | Version info / check for updates | **v1.4.8** |
 
 ---
 
 ## 🖥️ Supported Editors (8+)
 
-| Editor         | Auto-detect | One-click Install | Config Path                                                |
-| -------------- | ----------- | ----------------- | ---------------------------------------------------------- |
-| Trae           | ✅          | ✅                | `~/.trae/mcp_settings.json`                               |
-| VS Code        | ✅          | ✅                | `~/Library/Application Support/Code/User/settings.json` (macOS) / `%APPDATA%\Code\User\settings.json` (Windows) |
-| Cursor         | ✅          | ✅                | `~/.cursor/mcp.json`                                      |
-| Windsurf       | ✅          | ✅                | `~/.codeium/windsurf/mcp_config.json`                      |
-| Claude Desktop | ✅          | ✅                | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Zed            | ✅          | ✅                | `~/.config/zed/settings.json` (uses `mcp_servers` field)   |
-| Cline          | ✅          | ✅                | VS Code settings                                          |
-| Roo Code       | ✅          | ✅                | VS Code settings                                          |
+| Editor | Auto-detect | One-click Install |
+| --- | --- | --- |
+| Trae | ✅ | ✅ |
+| VS Code | ✅ | ✅ |
+| Cursor | ✅ | ✅ |
+| Windsurf | ✅ | ✅ |
+| Claude Desktop | ✅ | ✅ |
+| Zed | ✅ | ✅ |
+| Cline | ✅ | ✅ |
+| Roo Code | ✅ | ✅ |
 
-### MCP Configuration Template
+MCP configuration template:
 
 ```json
 {
@@ -733,79 +191,71 @@ figma-dev lang set en-US
 
 ## ⚙️ Configuration
 
-### Environment Variables (.env)
+Key environment variables (`.env`):
 
 ```env
-# Required: Figma Personal Access Token
-# Get from: https://www.figma.com/developers/api#access-tokens
-FIGMA_ACCESS_TOKEN=figd_your_token_here
-
-# Optional: Figma OAuth Token (for enterprise)
-# FIGMA_OAUTH_TOKEN=
-
-# Optional: Custom Figma API endpoint (enterprise proxy)
-# FIGMA_API_BASE_URL=https://api.figma.com
-
-# Optional: Default export scale (1-4, default 2)
-# FIGMA_DEFAULT_SCALE=2
-
-# Optional: Default color format (hex/rgb/oklch/hsl, default oklch)
-# FIGMA_COLOR_FORMAT=oklch
-
-# Optional: Asset output base directory (default public)
-# ASSETS_OUTPUT_DIR=public
-
-# Optional: Asset CDN prefix (default /)
-# ASSETS_CDN_PREFIX=/
-
-# v1.3.2 new: Default language (zh-CN/en-US)
-FIGMA_DEV_LANG=zh-CN
-
-# v1.3.0 new: GUI default port (default 54321)
-# FIGMA_DEV_GUI_PORT=54321
-
-# v1.4.18 new: Custom CA root certificate (PEM; private PKI / HTTPS-decrypting proxies)
-# Effective for both Figma API calls and OCR remote-image downloads;
-# the file must exist and contain a BEGIN CERTIFICATE marker
-# FIGMA_CA_CERT_PATH=/path/to/corporate-root-ca.pem
+FIGMA_ACCESS_TOKEN=figd_your_token_here    # Required
+FIGMA_DEV_LANG=zh-CN                        # Language (zh-CN/en-US)
+# FIGMA_DEFAULT_SCALE=2                     # Export scale 1-4
+# FIGMA_COLOR_FORMAT=oklch                  # hex/rgb/oklch/hsl
+# FIGMA_DEV_GUI_PORT=54321                  # GUI port
+# FIGMA_CA_CERT_PATH=/path/to/ca.pem        # Custom CA cert (v1.4.18)
 ```
 
-### MCP Configuration Priority
+Priority: CLI parameters > environment variables > .env file > defaults
 
-```
-CLI parameters > environment variables > .env file > default values
-```
+---
+
+## 🎻 Framework × Style Matrix
+
+| Style | React (`jsx`) | Vue (`vue`) | HTML (`structured`) |
+| --- | --- | --- | --- |
+| Tailwind | ✅ | ✅ | ✅ |
+| UnoCSS (attributify) | ✅ | ✅ | ✅ |
+| CSS Modules | ✅ | ✅ | ✅ |
+| Styled Components | ✅ | — | — |
+| Emotion | ✅ | — | — |
+| Less | ✅ | ✅ | ✅ |
+| Sass/SCSS | ✅ | ✅ | ✅ |
+| vanilla-extract | ✅ | — | — |
+| Panda CSS | ✅ | — | — |
+
+> Unsupported combinations fail fast via dual zod/registry validation. `inline-styles` is legacy-only; `css-variables` planned for v1.5.0.
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    MCP Server (stdio)                        │
-├─────────────────────────────────────────────────────────────┤
-│  CLI Layer    │  GUI Layer    │  Service Layer  │  Tool Layer │
-│                │               │                 │              │
-│  figma-dev     │  Browser      │  figma-client   │  20 MCP     │
-│  <command>     │  UI           │  node-processor │  tools      │
-│                │               │  tailwind-      │              │
-│                │               │  mapper         │              │
-│                │               │  asset-         │              │
-│                │               │  downloader     │              │
-│                │               │  hierarchy-     │              │
-│                │               │  fixer          │              │
-│                │               │  🔒 cache        │              │
-│                │               │  🔒 sanitizer    │              │
-│                │               │  ♿ a11y         │              │
-│                │               │  🧱 fallback    │              │
-│                │               │  🤖 vlm         │              │
-│                │               │  📏 verify      │              │
-│                │               │  🚀 pool        │              │
-│                │               │  💾 cache       │              │
-├─────────────────────────────────────────────────────────────┤
-│                    Figma REST API                            │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                  MCP Server (stdio)                   │
+├──────────┬──────────┬───────────────┬────────────────┤
+│ CLI Layer│ GUI Layer│ Service Layer │   Tool Layer   │
+│          │          │ figma-client  │   22 MCP       │
+│          │          │ node-processor│   tools        │
+│          │          │ tailwind-mapper│               │
+│          │          │ asset-downloader│              │
+│          │          │ fallback/pool/cache│           │
+│          │          │ a11y/vlm/verify│               │
+├──────────┴──────────┴───────────────┴────────────────┤
+│                   Figma REST API                      │
+└──────────────────────────────────────────────────────┘
 ```
+
+---
+
+## ❓ FAQ
+
+| Question | Answer |
+| --- | --- |
+| **First-time setup?** | Run `npx figma-dev-tools gui` and follow the wizard |
+| **MCP won't start?** | Check Node.js ≥ 18, Token configured, port not occupied |
+| **API 401?** | Token expired or missing *File content (Read only)* permission |
+| **Icons deformed?** | v1.3.2+ auto-fixes Flex issues; manually add `flex-shrink: 0` if needed |
+| **Want Vue/Svelte/other?** | Use `figma-dev vue` for Vue, `figma-dev svelte` for Svelte 4 (tailwind/unocss/css-modules), or `figma_get_structured_data` for framework-agnostic JSON |
+| **Colors/spacing off?** | Run `figma_lint_design` → `figma_extract_tokens` → `figma_sync_to_project` → regenerate |
+| **Too many nested divs?** | `hierarchyFix` enabled by default in v1.4.0+; `figma_lint_design` reports nesting depth |
+| **Corporate proxy/CA?** | Set `FIGMA_CA_CERT_PATH` (v1.4.18+) |
 
 ---
 
@@ -813,271 +263,72 @@ CLI parameters > environment variables > .env file > default values
 
 ```
 figma-dev-tools/
-├── bin/                    # CLI entry point
-├── dist/                   # Compiled output
-├── docs/                   # Documentation
-├── scripts/                # Build scripts
+├── bin/              # CLI entry point
+├── dist/             # Compiled output
 ├── src/
-│   ├── cli/                # CLI command implementations
-│   ├── gui/                # GUI server
-│   ├── i18n/               # Internationalization
-│   ├── services/           # Core services
-│   │   ├── figma-client.ts        # Figma REST API client (with local encrypted cache)
-│   │   ├── node-processor.ts      # Node tree processing + semantic annotation
-│   │   ├── tailwind-mapper.ts     # Tailwind class mapping
-│   │   ├── asset-downloader.ts    # Asset download pipeline
-│   │   ├── hierarchy-fixer.ts     # 🗂️ v1.4.0: Smart hierarchy fix
-│   │   ├── svg-inline-renderer.ts # 🎨 v1.4.0: SVG inline rendering (SVGO + LRU cache)
-│   │   ├── cache.ts               # ⚡ v1.4.0: AES-256-GCM local encrypted cache (LRU+TTL)
-│   │   ├── sanitizer.ts           # 🔒 v1.4.0: XSS protection
-│   │   ├── a11y-enhancer.ts       # ♿ v1.3.2: Accessibility enhancement
-│   │   ├── browser-fallback.ts    # 🧱 v1.4.4: Browser fallback service
-│   │   ├── browser-pool.ts        # 🚀 v1.4.4: Browser instance pool (performance)
-│   │   ├── screenshot-cache.ts    # 💾 v1.4.4: Screenshot cache (LRU+TTL)
-│   │   ├── visual-approximation.ts# 🤖 v1.4.4: Visual approximation mode
-│   │   └── fidelity-verify.ts     # 📏 v1.4.4: Pixel diff fidelity verification
-│   ├── tools/             # MCP tool implementations
-│   ├── types/              # TypeScript type definitions
-│   ├── utils/             # Utility functions
-│   └── index.ts           # MCP server entry
-├── test/                  # Test files (95 tests)
-├── package.json
-├── tsconfig.json
-├── README.md              # You are here (Chinese)
-└── README.en-US.md        # English version
+│   ├── cli/          # CLI commands
+│   ├── gui/          # GUI server
+│   ├── i18n/         # Internationalization
+│   ├── services/     # Core: figma-client, node-processor, tailwind-mapper,
+│   │                 #   asset-downloader, fallback, pool, cache, a11y, vlm, verify
+│   ├── tools/        # MCP tool implementations
+│   ├── types/        # TypeScript types
+│   └── index.ts      # MCP server entry
+├── test/             # Tests (95 tests)
+└── docs/             # Documentation
 ```
 
 ---
 
-## ❓ FAQ / Troubleshooting
+## 📊 Version History
 
-### Q: I'm a beginner, how do I configure for the first time?
-
-Run `npx figma-dev-tools gui` to launch the GUI configuration panel, then follow these steps:
-
-1. Select Chinese language
-2. Paste your Figma Token (auto-validated)
-3. Check the editors you want to configure (auto-detects installed ones)
-4. Click one-click install, done!
-
-### Q: How to launch GUI configuration interface?
-
-```bash
-# Method 1: Direct gui command (recommended)
-figma-dev gui
-# or npx figma-dev-tools gui
-
-# Method 2: Wizard command with --gui flag
-figma-dev wizard --gui
-
-# Method 3: Init command with --gui flag
-figma-dev init --gui
-```
-
-### Q: Can the GUI use a custom port?
-
-```bash
-# Specify port
-figma-dev gui --port 8080
-
-# Or via environment variable
-FIGMA_DEV_GUI_PORT=8080 figma-dev gui
-```
-
-### Q: MCP server won't start?
-
-1. Check if Node.js version ≥ 18
-2. Check if Token is configured correctly
-3. Check if the port is occupied
-4. View detailed logs: `figma-dev info --verbose`
-
-### Q: API returns 401 Unauthorized?
-
-1. Check if Token has expired
-2. Check if Token has **File content (Read only)** permission
-3. Re-generate Token: https://www.figma.com/developers/api#access-tokens
-
-### Q: Generated icons become oval/deformed?
-
-This is a classic Flex issue. v1.3.2+ automatically fixes:
-- Adds `flex-shrink: 0` to prevent compression
-- Adds `align-items: center` to center
-- Adds explicit width/height
-
-If still problematic, manually add `flex-shrink: 0` to the icon.
-
-### Q: I'm using Vue/Svelte/other frameworks, not React?
-
-Use the `figma_get_structured_data` tool to get framework-agnostic JSON data, then manually convert to Vue/Svelte/HTML code.
-
-### Q: Generated component colors/spacing don't match the design?
-
-1. Run `figma_lint_design` to check design quality
-2. Run `figma_extract_tokens` to extract design tokens
-3. Run `figma_sync_to_project` to sync to project
-4. Use `figma_generate_jsx` to regenerate the component
-
-### Q: Generated code has many redundant nested divs?
-
-Enable smart hierarchy simplification, which automatically:
-- Flattens redundant GROUP/FRAME
-- Removes meaningless wrapper layers
-- Reduces ~60% of div nesting
-
-### Q: Image assets not automatically downloaded?
-
-Use the `figma_download_assets` tool, which automatically:
-- Detects image/SVG nodes
-- Downloads to `public/portal/<scene>/` directory
-- SVGO optimizes SVGs
-- Generates `publicCdnUrl()` references
-
-### Q: How to make generated code support responsive?
-
-v1.3.2+ automatically infers breakpoints based on design dimensions and provides sm/md/lg/xl responsive prefix suggestions.
-
-### Q: Generated code lacks accessibility attributes?
-
-v1.3.2+ automatically adds:
-- Semantic HTML tags (h1-h6, button, nav, etc.)
-- alt text for images
-- ARIA attributes
-- Keyboard navigation support
-
-### Q: API request rate limit?
-
-- Figma API has rate limits (per second/per hour)
-- v1.4.0+ has AES-256-GCM encrypted cache, reducing repeated requests
-- v1.4.3+ optimized Watch mode to reduce duplicate API calls
-- v1.4.4+ has screenshot cache, reducing repeat screenshot requests
-
-### Q: Which frontend frameworks are supported?
-
-- **React**: First-class support, one-click TSX generation
-- **Vue**: Use `figma_get_structured_data` to get JSON, then convert
-- **Svelte**: Same as Vue
-- **HTML**: Same as Vue
-- **Angular/Solid**: Same as Vue
-
-### Q: Zed editor configuration not taking effect?
-
-Zed uses the `mcp_servers` field instead of `mcpServers`, the install script handles this automatically. For manual config:
-
-```json
-{
-  "mcp_servers": {
-    "figma-dev-tools": {
-      "command": "npx",
-      "args": ["-y", "figma-dev-tools", "--figma-api-key=figd_your_token_here"]
-    }
-  }
-}
-```
-
-### Q: How to switch interface language?
-
-```bash
-# CLI interactive switch
-figma-dev lang switch
-
-# Direct setting
-figma-dev lang set zh-CN  # Chinese
-figma-dev lang set en-US  # English
-```
-
-Or in the GUI configuration panel, select language.
-
-### Q: How to save Token securely?
-
-```bash
-# Direct save
-figma-dev token set -t figd_your_token_here
-
-# List saved Tokens
-figma-dev token list
-
-# View Token (masked display)
-figma-dev token get
-
-# Set default Token
-figma-dev token default work
-```
-
-Token is saved in system secure storage:
-
-- macOS: Keychain
-- Windows: Credential Manager
-- Linux: libsecret (falls back to encrypted file if unavailable)
+| Version | Date | Highlights |
+| --- | --- | --- |
+| **v1.4.19** | 2025-07 | 11 style renderers, first-class Vue, batch generation, smart inference, component mapping |
+| **v1.4.18** | 2025-06 | TS Props inference, W3C DTCG tokens, enterprise CA, import organizing |
+| **v1.4.14** | 2025-05 | OCR text extraction (native node + tesseract.js fallback) |
+| **v1.4.8** | 2025-04 | `figma-dev -v` / `--update`, EBUSY auto-retry |
+| **v1.4.4** | 2025-03 | Paywall fallback, visual approximation, fidelity verification, performance optimization |
+| **v1.4.0** | 2025-02 | Hierarchy fix, SVG inline rendering, encrypted cache, XSS protection |
+| **v1.3.2** | 2025-01 | a11y enhancement, Flex auto-fix, i18n, SVG sprite, token secure storage |
+| **v1.3.0** | 2024-12 | GUI visual configuration wizard |
+| **v1.2** | 2024-11 | `figma_get_metadata` + `figma_get_design_context` |
+| **v1.1.0** | 2024-10 | `figma_get_structured_data` (framework-agnostic) |
+| **v1.0.0** | 2024-09 | Initial release: 14 MCP tools, CLI, multi-editor |
 
 ---
 
-## 📖 Design Guidelines
+## 🆚 Comparison
 
-See **[FIGMA-DESIGN-GUIDELINES.md](./FIGMA-DESIGN-GUIDELINES.md)**, a complete Figma design spec guide for designers and AI, including:
+### vs Commercial SaaS
 
-- Auto Layout usage guidelines
-- Layer naming conventions
-- 4px/8px grid system
-- Component reuse suggestions
-- Accessibility design requirements
-- Design-to-code best practices
-
-It's recommended to run `figma_lint_design` to check design quality before generating code.
-
----
-
-## 🎯 Comparison with Other Solutions
-
-> The comparison below is based on publicly available information from 2025-2026 and reflects the capability differences between figma-dev-tools v1.4.4 and each solution. It does not represent the full capabilities of the others. "TBC" indicates that public information does not clearly state the feature.
-
-### vs Commercial SaaS Solutions
-
-| Dimension                  | figma-dev-tools v1.4.4              | Builder.io              | Anima                | Locofy                 | Seal (NetEase D2C)      |
-| -------------------------- | ----------------------------------- | ----------------------- | -------------------- | ---------------------- | ---------------------- |
-| **Positioning**            | Open-source MCP toolchain           | Commercial SaaS + AI    | Commercial SaaS      | Commercial SaaS        | Enterprise tool / Figma plugin |
-| **Price**                  | **Free & Open Source** (MIT)        | Freemium (Pro $24/mo+)  | Freemium ($20/mo+)   | Freemium ($29/mo+)     | Free (registration required) |
-| **MCP Protocol**           | ✅                                  | ✅                      | ✅                   | ✅                     | ❌                     |
-| **GUI Visual Configuration** | ✅ v1.3.0 (browser GUI)           | ✅ (Fusion canvas)      | ✅ (AI Playground)   | ✅ (Figma plugin)      | ✅ (Figma plugin)      |
-| **React Code Generation**  | ✅ TSX + Tailwind                   | ✅                      | ✅                   | ✅                     | ✅                     |
-| **Vue Code Generation**    | ✅ v1.4.0 (Vue 3 SFC + UnoCSS)      | ✅                      | ✅                   | ✅                     | ✅                     |
-| **Framework-agnostic Data** | ✅ v1.1.0 (JSON output)            | ❌                      | ❌                   | ❌                     | ❌                     |
-| **Design Tokens Extraction** | ✅ Variables + Styles              | ✅                      | TBC                  | ✅                     | TBC                    |
-| **Flex Layout Auto-fix**   | ✅ v1.3.2 (icon deformation/text truncation) | Partial (auto-responsive) | ✅            | ✅                     | ✅ (auto-layout restore) |
-| **Accessibility (a11y)**   | ✅ v1.3.2 (semantic tags/alt/ARIA)  | ✅ (Review agents)      | TBC                  | ✅ (Agent Mode)        | TBC                    |
-| **Asset Auto-download**    | ✅ publicCdnUrl + SVGO              | ✅                      | ✅                   | ✅                     | TBC                    |
-| **Fidelity Verification (pixel diff)** | ✅ v1.4.4 (pixelmatch + heatmap) | ❌                | ❌                   | TBC ("pixel-perfect" claim) | Partial (design check) |
-| **Paywall Fallback (screenshot)** | ✅ v1.4.4 (Playwright + visual approximation) | ❌          | ❌                   | ❌                     | ❌                     |
-| **Multi-editor Integration** | ✅ 8+ (GUI auto-detect one-click install) | ✅ (VS Code/Cursor) | ✅ (Frontier extension) | ✅ (Cursor/Windsurf etc.) | ❌            |
-| **CLI**                    | ✅ 20+ commands                     | ✅ (Visual Copilot CLI) | TBC                  | TBC                    | ❌                     |
-| **i18n**                   | ✅ v1.3.2 (Chinese/English bilingual) | ✅                    | TBC                  | ✅ (Agent Mode commands) | TBC                  |
-| **Token Secure Storage**   | ✅ v1.3.2 (system keychain)         | ✅                      | TBC                  | TBC                    | TBC                    |
+| Dimension | figma-dev-tools | Locofy | Anima | Builder.io | Overlay |
+| --- | --- | --- | --- | --- | --- |
+| **Price** | **Free (MIT)** | $29/mo+ | $29/mo+ | $49/mo+ | $15/mo+ |
+| **MCP Protocol** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Code Generation** | ✅ TSX/Vue | ✅ | ✅ | ✅ | ✅ |
+| **Design Tokens** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Paywall Fallback** | ✅ v1.4.4 | ❌ | ❌ | ❌ | ❌ |
+| **Fidelity Verification** | ✅ v1.4.4 | ❌ | ❌ | ❌ | ❌ |
+| **Multi-editor** | ✅ 8+ | ✅ | ✅ | ✅ | ✅ |
+| **CLI** | ✅ 20+ cmds | ✅ | ✅ | TBC | ❌ |
+| **i18n** | ✅ v1.3.2 | ✅ | TBC | ✅ | TBC |
 
 ### vs Open Source / Official Tools
 
-| Dimension                  | figma-dev-tools v1.4.4              | @figma/code-connect           | Framelink Figma MCP            | figma-mcp (Community) | Design Lint AI            |
-| -------------------------- | ----------------------------------- | ----------------------------- | ------------------------------ | --------------------- | ------------------------- |
-| **Positioning**            | Open-source MCP toolchain           | Official Figma component mapping | Open-source MCP (8k+ stars)  | Open-source MCP (multiple projects) | Figma plugin    |
-| **Price**                  | **Free & Open Source** (MIT)        | Free (requires Dev/Full seat) | Free & Open Source (MIT)       | Free & Open Source    | Freemium (Pro $19/mo+)   |
-| **MCP Protocol**           | ✅                                  | ✅ (integrates with official MCP) | ✅                          | ✅                    | ❌                        |
-| **GUI Visual Configuration** | ✅ v1.3.0                         | ✅ (Code Connect UI beta)     | ❌ (config-file driven)        | ❌                    | ✅ (Figma plugin)         |
-| **Code Generation**        | ✅ one-click TSX/Vue                | ❌ (component mapping only, not D2C) | ❌ (data only, AI generates) | ❌ (data only)        | N/A (not a code-gen tool) |
-| **Design Tokens Extraction** | ✅                                | ✅ (variables + code syntax)  | ❌                             | ❌                    | ✅ (Token validation)     |
-| **Flex Layout Auto-fix**   | ✅ v1.3.2                           | ❌                             | ❌                             | Partial (Auto-Layout config) | ❌                |
-| **Accessibility (a11y)**   | ✅ v1.3.2                           | ❌                             | ❌                             | ❌                    | ✅ (WCAG checks)          |
-| **Asset Auto-download**    | ✅                                  | ❌                             | ✅ (download_figma_images)     | ✅                    | ❌                        |
-| **Fidelity Verification (pixel diff)** | ✅ v1.4.4                  | ❌                             | ❌                             | ❌                    | ❌                        |
-| **Paywall Fallback (screenshot)** | ✅ v1.4.4                      | N/A (official feature, no paywall) | ❌                        | ❌                    | ❌                        |
-| **Multi-editor Integration** | ✅ 8+ (GUI auto-detect)             | ✅ (VS Code/Cursor/Android Studio etc.) | ✅ (all MCP clients)    | ✅ (all MCP clients)  | ❌                        |
-| **CLI**                    | ✅ 20+ commands                     | ✅ (`figma connect` CLI)      | ✅ (npx startup)               | ✅                    | ❌ (Team API)            |
-| **i18n**                   | ✅ v1.3.2                           | ❌                             | ❌                             | ❌                    | ❌                        |
-| **SVG Sprite Generation**  | ✅ v1.3.2                           | ❌                             | ❌                             | ❌                    | ❌                        |
+| Dimension | figma-dev-tools | @figma/code-connect | Framelink MCP | figma-mcp (Community) | Design Lint AI |
+| --- | --- | --- | --- | --- | --- |
+| **Positioning** | Full MCP toolchain | Official component mapping | MCP (8k+ stars) | MCP (community) | Figma plugin |
+| **Price** | **Free (MIT)** | Free (Dev seat) | Free (MIT) | Free | Freemium |
+| **Code Generation** | ✅ TSX/Vue | ❌ mapping only | ❌ data only | ❌ data only | N/A |
+| **Design Tokens** | ✅ | ✅ | ❌ | ❌ | ✅ |
+| **Flex Auto-fix** | ✅ v1.3.2 | ❌ | ❌ | Partial | ❌ |
+| **a11y** | ✅ v1.3.2 | ❌ | ❌ | ❌ | ✅ |
+| **Paywall Fallback** | ✅ v1.4.4 | N/A | ❌ | ❌ | ❌ |
+| **Fidelity Verify** | ✅ v1.4.4 | ❌ | ❌ | ❌ | ❌ |
+| **SVG Sprite** | ✅ v1.3.2 | ❌ | ❌ | ❌ | ❌ |
 
-### Differentiated Advantages
-
-- **Paywall Fallback**: figma-dev-tools v1.4.4's exclusive `BrowserFallbackService` — when the Figma REST API fails due to paywall, it automatically launches Playwright to capture a screenshot as a fallback. No competitor offers a similar mechanism.
-- **Fidelity Verification Loop**: `figma_verify_fidelity` provides pixel diff + diff heatmap + quantified score (0-100%). Other tools mostly stop at "pixel-perfect" marketing claims without automated verification.
-- **Framework-agnostic Structured Data**: `figma_get_structured_data` outputs standard JSON supporting any framework, while commercial SaaS solutions mostly lock into specific frameworks.
-- **Open Source + Free + Full-featured**: MIT license, no paid seat required to use all 22 MCP tools.
+**Unique advantages:** Paywall Fallback (`BrowserFallbackService`), Fidelity Verification (pixel diff + heatmap + score), framework-agnostic structured data, and MIT-licensed full-featured 22-tool suite.
 
 ---
 

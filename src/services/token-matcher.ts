@@ -350,6 +350,37 @@ const LINE_HEIGHT_MAP: ReadonlyArray<{ readonly key: string; readonly ratio: num
 // ============ TokenMatcher 类 ============
 
 /**
+ * Tailwind v3 默认 spacing scale（units 值，1 unit = 0.25rem = 4px）。
+ * P3-12：提升为模块常量，避免 matchSpacing 每次调用重新分配 34 元素数组。
+ */
+const STANDARD_UNITS: ReadonlyArray<number> = [
+  0.25, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56,
+  60, 64, 72, 80, 96,
+];
+
+/** px → 最近标准单位（P3-12 记忆化：宽高/padding/gap 对常见尺寸反复调用） */
+function nearestSpacingUnit(
+  cache: Map<number, { unit: number; diff: number }>,
+  px: number,
+): { unit: number; diff: number } {
+  const hit = cache.get(px);
+  if (hit) return hit;
+  const units = px / 4;
+  let bestUnit = -1;
+  let bestDiff = Infinity;
+  for (const u of STANDARD_UNITS) {
+    const diff = Math.abs(units - u);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestUnit = u;
+    }
+  }
+  const result = { unit: bestUnit, diff: bestDiff };
+  cache.set(px, result);
+  return result;
+}
+
+/**
  * Token 匹配器类
  *
  * 将 Figma 原始样式值映射到 Tailwind 工具类名。
@@ -374,6 +405,22 @@ const LINE_HEIGHT_MAP: ReadonlyArray<{ readonly key: string; readonly ratio: num
  * ```
  */
 export class TokenMatcher {
+  // ============ P3-12 记忆化缓存 ============
+  // 单例在整个进程复用；键空间为设计中出现的离散值（颜色 hex/像素数值），
+  // 真实页面重复度极高，缓存条目量级在数百到数千，内存占用可忽略。
+  /** 大写 hex → FLAT_COLORS 精确命中下标（-1 = 无精确命中） */
+  private readonly _colorExactIndex = new Map<string, number>();
+  /** 大写 hex → 最近邻 {下标,色差}（色差仅由 rgb 决定，与 purpose/a 无关） */
+  private readonly _colorNearest = new Map<string, { index: number; distance: number }>();
+  /** px → 最近间距单位 {unit,diff}（避免每次分配 34 元素量表并线性扫描） */
+  private readonly _spacingNearestUnit = new Map<number, { unit: number; diff: number }>();
+  /** px → 圆角匹配结果（结果与调用方无关，直接共享只读对象） */
+  private readonly _radiusCache = new Map<number, TokenMatch<string>>();
+  /** px → 字号匹配结果 */
+  private readonly _fontSizeCache = new Map<number, TokenMatch<string>>();
+  /** 字重 → 匹配结果 */
+  private readonly _fontWeightCache = new Map<number, TokenMatch<string>>();
+
   /**
    * 颜色匹配
    *
@@ -425,10 +472,15 @@ export class TokenMatcher {
       };
     }
 
-    // ============ 优先级3：系统色板精确匹配 ============
+    // ============ 优先级3：系统色板精确匹配（记忆化下标） ============
     const upperHex = hex.toUpperCase();
-    const exact = FLAT_COLORS.find((c) => c.hex === upperHex);
-    if (exact) {
+    let exactIndex = this._colorExactIndex.get(upperHex);
+    if (exactIndex === undefined) {
+      exactIndex = FLAT_COLORS.findIndex((c) => c.hex === upperHex);
+      this._colorExactIndex.set(upperHex, exactIndex);
+    }
+    if (exactIndex >= 0) {
+      const exact = FLAT_COLORS[exactIndex]!;
       const tokenName = exact.shade === 'DEFAULT' ? exact.prefix : `${exact.prefix}-${exact.shade}`;
       return {
         matched: true,
@@ -441,20 +493,26 @@ export class TokenMatcher {
       };
     }
 
-    // ============ 优先级4：最近邻模糊匹配（色差在阈值内） ============
-    let bestMatch: FlatColor | null = null;
-    let bestDistance = Infinity;
-    for (const c of FLAT_COLORS) {
-      const d = colorDistance(parsed, hexToRgb(c.hex));
-      if (d < bestDistance) {
-        bestDistance = d;
-        bestMatch = c;
+    // ============ 优先级4：最近邻模糊匹配（色差在阈值内，最近邻记忆化） ============
+    let nearest = this._colorNearest.get(upperHex);
+    if (!nearest) {
+      let bestIndex = -1;
+      let bestDistance = Infinity;
+      for (let i = 0; i < FLAT_COLORS.length; i++) {
+        const d = colorDistance(parsed, hexToRgb(FLAT_COLORS[i]!.hex));
+        if (d < bestDistance) {
+          bestDistance = d;
+          bestIndex = i;
+        }
       }
+      nearest = { index: bestIndex, distance: bestDistance };
+      this._colorNearest.set(upperHex, nearest);
     }
 
     // 色差阈值 12：人眼刚好能察觉的差异（JND）
     const COLOR_FUZZY_THRESHOLD = 12;
-    if (bestMatch && bestDistance < COLOR_FUZZY_THRESHOLD) {
+    if (nearest.index >= 0 && nearest.distance < COLOR_FUZZY_THRESHOLD) {
+      const bestMatch = FLAT_COLORS[nearest.index]!;
       const tokenName = bestMatch.shade === 'DEFAULT' ? bestMatch.prefix : `${bestMatch.prefix}-${bestMatch.shade}`;
       return {
         matched: true,
@@ -462,7 +520,7 @@ export class TokenMatcher {
         cssVar: `--color-${tokenName}`,
         originalValue,
         tokenValue: tokenName,
-        confidence: 1 - bestDistance / COLOR_FUZZY_THRESHOLD,
+        confidence: 1 - nearest.distance / COLOR_FUZZY_THRESHOLD,
         needsExtension: false,
       };
     }
@@ -481,6 +539,15 @@ export class TokenMatcher {
    * @returns Token 匹配结果
    */
   matchRadius(px: number): TokenMatch<string> {
+    // P3-12：圆角结果只依赖 px（同 px 常量在页面中高度重复），整结果记忆化
+    const cached = this._radiusCache.get(px);
+    if (cached) return cached;
+    const result = this._matchRadiusUncached(px);
+    this._radiusCache.set(px, result);
+    return result;
+  }
+
+  private _matchRadiusUncached(px: number): TokenMatch<string> {
     // 0 或极小值 → 无圆角
     if (px <= 0.5) {
       return {
@@ -597,29 +664,8 @@ export class TokenMatcher {
     }
 
     // 转换为 Tailwind spacing unit（1 unit = 0.25rem = 4px）
-    const units = px / 4;
-
-    // Tailwind v3 默认 spacing scale（units 值）
-    // 来源：https://tailwindcss.com/docs/customizing-spacing#default-spacing-scale
-    // px=0.25(1px), 0.5(2px), 1(4px), 1.5(6px), 2(8px), 2.5(10px), 3(12px), 3.5(14px)
-    // 4(16px), 5(20px), 6(24px), 7(28px), 8(32px), 9(36px), 10(40px), 11(44px), 12(48px)
-    // 14(56px), 16(64px), 20(80px), 24(96px), 28(112px), 32(128px), 36(144px), 40(160px)
-    // 44(176px), 48(192px), 52(208px), 56(224px), 60(240px), 64(256px), 72(288px), 80(320px), 96(384px)
-    const STANDARD_UNITS: ReadonlyArray<number> = [
-      0.25, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56,
-      60, 64, 72, 80, 96,
-    ];
-
-    // 查找最接近的标准单位值
-    let bestUnit = -1;
-    let bestDiff = Infinity;
-    for (const u of STANDARD_UNITS) {
-      const diff = Math.abs(units - u);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestUnit = u;
-      }
-    }
+    // P3-12：最近单位记忆化（量表已提升为模块常量）
+    const { unit: bestUnit, diff: bestDiff } = nearestSpacingUnit(this._spacingNearestUnit, px);
 
     // 超大尺寸（>96 units = 384px）直接使用任意值，避免生成 w-207 这种不存在的类名
     if (bestUnit > 96 || bestUnit < 0) {
@@ -669,6 +715,15 @@ export class TokenMatcher {
    * @returns Token 匹配结果
    */
   matchFontSize(px: number): TokenMatch<string> {
+    // P3-12：字号结果只依赖 px，记忆化
+    const cached = this._fontSizeCache.get(px);
+    if (cached) return cached;
+    const result = this._matchFontSizeUncached(px);
+    this._fontSizeCache.set(px, result);
+    return result;
+  }
+
+  private _matchFontSizeUncached(px: number): TokenMatch<string> {
     // 精确匹配（0.5px 容差）
     const exact = FONT_SIZE_MAP.find((f) => Math.abs(f.px - px) < 0.5);
     if (exact)
@@ -715,6 +770,15 @@ export class TokenMatcher {
    * @returns Token 匹配结果
    */
   matchFontWeight(weight: number): TokenMatch<string> {
+    // P3-12：字重为离散标准值，结果记忆化
+    const cached = this._fontWeightCache.get(weight);
+    if (cached) return cached;
+    const result = this._matchFontWeightUncached(weight);
+    this._fontWeightCache.set(weight, result);
+    return result;
+  }
+
+  private _matchFontWeightUncached(weight: number): TokenMatch<string> {
     const standardWeights = [100, 200, 300, 400, 500, 600, 700, 800, 900] as const;
     const nearest = standardWeights.reduce((prev, curr) =>
       Math.abs(curr - weight) < Math.abs(prev - weight) ? curr : prev,

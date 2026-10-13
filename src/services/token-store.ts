@@ -15,6 +15,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { getI18n } from '../i18n/index.js';
+import { maskSensitiveData } from '../utils/security.js';
 
 // ============ 类型定义 ============
 
@@ -71,6 +72,14 @@ export interface TokenValidationResult {
 /**
  * Token 存储服务接口
  */
+export function classifyTokenValidationFailure(error: unknown): 'unknown' | 'invalid' {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: unknown } | null)?.code;
+  const transientCode = typeof code === 'string'
+    && ['NETWORK_ERROR', 'TIMEOUT_ERROR', 'PROXY_ERROR', 'TLS_ERROR', 'DNS_ERROR', 'RATE_LIMITED', 'SERVER_ERROR'].includes(code);
+  const transientMessage = /network|timeout|timed ?out|etimedout|dns|proxy|tls|certificate|rate limit|too many requests|http 5\d\d|server error|服务器错误|网络|超时|代理|证书/i.test(rawMessage);
+  return transientCode || transientMessage ? 'unknown' : 'invalid';
+}
 export interface TokenStore {
   /**
    * 保存 Token（会加密存储，并立即验证有效性）
@@ -545,7 +554,22 @@ class TokenStoreImpl implements TokenStore {
   private async writeEncryptedFile(data: EncryptedFileData): Promise<void> {
     await ensureConfigDir();
     const filePath = getCredentialsFilePath();
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    const payload = JSON.stringify(data, null, 2);
+
+    try {
+      await fs.writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
+      if (process.platform !== 'win32') {
+        await fs.chmod(tempPath, 0o600);
+      }
+      await fs.rename(tempPath, filePath);
+      if (process.platform !== 'win32') {
+        await fs.chmod(filePath, 0o600);
+      }
+    } catch (error) {
+      await fs.rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async saveTokenEncryptedFile(name: string, token: string, note?: string): Promise<void> {
@@ -815,11 +839,10 @@ class TokenStoreImpl implements TokenStore {
         error: labels.tokenValidateFailedGeneric as string,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       return {
         valid: false,
-        status: 'invalid',
-        error: errorMessage,
+        status: classifyTokenValidationFailure(error),
+        error: maskSensitiveData(error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -867,7 +890,7 @@ class TokenStoreImpl implements TokenStore {
         email: result.user.email,
         handle: result.user.handle,
       });
-    } else {
+    } else if (result.status !== 'unknown') {
       await this.updateValidationStatus(name, 'invalid');
     }
 

@@ -40,20 +40,42 @@ describe('CLI update result policy', () => {
 describe('CLI registry retry policy', () => {
   it('retries transient registry failures and returns the stable version', async () => {
     let attempts = 0;
-    const version = await fetchLatestStableVersion('https://registry.example/latest', {
-      fetchImpl: async () => {
+    const version = await fetchLatestStableVersion('figma-dev-tools', {
+      registries: ['https://registry.example'],
+      requestImpl: async () => {
         attempts += 1;
-        if (attempts < 3) return new Response('', { status: 503 });
-        return new Response(JSON.stringify({ version: '1.4.17' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+        if (attempts < 3) {
+          const err = new Error('HTTP 503') as Error & { response?: { status: number } };
+          err.response = { status: 503 };
+          throw err;
+        }
+        return { version: '1.4.17' };
       },
       maxAttempts: 3,
       timeoutMs: 100,
-      sleep: async () => undefined,
     });
     expect(version).toBe('1.4.17');
     expect(attempts).toBe(3);
+  });
+
+  it('falls back to the next registry when the primary one fails', async () => {
+    const triedUrls: string[] = [];
+    const version = await fetchLatestStableVersion('figma-dev-tools', {
+      registries: ['https://primary.example', 'https://mirror.example'],
+      requestImpl: async (url) => {
+        triedUrls.push(url);
+        if (url.includes('primary.example')) {
+          const err = new Error('HTTP 500') as Error & { response?: { status: number } };
+          err.response = { status: 500 };
+          throw err;
+        }
+        return { version: '1.4.18' };
+      },
+      maxAttempts: 1,
+      timeoutMs: 100,
+    });
+    expect(version).toBe('1.4.18');
+    expect(triedUrls).toContain('https://primary.example/figma-dev-tools/latest');
+    expect(triedUrls).toContain('https://mirror.example/figma-dev-tools/latest');
   });
 });

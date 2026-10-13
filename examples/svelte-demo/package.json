@@ -1,0 +1,17 @@
+{
+  "name": "figma-dev-tools-svelte-demo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "figma-dev-tools figma_generate_svelte 产物的人工验证工程（Svelte 4 + Vite）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "svelte": "^4.2.19",
+    "vite": "^5.4.0"
+  }
+}

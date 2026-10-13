@@ -199,6 +199,54 @@ describe('TR-20.1 样式旁路与 Vue 矩阵', () => {
   });
 });
 
+describe('WBS-P1-13 Svelte 批量产物', () => {
+  it('每区块一个 .svelte（Svelte 4 口径），barrel 以 .svelte 路径再导出 default', async () => {
+    const root = makePageTree();
+    const result = await createBatchGenerator(NULL_CLIENT).generate(splitPageIntoBlocks(root), makeContext(root), {
+      framework: 'svelte',
+      styleFormat: 'tailwind',
+      bundler: 'none',
+      skipEnhancements: true,
+    });
+
+    expect(result.framework).toBe('svelte');
+    expect(result.files.map((file) => file.fileName)).toEqual(
+      expect.arrayContaining(['Header.svelte', 'HeroSection.svelte', 'FeaturesSection.svelte', 'index.ts']),
+    );
+    // 区块文件 lang 标记为 svelte
+    expect(result.files.filter((f) => f.lang === 'svelte')).toHaveLength(3);
+    expect(contentOf(result, 'index.ts')).toContain("export { default as Header } from './Header.svelte';");
+    expect(contentOf(result, 'Header.svelte')).toContain('<script lang="ts">');
+    expect(contentOf(result, 'Header.svelte')).toContain('Svelte 4');
+  });
+
+  it('css-modules：样式内联 scoped <style>，不产出额外旁路文件', async () => {
+    const root = makePageTree();
+    const result = await createBatchGenerator(NULL_CLIENT).generate(splitPageIntoBlocks(root), makeContext(root), {
+      framework: 'svelte',
+      styleFormat: 'css-modules',
+      bundler: 'none',
+      skipEnhancements: true,
+    });
+    // 3 个 .svelte + barrel，无 .module.css 旁路
+    expect(result.files).toHaveLength(4);
+    expect(result.files.some((f) => f.fileName.endsWith('.module.css'))).toBe(false);
+    expect(contentOf(result, 'Header.svelte')).toContain('<style>');
+  });
+
+  it('非法样式组合在批量入口同样被拒绝（styled 为 React 专属）', async () => {
+    const root = makePageTree();
+    await expect(
+      createBatchGenerator(NULL_CLIENT).generate(splitPageIntoBlocks(root), makeContext(root), {
+        framework: 'svelte',
+        styleFormat: 'styled',
+        bundler: 'none',
+        skipEnhancements: true,
+      }),
+    ).rejects.toThrow();
+  });
+});
+
 describe('TR-20.2 两入口一致性与空选择', () => {
   it('整页拆分与显式 nodeIds 在同一区块集合上产物逐文件一致', async () => {
     // 两棵独立但同构的树，避免增强器原地标注造成两次生成互相干扰

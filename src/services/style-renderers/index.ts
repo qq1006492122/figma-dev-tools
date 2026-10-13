@@ -46,6 +46,19 @@ export { PreprocessorRenderer, type PreprocessorSyntax } from './preprocessor-re
 export { VanillaExtractRenderer } from './vanilla-extract-renderer.js';
 export { PandaRenderer } from './panda-renderer.js';
 export {
+  buildCssVariableName,
+  buildRootVariableBlock,
+  CSS_VARIABLE_PREFIX,
+  CSS_VARIABLES_PLANNED_VERSION,
+  CssVariablesRenderer,
+  mapValueToCssVariable,
+  parseCssVariableName,
+  toKebabSegment,
+  type CssTokenCategory,
+  type CssTokenDefinition,
+  type CssVariableMatch,
+} from './css-variables-renderer.js';
+export {
   collectUnsupportedFillWarnings,
   declarationsToObjectEntries,
   resolveHtmlTag,

@@ -1,0 +1,26 @@
+{
+  "recordedAt": "2026-10-12T10:02:11.782Z",
+  "method": "in-process same-build env-gated cold-start A/B (TEMP-P3-12-BENCH)",
+  "fixture": {
+    "actualNodes": 998
+  },
+  "runs": 30,
+  "react": {
+    "legacyMs": 390.12,
+    "memoColdMs": 332.96,
+    "deltaPct": -14.65,
+    "legacyMinMs": 325.57,
+    "memoColdMinMs": 280.42,
+    "minDeltaPct": -13.87,
+    "outputIdentical": true
+  },
+  "weapp": {
+    "legacyMs": 53.84,
+    "memoColdMs": 45.23,
+    "deltaPct": -15.99,
+    "legacyMinMs": 40.57,
+    "memoColdMinMs": 31.35,
+    "minDeltaPct": -22.73,
+    "outputIdentical": true
+  }
+}

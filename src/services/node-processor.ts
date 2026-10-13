@@ -837,7 +837,8 @@ export class NodeProcessor {
   }
 
   /**
-   * 递归统计原始节点总数（带节点数硬限制）
+   * 递归统计原始节点总数（带节点数硬限制）。
+   * P3-12：visited 改为路径式 add/delete（见 _processNode），消除每子节点 Set 复制。
    */
   private _countNodes(node: FigmaNode, visited: Set<string>): void {
     if (this._nodeLimitExceeded) return;
@@ -848,19 +849,23 @@ export class NodeProcessor {
       visited.add(nodeId);
     }
 
-    this.stats.originalNodeCount++;
+    try {
+      this.stats.originalNodeCount++;
 
-    // 节点数硬限制检查
-    if (this.stats.originalNodeCount > SAFE_MAX_NODES) {
-      this._nodeLimitExceeded = true;
-      return;
-    }
-
-    if (node.children) {
-      for (const child of node.children) {
-        this._countNodes(child, new Set(visited));
-        if (this._nodeLimitExceeded) return;
+      // 节点数硬限制检查
+      if (this.stats.originalNodeCount > SAFE_MAX_NODES) {
+        this._nodeLimitExceeded = true;
+        return;
       }
+
+      if (node.children) {
+        for (const child of node.children) {
+          this._countNodes(child, visited);
+          if (this._nodeLimitExceeded) return;
+        }
+      }
+    } finally {
+      if (nodeId) visited.delete(nodeId);
     }
   }
 
@@ -895,6 +900,28 @@ export class NodeProcessor {
     parent: ProcessedNode | null,
     visited: Set<string>,
   ): ProcessedNode | null {
+    // P3-12：路径型循环检测改为 add/finally-delete（深度优先）。
+    // 旧实现在每个子节点处 `new Set(visited)` 复制祖先路径——千节点深树
+    // 为 O(n²) 次 Set 拷贝。兄弟分支只需看到共同祖先路径，
+    // 递归返回时 delete 自身 id 即可正确隔离，无需复制。
+    const nodeId = node.id;
+    if (nodeId) {
+      if (visited.has(nodeId)) return null; // 循环引用，跳过
+      visited.add(nodeId);
+    }
+    try {
+      return this._processNodeInner(node, depth, parent, visited);
+    } finally {
+      if (nodeId) visited.delete(nodeId);
+    }
+  }
+
+  private _processNodeInner(
+    node: FigmaNode,
+    depth: number,
+    parent: ProcessedNode | null,
+    visited: Set<string>,
+  ): ProcessedNode | null {
     // ============ 边界保护 ============
 
     // 配置的 maxDepth 检查
@@ -907,14 +934,8 @@ export class NodeProcessor {
       return null;
     }
 
-    // 循环引用检测
+    // 循环引用检测（visited 由外层守卫维护为当前祖先路径）
     const nodeId = node.id;
-    if (nodeId) {
-      if (visited.has(nodeId)) {
-        return null; // 循环引用，跳过
-      }
-      visited.add(nodeId);
-    }
 
     if (shouldSkipNode(node, this.options)) {
       if (node.visible === false || (node.opacity !== undefined && node.opacity <= 0.01)) {
@@ -930,7 +951,7 @@ export class NodeProcessor {
     if (this.options.flattenGroups && isRedundantGroup(node) && node.children && node.children.length === 1) {
       this.stats.flattenedGroupCount++;
       const child = node.children[0]!;
-      return this._processNode(child, depth, parent, new Set(visited));
+      return this._processNode(child, depth, parent, visited);
     }
 
     // ============ 处理子节点 ============
@@ -944,7 +965,7 @@ export class NodeProcessor {
         // v1.4.4 保存父节点绝对边界，用于子节点计算相对定位
         const savedParentBBox = this._parentAbsoluteBBox;
         this._parentAbsoluteBBox = node.absoluteBoundingBox ?? null;
-        const processedChild = this._processNode(child, depth + 1, null, new Set(visited));
+        const processedChild = this._processNode(child, depth + 1, null, visited);
         // 恢复父节点边界（栈式管理）
         this._parentAbsoluteBBox = savedParentBBox;
         if (processedChild) {

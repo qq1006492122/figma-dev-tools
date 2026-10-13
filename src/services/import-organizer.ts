@@ -152,28 +152,23 @@ const COMMENT_OR_STRING_RE =
  *
  * named 块内不可能出现 `from '...'`，故非贪婪匹配到最近模块说明符是安全的。
  */
-const ANY_IMPORT_RE =
-  /^[ \t]*import\b[\s\S]*?from\s*['"][^'"]+['"][ \t]*;?[ \t]*(?:\r\n|\r|\n|$)|^[ \t]*import\s+['"][^'"]+['"][ \t]*;?[ \t]*(?:\r\n|\r|\n|$)/gm;
+const ANY_IMPORT_PATTERN =
+  "^[ \\t]*import\\b[\\s\\S]*?from\\s*['\"][^'\"]+['\"][ \\t]*;?[ \\t]*(?:\\r\\n|\\r|\\n|$)|^[ \\t]*import\\s+['\"][^'\"]+['\"][ \\t]*;?[ \\t]*(?:\\r\\n|\\r|\\n|$)";
 
 /**
- * 将注释与字符串替换为等长空白（保留换行），避免误报使用。
- *
- * @param code - 原始代码
- * @returns 仅保留代码结构、字面量内容被空白替换的等长字符串
+ * P3-12：import 语句与注释/字符串合并为单条交替正则。
+ * 两类 token 的处理完全一致（非换行字符替换为空格），一遍扫描等价于
+ * 原先「先 blank imports 再 blank comments/strings」两遍全文件扫描。
  */
-function blankCommentsAndStrings(code: string): string {
-  return code.replace(COMMENT_OR_STRING_RE, (token) => token.replace(/[^\r\n]/g, ' '));
-}
+const BLANK_ALL_RE = new RegExp(`${ANY_IMPORT_PATTERN}|${COMMENT_OR_STRING_RE.source}`, 'gm');
 
 /**
- * 将所有 import 语句替换为等长空白（保留换行），使使用扫描不受
- * 其他模块同名导出（如 `import { useState } from './shims'`）干扰。
- *
- * @param code - 原始代码
- * @returns import 语句被空白替换后的等长字符串
+ * 单遍空白化 import + 注释 + 字符串（P3-12）。
+ * 两类 token 均替换为等长空白（保留换行），单条交替正则一遍扫描，
+ * 输出与「先 blank imports 再 blank comments/strings」两次串行替换逐字符等价。
  */
-function blankImportStatements(code: string): string {
-  return code.replace(ANY_IMPORT_RE, (token) => token.replace(/[^\r\n]/g, ' '));
+function blankImportsCommentsAndStrings(code: string): string {
+  return code.replace(BLANK_ALL_RE, (token) => token.replace(/[^\r\n]/g, ' '));
 }
 
 /**
@@ -184,22 +179,6 @@ function blankImportStatements(code: string): string {
  */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * 判断标识符在代码体中是否被**实际使用**。
- *
- * 前置负向 `[\w$.]` 同时排除：
- * - 标识符前后缀（如 `myUseState`）；
- * - 属性访问（如 `React.useState`，此时不应补 named 导入）。
- *
- * @param body - 已经过注释/字符串/import 空白化处理的代码体
- * @param name - 标识符名
- * @returns 是否存在至少一处真实使用
- */
-function isIdentifierUsed(body: string, name: string): boolean {
-  const re = new RegExp(`(?<![\\w$.])${escapeRegExp(name)}(?![\\w$])`, 'g');
-  return re.test(body);
 }
 
 // ============ import 语句解析 ============
@@ -340,14 +319,26 @@ function organizeSegment(code: string, spec: FrameworkSpec): string {
   }
   const anchor = removedRanges[0]?.start ?? null;
 
-  // 4. 基于「去注释/字符串/import」的代码体做使用扫描
-  const scanBody = blankCommentsAndStrings(blankImportStatements(work));
+  // 4. 基于「去注释/字符串/import」的代码体做使用扫描（P3-12：单遍空白化）。
+  // P3-12：白名单（+default 标识）合并为单个交替正则，一次 matchAll 收集
+  // 全部已用名，替代原先「每个名字一遍全代码体扫描」（~16 遍 → 1 遍，边界语义不变）。
+  const scanBody = blankImportsCommentsAndStrings(work);
+  const usageCandidates = new Set<string>(spec.whitelist);
+  if (spec.supportsDefault && spec.defaultIdentifier) usageCandidates.add(spec.defaultIdentifier);
+  const usedNames = new Set<string>();
+  if (usageCandidates.size > 0) {
+    const alternation = [...usageCandidates].map(escapeRegExp).join('|');
+    const usageRe = new RegExp(`(?<![\\w$.])(${alternation})(?![\\w$])`, 'g');
+    for (const m of scanBody.matchAll(usageRe)) {
+      usedNames.add(m[1] as string);
+    }
+  }
 
   /** 最终保留的 named 片段（白名单按使用裁剪，非白名单原样保留） */
   const finalSpecifiers: string[] = [];
   for (const [key, raw] of namedByKey) {
     if (spec.whitelist.includes(key)) {
-      if (isIdentifierUsed(scanBody, key)) {
+      if (usedNames.has(key)) {
         finalSpecifiers.push(raw);
       }
     } else {
@@ -356,7 +347,7 @@ function organizeSegment(code: string, spec: FrameworkSpec): string {
   }
   // 白名单中已使用但缺失的成员 → 补齐
   for (const name of spec.whitelist) {
-    if (!namedByKey.has(name) && isIdentifierUsed(scanBody, name)) {
+    if (!namedByKey.has(name) && usedNames.has(name)) {
       finalSpecifiers.push(name);
     }
   }
@@ -370,7 +361,7 @@ function organizeSegment(code: string, spec: FrameworkSpec): string {
     namespaceName === null &&
     spec.supportsDefault &&
     spec.defaultIdentifier &&
-    isIdentifierUsed(scanBody, spec.defaultIdentifier)
+    usedNames.has(spec.defaultIdentifier)
   ) {
     defaultName = spec.defaultIdentifier;
     keepDefault = true;

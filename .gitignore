@@ -27,6 +27,9 @@ _*.js
 figma-dev.config.json
 .figma-dev-cache/
 
+# 微信开发者工具本地私有配置（含个人编译设置，不随仓库交付）
+examples/**/project.private.config.json
+
 # 本地 IDE/Agent 工作流目录与历史分析文档（不随包发布）
 .trae/
 OPTIMIZATION-ANALYSIS.md

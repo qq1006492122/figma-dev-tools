@@ -1,0 +1,147 @@
+{
+  "label": "optimized",
+  "recordedAt": "2026-10-13T00:27:06.898Z",
+  "env": {
+    "node": "v24.21.0",
+    "platform": "win32/x64",
+    "os": "Windows_NT 10.0.26200",
+    "cpu": "AMD Ryzen 7 H 255 w/ Radeon 780M Graphics",
+    "cores": 16,
+    "memTotalGB": 15.2
+  },
+  "fixture": {
+    "targetNodes": 1000,
+    "actualNodes": 998,
+    "seed": 20261012
+  },
+  "config": {
+    "warmup": 1,
+    "runs": 5,
+    "gcAvailable": true
+  },
+  "react": {
+    "runs": 5,
+    "gcAvailable": true,
+    "durationMs": {
+      "median": 225.67,
+      "min": 214.71,
+      "max": 253.54
+    },
+    "heapDeltaMB": {
+      "median": 60.83,
+      "max": 62.91
+    },
+    "retainedMB": {
+      "median": 0.2,
+      "max": 0.76
+    },
+    "rssMB": {
+      "median": 236.34,
+      "max": 239.01
+    },
+    "outputBytes": {
+      "median": 270944,
+      "stable": true
+    },
+    "samples": [
+      {
+        "ms": 238.89,
+        "heapDeltaMB": 34.2,
+        "retainedMB": 0.76,
+        "rssMB": 167.96,
+        "outBytes": 270944
+      },
+      {
+        "ms": 253.54,
+        "heapDeltaMB": 62.91,
+        "retainedMB": 0.3,
+        "rssMB": 224.46,
+        "outBytes": 270944
+      },
+      {
+        "ms": 214.71,
+        "heapDeltaMB": 61.18,
+        "retainedMB": 0.12,
+        "rssMB": 239.01,
+        "outBytes": 270944
+      },
+      {
+        "ms": 225.67,
+        "heapDeltaMB": 59.3,
+        "retainedMB": 0.2,
+        "rssMB": 238.84,
+        "outBytes": 270944
+      },
+      {
+        "ms": 221.43,
+        "heapDeltaMB": 60.83,
+        "retainedMB": 0.11,
+        "rssMB": 236.34,
+        "outBytes": 270944
+      }
+    ]
+  },
+  "weapp": {
+    "runs": 5,
+    "gcAvailable": true,
+    "durationMs": {
+      "median": 28.32,
+      "min": 26.3,
+      "max": 35.01
+    },
+    "heapDeltaMB": {
+      "median": 24.88,
+      "max": 25.22
+    },
+    "retainedMB": {
+      "median": 0.03,
+      "max": 2.07
+    },
+    "rssMB": {
+      "median": 231.88,
+      "max": 231.89
+    },
+    "outputBytes": {
+      "median": 1031602,
+      "stable": true
+    },
+    "samples": [
+      {
+        "ms": 35.01,
+        "heapDeltaMB": 24.94,
+        "retainedMB": 2.07,
+        "rssMB": 228.94,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 29.32,
+        "heapDeltaMB": 25.22,
+        "retainedMB": 0.07,
+        "rssMB": 231.78,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 27.6,
+        "heapDeltaMB": 24.88,
+        "retainedMB": 0.03,
+        "rssMB": 231.88,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 28.32,
+        "heapDeltaMB": 24.6,
+        "retainedMB": 0,
+        "rssMB": 231.89,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 26.3,
+        "heapDeltaMB": 23.97,
+        "retainedMB": 0.02,
+        "rssMB": 231.89,
+        "outBytes": 1031602
+      }
+    ]
+  },
+  "weappReactRatio": 0.125
+}

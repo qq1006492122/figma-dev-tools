@@ -445,6 +445,11 @@ export const enUS = {
           'UnoCSS attributify mode (v1.4.18, use with --style unocss only; emits utilities as element attributes; off by default = wind mode)',
         attributifyIgnored:
           '--attributify only takes effect with --style unocss; ignored for this run (wind utilities are used).',
+        // WBS-P2-12/13: component library mapping toggle (conservative gate, native tags by default)
+        componentLibrary:
+          'Component library mapping: auto (detect from package.json/components.json) | none (default, native tags) | shadcn-ui | ant-design (React); element-plus | ant-design-vue (Vue)',
+        componentLibraryIgnored:
+          '--component-library is only supported for react/vue output; ignored for this svelte run.',
         styleHintsSuffix:
           'setup hints (apply manually as needed; the tool never modifies your project files)',
         moduleCssSaved: 'Co-located CSS Modules file saved',
@@ -461,6 +466,12 @@ export const enUS = {
         description: 'Generate a Vue 2/3 SFC component (.vue single file, new in v1.4.19)',
         vueVersion: 'Vue major version: 2 (Options API) | 3 (default, <script setup>)',
         invalidVersion: 'Error: --vue-version accepts only 2 or 3',
+      },
+
+      // v1.4.20 WBS-P1-1: dedicated `figma-dev svelte` command (Svelte 4 default)
+      svelte: {
+        description:
+          'Generate a Svelte 4 component (.svelte single file; tailwind/unocss/css-modules only, new in v1.4.20)',
       },
 
       // v1.4.19 T20: page batch generation
@@ -866,6 +877,30 @@ export const enUS = {
     filesHeading: 'Output file tree',
     graphHeading: 'Dependency graph',
     savedPrefix: 'Batch output written to',
+  },
+
+  // v1.4.20 WBS-P1-2/P1-3: Watch & Compare frozen error copy
+  watch: {
+    title: 'Watch sessions',
+    started: 'Watch session started (coarse probe detects changes within 10s; sessions live only in this MCP process — restart requires start again)',
+    stopped: 'Watch session stopped (idempotent)',
+    none: 'No active watch sessions',
+    errors: {
+      'missing-output': 'FDT-WATCH-MISSING-OUTPUT: outputDir is required when write=true',
+      'output-without-write': 'FDT-WATCH-OUTPUT-WITHOUT-WRITE: outputDir is not allowed when write=false (MCP never writes by default)',
+      'too-many-sessions': 'FDT-WATCH-TOO-MANY-SESSIONS: max 5 concurrent watch sessions per client; stop unused sessions first',
+      'framework-unavailable': 'FDT-WATCH-FRAMEWORK-UNAVAILABLE: watch adapter for this framework is not ready',
+      'session-not-found': 'FDT-WATCH-SESSION-NOT-FOUND: session does not exist, was stopped, or belongs to another client',
+    },
+  },
+  compare: {
+    title: 'Code diff',
+    errors: {
+      'path-traversal': 'FDT-COMPARE-PATH-TRAVERSAL: path traversal detected, read denied',
+      'input-too-large': 'FDT-COMPARE-INPUT-TOO-LARGE: total input exceeds the 512KB limit',
+      'binary-unsupported': 'FDT-COMPARE-BINARY-UNSUPPORTED: binary files cannot be compared',
+      'missing-current': 'One of currentCode / currentFilePath / currentFiles is required as the current side',
+    },
   },
   gui: {
     title: 'GUI Setup Wizard',

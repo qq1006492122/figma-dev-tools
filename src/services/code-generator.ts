@@ -64,6 +64,7 @@
 import type { FigmaNode, CodeGenOptions, GeneratedComponent, SmartInferenceSwitches } from '../types.js';
 import type { ProcessedNode, DesignContext } from '../types/nodes.js';
 import { cn } from '../utils/cn.js';
+import { getToolVersion } from '../utils/version.js';
 import { convertFigmaColor } from '../utils/color.js';
 import { escapeAttribute, sanitizeIdentifier, sanitizeText } from '../utils/security.js';
 import { createA11yEnhancer, type A11yEnhancerResult } from './a11y-enhancer.js';
@@ -92,8 +93,63 @@ import {
   type StyleSidecarFile,
   type UnocssMode,
 } from './style-renderers/index.js';
+import {
+  COMPONENT_LIBRARIES,
+  matchComponent,
+  resolveLibrary,
+  type ComponentLibraryChoice,
+  type ComponentLibraryId,
+  type DetectHooks,
+  type PackageJsonLike,
+} from './component-library/index.js';
 import { normalizeAssetUrlPath, planAssetReference, toAssetVarName, type BundlerKind } from './asset-paths.js';
 import { generateReactPropsInterface } from './props-type-generator.js';
+
+// ============ 组件库映射（WBS-P2-12） ============
+
+/** shadcn/ui 每个组件对应的 components/ui 子路径（与官方 CLI 生成位置一致） */
+const SHADCN_UI_PATHS: Readonly<Record<string, string>> = {
+  Button: 'button',
+  Input: 'input',
+  Badge: 'badge',
+  Card: 'card',
+  Dialog: 'dialog',
+  Tabs: 'tabs',
+  Avatar: 'avatar',
+};
+
+/** 结构需手工调整的组件（容器/组合式），替换标签时必须给警告 */
+const COMPOSITION_WARNING_COMPONENTS = new Set(['dialog', 'tabs', 'avatar']);
+
+/**
+ * 注册一次组件匹配用到的 import（主组件 + 组合式子组件），
+ * 按库形态归入 antd 单包或 shadcn 各 ui 子路径。
+ */
+function registerUiImport(
+  uiImports: Map<string, Set<string>>,
+  library: ComponentLibraryId,
+  match: ReturnType<typeof matchComponent> extends infer T ? Exclude<T, null> : never,
+): void {
+  const add = (source: string, name: string): void => {
+    let set = uiImports.get(source);
+    if (!set) {
+      set = new Set<string>();
+      uiImports.set(source, set);
+    }
+    set.add(name);
+  };
+  if (library === 'shadcn-ui') {
+    // 组合式子组件（DialogContent/TabsList/CardHeader 等）与主组件同属一个 ui 子路径，
+    // 与 shadcn 官方产物一致：import { Dialog, DialogContent, ... } from '@/components/ui/dialog'
+    const source = `@/components/ui/${SHADCN_UI_PATHS[match.importName] ?? ''}`;
+    add(source, match.importName);
+    for (const sub of match.subImports) {
+      add(source, sub);
+    }
+  } else {
+    add(COMPONENT_LIBRARIES[library].packageName, match.importName);
+  }
+}
 
 // ============ 类型定义 ============
 
@@ -149,6 +205,13 @@ interface ProcessedNodeContext {
   componentName: string;
   /** 父级节点在样式渲染器中注册的类名/标识符（v1.4.19 T16：Less/Sass 嵌套归属） */
   parentStyleIdentifier?: string;
+  /**
+   * WBS-P2-12：已解析的组件库 id（null=关闭组件映射，全部原生标签）。
+   * 由 generateJsxFromContext 按 componentLibrary + package.json 依赖解析一次。
+   */
+  componentLibrary: ComponentLibraryId | null;
+  /** 组件库 import 收集：source 路径 → 命名导入集合（渲染完后统一生成 import 语句） */
+  uiImports: Map<string, Set<string>>;
 }
 
 /**
@@ -192,6 +255,13 @@ const DEFAULT_CODE_GEN_OPTIONS: Required<CodeGenOptions> = {
   skipEnhancements: false,
   inference: {},
 };
+
+/**
+ * P3-12：语义标签推断结果缓存（name + role + fontSize → tag）。
+ * 模块级跨生成复用；键空间为页面中出现过的唯一名/角色组合，
+ * 千节点页通常仅数十个唯一键，命中后跳过 ~20 条名称正则。
+ */
+const SEMANTIC_TAG_CACHE = new Map<string, string>();
 
 // ============ CodeGenerator 类 ============
 
@@ -452,6 +522,15 @@ export class CodeGenerator {
       skipEnhancements?: boolean;
       /** v1.4.19 T21：智能推断分项开关（缺省全开，skipEnhancements 为总闸） */
       inference?: SmartInferenceSwitches;
+      /**
+       * WBS-P2-12：组件库选择。'auto' 按 projectPackageJson 真实依赖检测，
+       * 'none'（默认）保持原生标签；显式库 id 不做依赖拦截（由调用方给安装提示）。
+       */
+      componentLibrary?: ComponentLibraryChoice;
+      /** auto 检测用的最近 package.json（CLI 读盘后传入；MCP 无 fs 可不传） */
+      projectPackageJson?: PackageJsonLike | null;
+      /** shadcn/ui 组件目录探测谓词（@/components/ui/<component> 是否存在） */
+      uiComponentExists?: DetectHooks['uiComponentExists'];
     } = {},
   ): Promise<{
     /** 组件名 */
@@ -481,9 +560,19 @@ export class CodeGenerator {
     assertStyleFormatSupported(effectiveStyleFormat, STYLE_FORMATS_NEW_PIPELINE, undefined, 'react');
     const unocssMode: UnocssMode = options.unocssMode ?? 'wind';
     const styleRenderer = createStyleRenderer(effectiveStyleFormat, { framework: 'react', unocssMode });
+    // WBS-P2-12：组件库解析（auto 必须有真实依赖证据；无证据/显式 none → 原生标签）
+    const resolvedComponentLibrary = resolveLibrary('react', options.componentLibrary ?? 'none', options.projectPackageJson ?? null, {
+      uiComponentExists: options.uiComponentExists,
+    });
+    const uiImports = new Map<string, Set<string>>();
     const imports = new Set<string>(['import React from "react";']);
     const extensionsNeeded: StyleExtensionNeeded[] = [];
     const warnings: string[] = [];
+    if (options.componentLibrary === 'auto' && !resolvedComponentLibrary) {
+      warnings.push(
+        'componentLibrary=auto 未检测到 antd 依赖或 @/components/ui 组件目录，已降级为原生标签（显式指定 componentLibrary 可覆盖）',
+      );
+    }
     const pendingAssets: Array<{ nodeId: string; name: string; type: string }> = [];
     const reports: EnhancementReports = {};
     let needsPublicCdnUrl = false;
@@ -551,11 +640,18 @@ export class CodeGenerator {
       fileKey: context.fileKey,
       svgRenderer: this._svgRenderer,
       componentName,
+      componentLibrary: resolvedComponentLibrary,
+      uiImports,
     });
 
     // 检测是否需要 publicCdnUrl import
     if (jsxBody.includes('publicCdnUrl')) {
       needsPublicCdnUrl = true;
+    }
+
+    // WBS-P2-12：组件库 import 收口（antd 聚合单包；shadcn 按 ui 子路径分组）
+    for (const [source, names] of uiImports) {
+      imports.add(`import { ${[...names].join(', ')} } from "${source}";`);
     }
 
     // ============ 样式旁路文件（v1.4.18 T9 css-modules；v1.4.19 T16 less/sass、T17 vanilla-extract） ============
@@ -736,7 +832,7 @@ export class CodeGenerator {
     if (!hasContent) return comments;
 
     comments.push('/**');
-    comments.push(' * 🤖 Generated by figma-dev-tools v1.4.4');
+    comments.push(` * 🤖 Generated by figma-dev-tools v${getToolVersion()}`);
     comments.push(' *');
 
     if (reports.flexFixes && reports.flexFixes.totalFixedNodes > 0) {
@@ -947,10 +1043,31 @@ export class CodeGenerator {
     }
 
     // 输出标签：styled 方案替换为样式组件标识符，其余为语义 HTML 标签
-    const tag = elementIdentifier ?? semanticTag;
+    let tag = elementIdentifier ?? semanticTag;
+
+    // WBS-P2-12：组件库映射（保守门控，未命中保持原生标签）
+    const uiMatch = ctx.componentLibrary ? matchComponent(node, ctx.componentLibrary) : null;
+    let uiComponentTag: string | null = null;
+    if (uiMatch) {
+      uiComponentTag = uiMatch.importName;
+      tag = uiComponentTag;
+      registerUiImport(ctx.uiImports, ctx.componentLibrary as ComponentLibraryId, uiMatch);
+      for (const advice of uiMatch.compositionAdvice ?? []) {
+        const warning = `[${node.name || node.figmaId}] ${uiMatch.importName}: ${advice}`;
+        if (!ctx.warnings.includes(warning)) ctx.warnings.push(warning);
+      }
+      if (COMPOSITION_WARNING_COMPONENTS.has(uiMatch.component)) {
+        const structural = `[${node.name || node.figmaId}] ${uiMatch.importName} 结构与原生素材不同（${uiMatch.component} 子结构/受控状态/src 绑定），已替换容器标签，请按组件库文档手工调整子节点结构`;
+        if (!ctx.warnings.includes(structural)) ctx.warnings.push(structural);
+      }
+    }
 
     // ============ 7. 判断是否为自闭合标签（样式组件标识符永不自闭合） ============
-    const selfClosing = !elementIdentifier && ['img', 'input', 'br', 'hr'].includes(semanticTag);
+    // 组件映射：Input/Avatar 自闭合；Button/Card/Badge/Tabs/Dialog 保留子节点
+    const UI_SELF_CLOSE = new Set(['input', 'avatar']);
+    const selfClosing = uiComponentTag
+      ? UI_SELF_CLOSE.has(uiMatch!.component)
+      : !elementIdentifier && ['img', 'input', 'br', 'hr'].includes(semanticTag);
 
     // ============ 8. 构建 props ============
     const props: string[] = [];
@@ -1030,13 +1147,29 @@ export class CodeGenerator {
       props.push('aria-hidden="true"');
     }
 
-    // 根节点展开外部传入的 rest props
-    if (ctx.isRoot) {
+    // 根节点展开外部传入的 rest props。
+    // 组件库映射标签不透传：rest 类型为 React.HTMLAttributes（color?: string 等宽类型），
+    // 与 antd 等库组件的窄联合 props（color: 'default'|'primary'|'danger'）冲突，tsc strict 下报错；
+    // 库组件需要的额外 props 由使用方在组件外层按库文档传入（见手工调整建议）。
+    if (ctx.isRoot && !uiMatch) {
       props.push('{...rest}');
     }
 
-    // ============ 10. 图片节点特殊处理（增强版 v1.4.0） ============
-    if (semanticTag === 'img') {
+    // WBS-P2-12：组件库 Props 注入（在 data/aria 之后，避免与原生分支重复）
+    if (uiMatch) {
+      for (const prop of uiMatch.props) {
+        if (prop.value === 'true') {
+          props.push(prop.name);
+        } else if (prop.name === 'placeholder') {
+          props.push(`placeholder=${JSON.stringify(escapeAttribute(sanitizeText(prop.value)))}`);
+        } else {
+          props.push(`${prop.name}=${JSON.stringify(prop.value)}`);
+        }
+      }
+    }
+
+    // ============ 10. 图片节点特殊处理（增强版 v1.4.0；组件映射后交由 Avatar 等组件处理） ============
+    if (semanticTag === 'img' && !uiComponentTag) {
       // object-fit 处理：
       // - 原子类（tailwind/unocss）：追加 object-cover 工具类（历史行为）；
       // - v1.4.19 非原子方案：不修改样式绑定，补内联 object-fit 兜底（styled/VE/Panda 等）
@@ -1128,8 +1261,8 @@ export class CodeGenerator {
       return `${indent}<${tag} ${props.join(' ')} />`;
     }
 
-    // ============ 11. 输入框特殊处理（按语义标签判断，styled.input 同样补 type） ============
-    if (semanticTag === 'input') {
+    // ============ 11. 输入框特殊处理（原生 input 补 type；组件 Input 的 type 已由映射 props 提供） ============
+    if (semanticTag === 'input' && !uiComponentTag) {
       const inputType =
         a11yEnhancements && 'inputType' in a11yEnhancements
           ? (a11yEnhancements as { inputType?: string }).inputType
@@ -1146,7 +1279,8 @@ export class CodeGenerator {
     }
 
     // ============ 13. 按钮节点 → 添加 type="button" 防止表单默认提交 ============
-    if (semanticTag === 'button' || a11yEnhancements?.isButton) {
+    // 组件库 Button 的 type 是 variant 口径（primary/default…），不能注入原生 type=button
+    if (!uiComponentTag && (semanticTag === 'button' || a11yEnhancements?.isButton)) {
       if (!props.some((p) => p.startsWith('type='))) {
         props.unshift('type="button"');
       }
@@ -1161,6 +1295,23 @@ export class CodeGenerator {
     }
 
     // ============ 15. 递归生成子节点（异步等待） ============
+    // WBS-P2-12：组件库叶子组件（Button/Badge 等）仅含文本子节点时，
+    // 文案直接内联为 children（<Button ...>Save</Button>），
+    // 避免文本被 <p> 包裹而不符合组件库用法；含图标等非文本子节点时保持结构递归
+    if (
+      uiMatch &&
+      node.children &&
+      node.children.length > 0 &&
+      node.children.every((c) => c.role === 'text' || c.originalType === 'TEXT')
+    ) {
+      const textContent = node.children
+        .map((c) => (c.textContent ? sanitizeText(c.textContent) : ''))
+        .join('');
+      if (textContent) {
+        return `${indent}<${tag} ${props.join(' ')}>${textContent}</${tag}>`;
+      }
+    }
+
     const childrenJsx =
       node.children && node.children.length > 0
         ? (await Promise.all(node.children.map((child) => this._generateProcessedNodeJsx(child, styleRenderer, nextCtx))))
@@ -1290,6 +1441,17 @@ export class CodeGenerator {
    * @returns HTML 标签名（小写）
    */
   private _selectSemanticTag(node: ProcessedNode): string {
+    // P3-12：标签只由 name/role/fontSize 决定，真实页面同名节点大量重复
+    // （如 200+ 张 Product Card），记忆化避免每节点重跑 20+ 条名称正则。
+    const cacheKey = `${node.name ?? ''}\u0000${node.role}\u0000${node.textStyle?.fontSize ?? 0}`;
+    const cached = SEMANTIC_TAG_CACHE.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const tag = this._selectSemanticTagUncached(node);
+    SEMANTIC_TAG_CACHE.set(cacheKey, tag);
+    return tag;
+  }
+
+  private _selectSemanticTagUncached(node: ProcessedNode): string {
     // ============ 0. 基于节点名称的语义标签推断（v1.4.0 新增） ============
     const nodeNameLower = (node.name || '').toLowerCase();
 

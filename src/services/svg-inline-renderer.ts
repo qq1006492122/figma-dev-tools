@@ -15,6 +15,7 @@ import equal from 'fast-deep-equal';
 import { optimize, type Config as SvgoConfig } from 'svgo';
 
 import { sanitizeSvg } from '../utils/security.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
 import type { FigmaClient } from './figma-client.js';
 
 // ============ 类型定义 ============
@@ -99,6 +100,13 @@ const SVGO_CONFIG: SvgoConfig = {
 const SVG_CACHE_MAX_SIZE = 200;
 
 /**
+ * SVG 下载最大并发（P3-12 受控并发）：
+ * 图标密集页面可能有上百矢量节点，无界 Promise.all 会瞬时打开大量 socket，
+ * 触发连接耗尽或 Figma 429；6 路并发兼顾吞吐与限流安全。
+ */
+const SVG_DOWNLOAD_CONCURRENCY = 6;
+
+/**
  * SVG 内联渲染器
  *
  * 将 Figma 矢量节点导出为可内联的 SVG JSX/Vue 代码
@@ -138,8 +146,8 @@ export class SvgInlineRenderer {
     const idList = nodeIds.map((n) => n.nodeId);
     const { images: svgUrls } = await this._client.getImages(fileKey, idList, 'svg', opts.scale);
 
-    // 2. 并行下载和处理 SVG
-    const downloadPromises = nodeIds.map(async ({ nodeId, name }) => {
+    // 2. 受控并发下载和处理 SVG（P3-12：避免图标密集页面无界扇出耗尽 socket/触发 429）
+    await mapWithConcurrency(nodeIds, SVG_DOWNLOAD_CONCURRENCY, async ({ nodeId, name }) => {
       const url = svgUrls[nodeId];
       if (!url) {
         results.set(nodeId, null);
@@ -154,7 +162,6 @@ export class SvgInlineRenderer {
       }
     });
 
-    await Promise.all(downloadPromises);
     return results;
   }
 

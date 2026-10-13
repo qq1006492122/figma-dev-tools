@@ -28,6 +28,14 @@ import type { A11yReportEntry } from './services/a11y-enhancer.js';
 import { createAssetDownloader, AssetDownloader } from './services/asset-downloader.js';
 import { detectBundler, type BundlerKind } from './services/bundler-detector.js';
 import {
+  loadProjectComponentLibrary,
+  loadProjectLibraryHints,
+  resolveLibrary,
+  type ComponentLibraryChoice,
+  type DetectHooks,
+  type PackageJsonLike,
+} from './services/component-library/index.js';
+import {
   BrowserFallbackService,
   getBrowserFallbackService,
   type BrowserFallbackResult,
@@ -51,6 +59,7 @@ import {
   type FidelityVerifyResult,
 } from './services/fidelity-verify.js';
 import { createFigmaClient, type FigmaClient } from './services/figma-client.js';
+import { createTokenStore } from './services/token-store.js';
 import { createFileWriter } from './services/file-writer.js';
 import { serializeDtcgTokens } from './services/dtcg-token-formatter.js';
 import type { FlexFixEntry } from './services/flex-fixer.js';
@@ -67,9 +76,27 @@ import {
 } from './services/visual-approximation.js';
 import { createTokensExtractor } from './services/tokens-extractor.js';
 import { createVueGenerator } from './services/vue-generator.js';
+import { createSvelteGenerator, SVELTE_STYLE_FORMATS, type SvelteStyleFormat } from './services/svelte-generator.js';
+import type { ExplicitConditionInput } from './services/weapp-structure-inferrer.js';
+// v1.4.20 WBS-P1-2：Watch 模式（MCP 化、会话内存态、bypass 粗筛）
+import { WatchManager, WatchError, type WatchSession, type WatchFramework } from './services/watch/watch-manager.js';
+import { regenerateWatchSession, type GeneratedWatchFile } from './services/watch/watch-regenerate.js';
+// v1.4.20 WBS-P1-3：代码差异对比
+import {
+  compareCodes,
+  compareCodesNormalized,
+  pairCompareFiles,
+  readCompareFile,
+  CompareError,
+  type CompareInputFile,
+  type CompareSideFile,
+} from './services/compare/compare-code.js';
 // v1.4.19 T20：批量生成（页面区块拆分 + 多文件 + barrel + 依赖图）
 import { createBatchGenerator } from './services/batch-generator.js';
 import { selectBlocksByIds, splitPageIntoBlocks } from './services/block-splitter.js';
+// v1.4.20：微信小程序生成
+import { createWeappGenerator } from './services/weapp-generator.js';
+import { measureMainPackage } from './services/weapp-compat/bundle-size.js';
 import type {
   CodeGenResult,
   DesignTokens,
@@ -92,23 +119,38 @@ let figmaClient: FigmaClient | null = null;
 let figmaCache: ReturnType<typeof createFigmaCache> | null = null;
 let figmaClientTokenKey = '';
 
-function getFigmaClient(token?: string): FigmaClient {
-  const accessToken = token || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
-
-  if (!accessToken) {
-    throw new Error(
-      'Figma Access Token 未配置。请设置 FIGMA_ACCESS_TOKEN 环境变量或在调用时传入 token 参数。\n' +
-        '如需多 Token 自动轮换，可用英文逗号分隔 FIGMA_ACCESS_TOKENS。\n' +
-        '获取 Token: https://www.figma.com/developers/api#access-tokens',
-    );
+async function resolveRequestToken(tokenProfile?: string): Promise<string> {
+  if (tokenProfile) {
+    const profile = tokenProfile.trim();
+    const store = createTokenStore();
+    const storedToken = await store.getToken(profile);
+    if (!storedToken) {
+      throw new Error(
+        `Token profile '${profile}' 不存在或无法读取。请先通过 GUI/CLI 将凭据保存到安全 Token Store。`,
+      );
+    }
+    return storedToken;
   }
 
+  const envToken = process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
+  if (!envToken) {
+    throw new Error(
+      'Figma Token 未配置。请传入 tokenProfile（安全 Token Store 配置名），或设置 FIGMA_ACCESS_TOKEN 环境变量。' +
+        '\n如需多 Token 自动轮换，可用英文逗号分隔 FIGMA_ACCESS_TOKENS。' +
+        '\n获取 Token: https://www.figma.com/developers/api#access-tokens',
+    );
+  }
+  return envToken;
+}
+
+async function getFigmaClient(tokenProfile?: string): Promise<FigmaClient> {
+  const accessToken = await resolveRequestToken(tokenProfile);
   const fallbackTokens = (process.env.FIGMA_ACCESS_TOKENS ?? '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
   const tokens = Array.from(new Set([accessToken, ...fallbackTokens]));
-  const tokenKey = tokens.join('|');
+  const tokenKey = `${tokenProfile ?? 'env'}|${tokens.join('|')}`;
 
   if (!figmaClient || figmaClientTokenKey !== tokenKey) {
     if (!figmaCache) {
@@ -126,14 +168,13 @@ function getFigmaClient(token?: string): FigmaClient {
   figmaClient.clearLastWarning();
   return figmaClient;
 }
-
 /**
  * getFigmaClient 的安全版本：token 未配置时返回 null 而非抛出异常。
  * 仅用于 catch 块中附带请求统计，不应作为主要获取方式。
  */
-function getFigmaClientSafe(token?: string): FigmaClient | undefined {
+async function getFigmaClientSafe(tokenProfile?: string): Promise<FigmaClient | undefined> {
   try {
-    return getFigmaClient(token);
+    return await getFigmaClient(tokenProfile);
   } catch {
     return undefined;
   }
@@ -421,7 +462,7 @@ server.registerTool(
     inputSchema: z.object({
       fileKey: z.string().describe('Figma 文件 Key（从 figma_parse_url 获取）'),
       figmaUrl: z.string().optional().describe('Figma URL（如果提供则自动解析 fileKey）'),
-      accessToken: z.string().optional().describe('Figma Access Token（可选，优先使用环境变量）'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -430,7 +471,7 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, figmaUrl, accessToken }) => {
+  async ({ fileKey, figmaUrl, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) : fileKey;
       if (!key) {
@@ -440,7 +481,7 @@ server.registerTool(
         };
       }
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const file = await client.getFile(key, undefined, 1);
 
       const pages =
@@ -488,7 +529,7 @@ server.registerTool(
         structuredContent: result,
       };
     } catch (error) {
-      return buildToolErrorResponse('获取文件信息', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('获取文件信息', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -510,7 +551,7 @@ server.registerTool(
         .describe('颜色输出格式（推荐 oklch 用于 Tailwind v4）'),
       spacingUnit: z.enum(['px', 'rem']).default('px').describe('间距单位'),
       tokenPrefix: z.string().optional().describe('Token 名称前缀'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -519,7 +560,7 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, figmaUrl, nodeId, colorFormat, spacingUnit, tokenPrefix, accessToken }) => {
+  async ({ fileKey, figmaUrl, nodeId, colorFormat, spacingUnit, tokenPrefix, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) : fileKey;
       const nId = figmaUrl ? extractNodeId(figmaUrl) : nodeId;
@@ -531,7 +572,7 @@ server.registerTool(
         };
       }
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const extractor = createTokensExtractor(client, {
         colorFormat,
         spacingUnit,
@@ -582,7 +623,7 @@ server.registerTool(
         },
       };
     } catch (error) {
-      return buildToolErrorResponse('提取 Tokens', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('提取 Tokens', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -604,7 +645,7 @@ server.registerTool(
       styleFormat: LEGACY_STYLE_FORMAT_PARAM,
       includeChildren: z.boolean().default(true).describe('是否包含子元素'),
       skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能（Flex 修复、a11y 等）'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -622,7 +663,7 @@ server.registerTool(
     styleFormat,
     includeChildren,
     skipEnhancements,
-    accessToken,
+    tokenProfile,
   }) => {
     try {
       let key = fileKey;
@@ -650,7 +691,7 @@ server.registerTool(
       // v1.4.18（T7）：legacy 管线防御性校验（schema 已限三值，此处防程序化误调）
       assertStyleFormatSupported(styleFormat, STYLE_FORMATS_LEGACY_REACT);
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const generator = createCodeGenerator(client, {
         format: 'react',
         framework: 'react',
@@ -677,7 +718,7 @@ server.registerTool(
         structuredContent: component,
       };
     } catch (error) {
-      return buildToolErrorResponse('生成组件代码', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('生成组件代码', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -694,7 +735,7 @@ server.registerTool(
       figmaUrl: z.string().optional().describe('Figma URL'),
       format: z.enum(['png', 'jpg', 'svg']).default('png').describe('图片格式'),
       scale: z.number().min(1).max(4).default(2).describe('缩放比例（1-4）'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -703,7 +744,7 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, format, scale, accessToken }) => {
+  async ({ fileKey, nodeId, figmaUrl, format, scale, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       const nId = figmaUrl ? extractNodeId(figmaUrl) || nodeId : nodeId;
@@ -715,7 +756,7 @@ server.registerTool(
         };
       }
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const result = await client.getImages(key, [nId], format, scale);
 
       const imageUrl = result.images[nId];
@@ -748,7 +789,7 @@ server.registerTool(
         },
       };
     } catch (error) {
-      return buildToolErrorResponse('获取截图', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('获取截图', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -917,7 +958,7 @@ server.registerTool(
     title: '验证 Figma Access Token',
     description: '验证 Figma Personal Access Token 是否有效，在使用其他工具前可以先验证。',
     inputSchema: z.object({
-      accessToken: z.string().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 中的配置名；省略时使用环境变量/default'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -926,9 +967,9 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ accessToken }) => {
+  async ({ tokenProfile }) => {
     try {
-      const client = createFigmaClient({ accessToken });
+      const client = await getFigmaClient(tokenProfile);
       const isValid = await client.validateToken();
 
       return {
@@ -960,7 +1001,7 @@ server.registerTool(
       nodeId: z.string().optional().describe('节点 ID（不填则返回文件根信息）'),
       figmaUrl: z.string().optional().describe('Figma URL（自动解析 fileKey/nodeId）'),
       depth: z.number().min(1).max(3).default(1).describe('概览深度（默认1，最大3）'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -969,13 +1010,13 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, depth, accessToken }) => {
+  async ({ fileKey, nodeId, figmaUrl, depth, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       const nId = figmaUrl ? extractNodeId(figmaUrl) : nodeId;
       if (!key) return { content: [{ type: 'text', text: '请提供 fileKey 或 figmaUrl' }], isError: true };
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const ctxService = createDesignContextService(client);
       const metadata = await ctxService.getMetadata(key, nId, depth);
 
@@ -1018,7 +1059,7 @@ server.registerTool(
         structuredContent: metadata,
       };
     } catch (error) {
-      return buildToolErrorResponse('获取元数据', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('获取元数据', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -1035,7 +1076,7 @@ server.registerTool(
       nodeId: z.string().describe('节点 ID（必需）'),
       figmaUrl: z.string().optional().describe('Figma URL（自动解析 fileKey/nodeId）'),
       maxDepth: z.number().min(1).max(10).default(6).describe('最大节点树深度（默认6）'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -1044,13 +1085,13 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, maxDepth, accessToken }) => {
+  async ({ fileKey, nodeId, figmaUrl, maxDepth, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       const nId = figmaUrl ? extractNodeId(figmaUrl) || nodeId : nodeId;
       if (!key || !nId) return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId' }], isError: true };
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const ctxService = createDesignContextService(client);
       const context = await ctxService.getDesignContext(key, nId, maxDepth);
 
@@ -1095,7 +1136,7 @@ server.registerTool(
         structuredContent: context,
       };
     } catch (error) {
-      return buildToolErrorResponse('获取设计上下文', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('获取设计上下文', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -1109,6 +1150,17 @@ const BUNDLER_PARAM = z
   .enum(['auto', 'vite', 'webpack', 'nextjs', 'remix', 'none'])
   .default('auto')
   .describe('目标项目构建器：auto=自动检测（默认）；vite/webpack/nextjs/remix 显式指定；none=旧版 publicCdnUrl 行为');
+
+/**
+ * WBS-P2-12/13：组件库映射入参（zod 枚举冻结，与 registry 单一数据源对齐）。
+ * 框架错配（如 react 传 element-plus）在执行体 resolveLibrary 触网前显式报错。
+ */
+const COMPONENT_LIBRARY_PARAM = z
+  .enum(['auto', 'none', 'shadcn-ui', 'ant-design', 'element-plus', 'ant-design-vue'])
+  .optional()
+  .describe(
+    '组件库映射（可选；省略时读取 figma-dev.config.json 的 componentLibrary，再否则保持原生标签）：auto=按 package.json/components.json 真实依赖检测（无证据降级原生）；none=关闭；React 可选 shadcn-ui/ant-design；Vue 可选 element-plus/ant-design-vue',
+  );
 
 server.registerTool(
   'figma_download_assets',
@@ -1129,7 +1181,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       scale: z.number().min(1).max(4).default(2).describe('导出倍率（默认2x）'),
       svgFormat: z.enum(['svg', 'png']).default('svg').describe('矢量图形导出格式'),
       optimizeSvg: z.boolean().default(true).describe('是否使用 SVGO 优化 SVG（移除冗余属性、压缩体积），默认 true'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: false,
@@ -1138,7 +1190,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       openWorldHint: false,
     },
   },
-  async ({ fileKey, sceneName, assetNodeIds, figmaUrl, projectRoot, bundler, scale, svgFormat, optimizeSvg, accessToken }) => {
+  async ({ fileKey, sceneName, assetNodeIds, figmaUrl, projectRoot, bundler, scale, svgFormat, optimizeSvg, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       if (!key) return { content: [{ type: 'text', text: '请提供 fileKey 或 figmaUrl' }], isError: true };
@@ -1162,7 +1214,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
       const effectiveBundler: BundlerKind =
         bundler === 'auto' ? (await detectBundler(root)).kind : bundler;
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
 
       const ctxService = createDesignContextService(client);
       const assets: NonNullable<ProcessedNode['asset']>[] = [];
@@ -1215,7 +1267,7 @@ v1.1.5 新增：自动使用 SVGO 优化 SVG，移除冗余属性。
         structuredContent: { results, projectRoot: root, sceneName, bundler: effectiveBundler, skippedNodeIds },
       };
     } catch (error) {
-      return buildToolErrorResponse('下载资源', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('下载资源', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -1322,7 +1374,7 @@ server.registerTool(
     inputSchema: z.object({
       fileKey: z.string().describe('Figma 文件 Key'),
       figmaUrl: z.string().optional().describe('Figma URL'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -1331,12 +1383,12 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, figmaUrl, accessToken }) => {
+  async ({ fileKey, figmaUrl, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       if (!key) return { content: [{ type: 'text', text: '请提供 fileKey' }], isError: true };
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const ctxService = createDesignContextService(client);
       const { components, componentSets } = await ctxService.listComponents(key);
 
@@ -1361,7 +1413,7 @@ server.registerTool(
         structuredContent: { components, componentSets },
       };
     } catch (error) {
-      return buildToolErrorResponse('获取组件列表', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('获取组件列表', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -1380,7 +1432,7 @@ server.registerTool(
       nodeId: z.string().optional().describe('节点 ID（可选，默认检查整个文件或指定节点）'),
       figmaUrl: z.string().optional().describe('Figma URL（如果提供则自动解析 fileKey 和 nodeId）'),
       maxDepth: z.number().min(1).max(30).default(15).describe('最大检查深度（默认15）'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -1389,7 +1441,7 @@ server.registerTool(
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, maxDepth, accessToken }) => {
+  async ({ fileKey, nodeId, figmaUrl, maxDepth, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       const nId = figmaUrl ? extractNodeId(figmaUrl) || nodeId : nodeId;
@@ -1397,7 +1449,7 @@ server.registerTool(
         return { content: [{ type: 'text', text: '请提供 fileKey 或有效的 figmaUrl' }], isError: true };
       }
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const ctxService = createDesignContextService(client);
       const linter = createDesignLinter();
 
@@ -1435,7 +1487,7 @@ server.registerTool(
         },
       };
     } catch (error) {
-      return buildToolErrorResponse('代码还原质量预检', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('代码还原质量预检', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -1475,6 +1527,7 @@ v1.2.0 新增强化功能：
       maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）'),
       framework: z.enum(['react', 'vue']).default('react').describe('目标框架：react (默认) | vue (v1.4.0新增)'),
       styleFormat: STYLE_FORMAT_PARAM,
+      componentLibrary: COMPONENT_LIBRARY_PARAM,
       unocssAttributify: z
         .boolean()
         .default(false)
@@ -1482,7 +1535,7 @@ v1.2.0 新增强化功能：
       skipEnhancements: z.boolean().default(false).describe('是否跳过 v1.2.0 增强功能'),
       inference: INFERENCE_PARAM,
       skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -1534,6 +1587,7 @@ Dedicated Vue entry of figma_generate_jsx: produces a .vue SFC with the full enh
           'Vue 大版本：3（默认，<script setup>）| 2（Options API）/ Vue major version: 3 (default, script setup) | 2 (Options API)',
         ),
       styleFormat: STYLE_FORMAT_PARAM,
+      componentLibrary: COMPONENT_LIBRARY_PARAM,
       unocssAttributify: z
         .boolean()
         .default(false)
@@ -1543,7 +1597,7 @@ Dedicated Vue entry of figma_generate_jsx: produces a .vue SFC with the full enh
       skipEnhancements: z.boolean().default(false).describe('是否跳过增强功能 / Skip enhancement pipeline'),
       inference: INFERENCE_PARAM,
       skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示 / Skip design lint hints'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -1559,6 +1613,89 @@ Dedicated Vue entry of figma_generate_jsx: produces a .vue SFC with the full enh
     }),
 );
 
+// ============= v1.4.20 WBS-P1-1：Svelte 一级工具（工具 24） =============
+
+/** Svelte 工具样式入参：仅三组合（zod 枚举冻结，非法值触网前拒绝） */
+const SVELTE_STYLE_FORMAT_PARAM = z
+  .enum([...SVELTE_STYLE_FORMATS] as [SvelteStyleFormat, ...SvelteStyleFormat[]])
+  .default('tailwind')
+  .describe(
+    'Svelte 样式方案：tailwind（默认）/ unocss / css-modules（css-modules 落地为 Svelte scoped <style>，不承诺 CSS Modules hash/composes 语义）；其余方案在触网前报错',
+  );
+
+server.registerTool(
+  'figma_generate_svelte',
+  {
+    title: '一键生成 Svelte 4 组件代码（v1.4.20 新增）/ Generate a Svelte 4 component',
+    description: `生成 .svelte 单文件组件（默认 Svelte 4 口径）：<script lang="ts"> + export let props + createEventDispatcher + on:click/on:input/on:submit 事件；模板支持 {#if}/{:else if}/{:else} 条件块、{#each list as item, index (item.id)} 列表（重复组自动推断，含占位数据）。
+Generates a .svelte SFC in Svelte 4 syntax: export let props, createEventDispatcher, on:* events, {#if} conditionals and keyed {#each} blocks with placeholder data.
+- 样式方案仅支持 tailwind / unocss / css-modules：css-modules 实际输出 Svelte 编译器 scoped <style>，工具描述与产物中均明确「不承诺 CSS Modules hash/composes 语义」，composes 会被静态展开。
+- Style options are limited to tailwind / unocss / css-modules; unsupported formats (styled/emotion/less/sass/vanilla-extract/panda/inline-styles) fail fast before any network call.
+- Svelte 5 runes（$props/$state）仅在产物注释中给出迁移建议，不作为默认输出。
+输出包含：Svelte SFC 代码、增强报告、需下载资源、@theme 扩展 token、UnoCSS 配置建议（如适用）。`,
+    inputSchema: z.object({
+      fileKey: z.string().describe('Figma 文件 Key（URL 中 /design/<key>/ 部分）/ Figma file key'),
+      nodeId: z.string().describe('目标节点 ID（URL 中 node-id= 参数）/ Target node id'),
+      figmaUrl: z
+        .string()
+        .optional()
+        .describe('Figma URL（可替代 fileKey+nodeId）/ Figma URL (alternative to fileKey+nodeId)'),
+      componentName: z
+        .string()
+        .optional()
+        .describe('生成的组件名（默认从节点名推断）/ Component name (inferred from node name by default)'),
+      sceneName: z.string().optional().describe('场景名（用于资源子路径组织）/ Scene name for asset sub-path'),
+      projectRoot: z
+        .string()
+        .optional()
+        .describe('项目根目录绝对路径（bundler=auto 时用于检测构建器）/ Project root for bundler auto-detection'),
+      bundler: BUNDLER_PARAM,
+      maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）/ Max traversal depth (default 15)'),
+      typescript: z
+        .boolean()
+        .default(true)
+        .describe('输出 <script lang="ts">（默认 true）；false 时输出纯 JS / Emit <script lang="ts"> by default; false for plain JS'),
+      styleFormat: SVELTE_STYLE_FORMAT_PARAM,
+      unocssAttributify: z
+        .boolean()
+        .default(false)
+        .describe('UnoCSS attributify 模式（仅 styleFormat=unocss 生效，默认 false）/ UnoCSS attributify mode (unocss only)'),
+      skipEnhancements: z.boolean().default(false).describe('是否跳过增强功能 / Skip enhancement pipeline'),
+      inference: INFERENCE_PARAM,
+      conditions: z
+        .array(
+          z.object({
+            nodeId: z.string().describe('目标节点 id'),
+            groupId: z.string().optional().describe('同父兄弟链分组 id（if/elif/else）'),
+            expression: z.string().optional().describe('条件表达式（isElse 时省略）'),
+            isElse: z.boolean().optional().describe('标记为链尾 else 分支'),
+            directive: z.enum(['wx:if', 'hidden']).optional().describe('wx:if（默认，{#if} 块）| hidden（hidden 属性）'),
+          }),
+        )
+        .optional()
+        .describe(
+          '显式条件绑定（同父兄弟形成 {#if}/{:else if}/{:else} 链；directive=hidden 输出 hidden 属性）/ Explicit condition bindings',
+        ),
+      skipLintCheck: z.boolean().default(false).describe('是否跳过设计规范检查提示 / Skip design lint hints'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params) =>
+    executeGenerateCodeTool({
+      ...params,
+      framework: 'svelte',
+      vueVersion: 3,
+      // Svelte 工具不暴露组件库映射（无登记库），固定关闭
+      componentLibrary: 'none',
+    }),
+);
+
 // ============= v1.4.19 T20：整页批量生成（工具 22） =============
 
 server.registerTool(
@@ -1568,7 +1705,7 @@ server.registerTool(
     description: `把一个页面/大 Frame 自动拆分为语义区块（header / hero / features / section / sticky / footer），逐区块复用与 figma_generate_jsx 完全相同的增强管线生成独立组件文件，并产出 index.ts barrel 与文件依赖图。
 Auto-splits a page/frame into semantic blocks (header, hero, features, sections, sticky bars, footer), generates one component file per block with the same enhancement pipeline as figma_generate_jsx, and emits an index.ts barrel plus a dependency graph.
 - 省略 nodeIds：自动拆分 nodeId 指向页面/Frame 的顶层区块；提供 nodeIds 时仅生成指定区块（顺序按树位置归一化，与整页拆分同节点结果一致）。
-- 框架与样式透传：framework=react|vue（vueVersion 2|3），styleFormat 支持全部 11 方案，React 专属方案在 Vue 下触网前明确报错。
+- 框架与样式透传：framework=react|vue|svelte（vueVersion 2|3；Svelte 固定 Svelte 4 口径），styleFormat 支持全部 11 方案，框架不支持的方案在触网前明确报错（Svelte 仅 tailwind/unocss/css-modules）。
 - 输出 Output：区块清单、文件树、依赖图（barrel→主文件→旁路样式）、每个文件的完整代码、聚合待下载资源。
 - MCP 不写磁盘；CLI figma-dev batch 可直接落盘为多文件目录。`,
     inputSchema: z.object({
@@ -1597,16 +1734,20 @@ Auto-splits a page/frame into semantic blocks (header, hero, features, sections,
         .describe('项目根目录绝对路径（bundler=auto 检测用）/ Project root for bundler auto-detection'),
       bundler: BUNDLER_PARAM,
       maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）/ Max traversal depth'),
-      framework: z.enum(['react', 'vue']).default('react').describe('目标框架：react (默认) | vue'),
+      framework: z
+        .enum(['react', 'vue', 'svelte'])
+        .default('react')
+        .describe('目标框架：react (默认) | vue | svelte（Svelte 4；样式仅 tailwind/unocss/css-modules）'),
       vueVersion: z.union([z.literal(2), z.literal(3)]).default(3).describe('Vue 大版本（仅 framework=vue）：3 默认 | 2'),
       styleFormat: STYLE_FORMAT_PARAM,
+      componentLibrary: COMPONENT_LIBRARY_PARAM,
       unocssAttributify: z
         .boolean()
         .default(false)
         .describe('UnoCSS attributify 模式（仅 unocss 生效，默认 false）'),
       skipEnhancements: z.boolean().default(false).describe('是否跳过增强管线 / Skip enhancement pipeline'),
       inference: INFERENCE_PARAM,
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -1635,9 +1776,11 @@ interface BatchGenerateToolInput {
   styleFormat: StyleFormat;
   unocssAttributify: boolean;
   skipEnhancements: boolean;
+  /** WBS-P2-12/13：组件库选择（省略时执行体读 figma-dev.config.json 兜底；svelte 框架由生成层忽略） */
+  componentLibrary?: ComponentLibraryChoice;
   /** v1.4.19 T21：智能推断分项开关（缺省全开） */
   inference?: SmartInferenceSwitches;
-  accessToken?: string;
+  tokenProfile?: string;
 }
 
 /**
@@ -1662,7 +1805,8 @@ async function executeBatchGenerateTool(input: BatchGenerateToolInput): Promise<
     unocssAttributify,
     skipEnhancements,
     inference,
-    accessToken,
+    tokenProfile,
+    componentLibrary,
   } = input;
   const i18n = getI18n();
   try {
@@ -1682,7 +1826,7 @@ async function executeBatchGenerateTool(input: BatchGenerateToolInput): Promise<
       bundler === 'auto' ? (await detectBundler(projectRoot ?? process.cwd())).kind : bundler;
     assertStyleFormatSupported(styleFormat, STYLE_FORMATS_NEW_PIPELINE, undefined, framework);
 
-    const client = getFigmaClient(accessToken);
+    const client = await getFigmaClient(tokenProfile);
     const ctxService = createDesignContextService(client);
     const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
 
@@ -1695,6 +1839,18 @@ async function executeBatchGenerateTool(input: BatchGenerateToolInput): Promise<
 
     // 阶段二：逐区块复用单组件生成管线并汇总多文件产物
     const unocssMode: 'wind' | 'attributify' = unocssAttributify ? 'attributify' : 'wind';
+    // WBS-P2-12/13 + P3-32：显式参数 > figma-dev.config.json（GUI 向导）> none；svelte 不消费
+    let resolvedBatchComponentLibrary: ComponentLibraryChoice | undefined = componentLibrary;
+    if (resolvedBatchComponentLibrary === undefined) {
+      const fromConfig = await loadProjectComponentLibrary(projectRoot ?? process.cwd());
+      if (fromConfig && fromConfig !== 'none') resolvedBatchComponentLibrary = fromConfig;
+    }
+    const useComponentLibrary: ComponentLibraryChoice | undefined =
+      framework === 'svelte' ? 'none' : resolvedBatchComponentLibrary;
+    const uiHints =
+      useComponentLibrary && useComponentLibrary !== 'none'
+        ? await loadProjectLibraryHints(projectRoot ?? process.cwd())
+        : null;
     const batchGenerator = createBatchGenerator(client);
     const result = await batchGenerator.generate(blocks, ctx, {
       framework,
@@ -1705,6 +1861,13 @@ async function executeBatchGenerateTool(input: BatchGenerateToolInput): Promise<
       skipEnhancements,
       inference,
       componentNamePrefix,
+      ...(uiHints && useComponentLibrary !== 'none'
+        ? {
+            componentLibrary: useComponentLibrary,
+            projectPackageJson: uiHints.pkg,
+            ...(framework === 'react' ? { uiComponentExists: uiHints.uiComponentExists } : {}),
+          }
+        : {}),
     });
 
     const lines: string[] = [];
@@ -1713,7 +1876,9 @@ async function executeBatchGenerateTool(input: BatchGenerateToolInput): Promise<
         ? vueVersion === 2
           ? 'Vue 2 SFC (Options API)'
           : 'Vue 3 SFC (<script setup>)'
-        : 'React TSX';
+        : framework === 'svelte'
+          ? 'Svelte 4 SFC'
+          : 'React TSX';
     lines.push(`# ${i18n.t('batchGenerate.title') as string} - ${frameworkLabel} (${styleFormat})\n`);
     lines.push(`- **数据来源**: ${ctx.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}`);
     lines.push(`- **区块数量**: ${result.blocks.length}`);
@@ -1790,7 +1955,7 @@ async function executeBatchGenerateTool(input: BatchGenerateToolInput): Promise<
     return buildToolErrorResponse(
       framework === 'vue' ? '批量生成 Vue 组件' : '批量生成页面组件',
       error,
-      getFigmaClientSafe(accessToken),
+      await getFigmaClientSafe(tokenProfile),
     );
   }
 }
@@ -1813,10 +1978,16 @@ interface GenerateCodeToolInput {
   styleFormat: StyleFormat;
   unocssAttributify: boolean;
   skipEnhancements: boolean;
+  /** WBS-P2-12/13：组件库选择（可选；缺省时读 figma-dev.config.json，再否则 none） */
+  componentLibrary?: ComponentLibraryChoice;
+  /** WBS-P1-1：是否输出 TS（仅 framework=svelte 生效，默认 true；Vue/React 固定 TS） */
+  typescript?: boolean;
+  /** WBS-P1-1：显式条件绑定（仅 framework=svelte 消费，透传推断器） */
+  conditions?: ExplicitConditionInput[];
   /** v1.4.19 T21：智能推断分项开关（缺省全开） */
   inference?: SmartInferenceSwitches;
   skipLintCheck: boolean;
-  accessToken?: string;
+  tokenProfile?: string;
 }
 
 /**
@@ -1840,9 +2011,11 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
     styleFormat,
     unocssAttributify,
     skipEnhancements,
+    typescript,
     inference,
     skipLintCheck,
-    accessToken,
+    tokenProfile,
+    componentLibrary,
   } = input;
   try {
     let resolvedKey = fileKey;
@@ -1864,10 +2037,32 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
     // v1.4.19 T14–T17：追加框架矩阵（styled/emotion/vanilla-extract/panda 在 vue 下触网前拒绝）
     assertStyleFormatSupported(styleFormat, STYLE_FORMATS_NEW_PIPELINE, undefined, framework);
 
-    const client = getFigmaClient(accessToken);
+    // WBS-P2-12/13 + P3-32：组件库选择优先级为 显式参数 > figma-dev.config.json（GUI 向导）> none。
+    // 显式非法值/跨框架选择由 resolveLibrary 在触网前抛出；配置文件非法值静默忽略。
+    const projectRootDir = projectRoot ?? process.cwd();
+    let effectiveComponentLibrary = componentLibrary;
+    if (effectiveComponentLibrary === undefined) {
+      const fromConfig = await loadProjectComponentLibrary(projectRootDir);
+      if (fromConfig && fromConfig !== 'none') effectiveComponentLibrary = fromConfig;
+    }
+    const uiHints =
+      effectiveComponentLibrary && effectiveComponentLibrary !== 'none'
+        ? await loadProjectLibraryHints(projectRootDir)
+        : null;
+    const uiOptions =
+      effectiveComponentLibrary && effectiveComponentLibrary !== 'none'
+        ? {
+            componentLibrary: effectiveComponentLibrary,
+            projectPackageJson: uiHints?.pkg ?? null,
+            ...(framework === 'react' ? { uiComponentExists: uiHints?.uiComponentExists } : {}),
+          }
+        : null;
+
+    const client = await getFigmaClient(tokenProfile);
     const ctxService = createDesignContextService(client);
     const codeGen = createCodeGenerator(client);
     const vueGen = createVueGenerator(client);
+    const svelteGen = createSvelteGenerator(client);
     const componentMapper = createComponentMapper();
 
     const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
@@ -1902,8 +2097,26 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
         inference,
         // v1.4.19 T18：Vue 一级工具可选 Vue2 Options API；jsx 工具固定补 3
         vueVersion,
+        ...(uiOptions
+          ? { componentLibrary: uiOptions.componentLibrary, projectPackageJson: uiOptions.projectPackageJson }
+          : {}),
       });
       result = vueResult as unknown as CodeGenResult;
+    } else if (framework === 'svelte') {
+      const svelteResult = await svelteGen.generateFromContext(ctx, {
+        componentName,
+        sceneName,
+        usePublicCdn: true,
+        bundler: effectiveBundler,
+        // P1-12：矩阵闸门已保证仅 tailwind/unocss/css-modules
+        styleFormat: styleFormat as 'tailwind' | 'unocss' | 'css-modules',
+        unocssMode,
+        skipEnhancements,
+        inference,
+        conditions: input.conditions,
+        typescript: typescript !== false,
+      });
+      result = svelteResult as unknown as CodeGenResult;
     } else {
       result = (await codeGen.generateJsxFromContext(ctx, {
         componentName,
@@ -1914,6 +2127,13 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
         unocssMode,
         skipEnhancements,
         inference,
+        ...(uiOptions
+          ? {
+              componentLibrary: uiOptions.componentLibrary,
+              projectPackageJson: uiOptions.projectPackageJson,
+              uiComponentExists: uiOptions.uiComponentExists,
+            }
+          : {}),
       })) as unknown as CodeGenResult;
     }
 
@@ -1932,7 +2152,10 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
         ? vueVersion === 2
           ? 'Vue 2 SFC (Options API)'
           : 'Vue 3 SFC (<script setup>)'
-        : 'React TSX';
+        : framework === 'svelte'
+          ? 'Svelte 4 SFC'
+          : 'React TSX';
+    const codeFence = framework === 'vue' ? 'vue' : framework === 'svelte' ? 'svelte' : 'tsx';
     lines.push(`# ${result.componentName} - ${frameworkLabel} 代码 (${styleFormat})\n`);
     lines.push(`- **数据来源**: ${ctx.dataSource === 'stale-cache' ? '陈旧缓存（可能非最新）' : '实时请求'}\n`);
 
@@ -2046,7 +2269,7 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
           lines.push('');
           lines.push(structure.mockCode);
           lines.push('```');
-          lines.push(framework === 'vue' ? '```vue' : '```tsx');
+          lines.push(`\`\`\`${codeFence}`);
           lines.push(structure.renderHint);
           lines.push('```\n');
         });
@@ -2067,7 +2290,7 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
       }
     }
 
-    lines.push(framework === 'vue' ? '```vue' : '```tsx');
+    lines.push(`\`\`\`${codeFence}`);
     lines.push(result.code);
     lines.push('```\n');
 
@@ -2184,8 +2407,330 @@ async function executeGenerateCodeTool(input: GenerateCodeToolInput): Promise<Ca
     return buildToolErrorResponse(
       framework === 'vue' ? '生成 Vue 组件' : '生成 JSX',
       error,
-      getFigmaClientSafe(accessToken),
+      await getFigmaClientSafe(tokenProfile),
     );
+  }
+}
+
+// ============================================================
+// v1.4.20 WBS-P1-2：Watch 三件套（会话仅存活于本 MCP 进程，决策见 ROADMAP P1-2）
+// ============================================================
+
+/** stdio 单客户端标识（一个 MCP 进程服务一个编辑器连接） */
+const WATCH_CLIENT_ID = 'mcp-stdio';
+/** 会话启动时绑定的 FigmaClient（粗筛/再生成复用，避免重复解析 token） */
+const watchClients = new Map<string, FigmaClient>();
+/** write=false 时最近一次生成产物（供 status 预览，不落盘） */
+const watchLastOutput = new Map<string, GeneratedWatchFile[]>();
+
+const watchManager = new WatchManager({
+  onRegenerate: async (session) => {
+    const client = watchClients.get(session.sessionId);
+    if (!client) return;
+    try {
+      const result = await regenerateWatchSession(session, client);
+      watchLastOutput.set(session.sessionId, result.files);
+      watchManager.recordChange(session.sessionId, WATCH_CLIENT_ID);
+    } catch (error) {
+      // 再生成失败不杀轮询循环：记录到会话错误，下次粗筛继续
+      watchManager.markSessionError(session.sessionId, WATCH_CLIENT_ID, String(error));
+    }
+  },
+});
+// WBS-P1-25：进程退出即清理全部会话与定时器（会话不做磁盘持久化）
+process.once('SIGTERM', () => watchManager.disposeAll());
+process.once('SIGINT', () => watchManager.disposeAll());
+
+function watchErrorText(code: WatchErrorCode): string {
+  const i18n = getI18n();
+  const key = code.replace(/^FDT-WATCH-/, '').toLowerCase() as
+    | 'missing-output'
+    | 'output-without-write'
+    | 'too-many-sessions'
+    | 'framework-unavailable'
+    | 'session-not-found';
+  return (i18n.t(`watch.errors.${key}`) as string) || code;
+}
+
+type WatchErrorCode =
+  | 'FDT-WATCH-MISSING-OUTPUT'
+  | 'FDT-WATCH-OUTPUT-WITHOUT-WRITE'
+  | 'FDT-WATCH-TOO-MANY-SESSIONS'
+  | 'FDT-WATCH-FRAMEWORK-UNAVAILABLE'
+  | 'FDT-WATCH-SESSION-NOT-FOUND';
+
+server.registerTool(
+  'figma_watch_start',
+  {
+    title: '启动设计稿 Watch 会话（粗筛变更→自动重新生成，v1.4.20 新增）',
+    description: `按固定间隔（默认 5s，≈720 req/h）以 cachePolicy=bypass 粗筛文件 lastModified/version；确认变更后才拉节点树并按框架重新生成。
+- 会话仅存在于当前 MCP 进程内存（最多 5 个），编辑器/MCP 重启后需重新 start；同 fileKey+nodeId+framework 重复 start 幂等返回既有 sessionId。
+- write 默认 false：只在内存返回最近产物，不写磁盘；write=true 必须传 outputDir（落盘前自动备份到 .figma-dev-backup/ 并保留 figma-dev:preserve 用户区块）。
+- 命中 429 指数退避（10s 起、×2、封顶 2min）；框架支持 react/vue/svelte/weapp。`,
+    inputSchema: z.object({
+      fileKey: z.string().min(1).describe('Figma 文件 Key'),
+      nodeId: z.string().min(1).describe('目标节点 ID'),
+      figmaUrl: z.string().optional().describe('Figma URL（可替代 fileKey+nodeId）'),
+      framework: z.enum(['react', 'vue', 'svelte', 'weapp']).describe('目标框架'),
+      styleFormat: z.string().optional().describe('样式方案（按框架校验，默认 tailwind）'),
+      vueVersion: z.union([z.literal(2), z.literal(3)]).optional().describe('仅 framework=vue'),
+      pollIntervalMs: z.number().int().min(3000).max(60000).default(5000).describe('粗筛间隔 ms（3000~60000，默认 5000）'),
+      write: z.boolean().default(false).describe('是否落盘（默认 false 只返回产物；true 时 outputDir 必填）'),
+      outputDir: z.string().optional().describe('write=true 时的输出根目录（相对/越权路径拒绝）'),
+      maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大深度（默认 15）'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
+    }).superRefine((v, ctx) => {
+      if (v.write && !v.outputDir) ctx.addIssue({ code: 'custom', message: 'FDT-WATCH-MISSING-OUTPUT' });
+      if (!v.write && v.outputDir) ctx.addIssue({ code: 'custom', message: 'FDT-WATCH-OUTPUT-WITHOUT-WRITE' });
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  async (params) => {
+    try {
+      let resolvedKey = params.fileKey;
+      let resolvedNode = params.nodeId;
+      if (params.figmaUrl) {
+        const parsed = parseFigmaUrl(params.figmaUrl);
+        if (parsed?.fileKey) resolvedKey = parsed.fileKey;
+        if (parsed?.nodeId) resolvedNode = parsed.nodeId;
+      }
+      const client = await getFigmaClient(params.tokenProfile);
+      const { session, existing } = watchManager.start(
+        {
+          fileKey: resolvedKey,
+          nodeId: resolvedNode,
+          framework: params.framework,
+          clientId: WATCH_CLIENT_ID,
+          pollIntervalMs: params.pollIntervalMs,
+          write: params.write,
+          outputDir: params.outputDir,
+          styleFormat: params.styleFormat,
+          vueVersion: params.vueVersion,
+        },
+        client,
+      );
+      watchClients.set(session.sessionId, client);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: [
+              `# Watch ${existing ? '会话已存在（幂等返回）' : '已启动'}：${session.sessionId}`,
+              `- 框架：${session.framework} / 间隔：${session.pollIntervalMs}ms / write：${session.write}`,
+              `- 节点：${resolvedKey} / ${resolvedNode}`,
+              `- ${getI18n().t('watch.started') as string}`,
+            ].join('\n'),
+          },
+        ],
+        structuredContent: { ...session },
+      };
+    } catch (error) {
+      if (error instanceof WatchError) {
+        return { content: [{ type: 'text', text: watchErrorText(error.code) }], isError: true };
+      }
+      return buildToolErrorResponse('启动 Watch', error, await getFigmaClientSafe(params.tokenProfile));
+    }
+  },
+);
+
+server.registerTool(
+  'figma_watch_stop',
+  {
+    title: '停止 Watch 会话（幂等，v1.4.20 新增）',
+    description: '停止指定 sessionId 的 watch 并清理轮询定时器。会话不存在或已停止均返回 stopped（不作为错误）。',
+    inputSchema: z.object({ sessionId: z.string().min(1) }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  async ({ sessionId }) => {
+    const session = watchManager.stop(sessionId, WATCH_CLIENT_ID);
+    watchClients.delete(sessionId);
+    watchLastOutput.delete(sessionId);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `${getI18n().t('watch.stopped') as string}\n- sessionId: ${sessionId}\n- state: stopped${
+            session ? `（变更 ${session.changeCount} 次）` : ''
+          }`,
+        },
+      ],
+      structuredContent: { sessionId, state: 'stopped' },
+    };
+  },
+);
+
+server.registerTool(
+  'figma_watch_status',
+  {
+    title: '查询 Watch 会话状态（v1.4.20 新增）',
+    description: '省略 sessionId 列出当前客户端全部会话；传未知 sessionId 返回 FDT-WATCH-SESSION-NOT-FOUND。',
+    inputSchema: z.object({ sessionId: z.string().optional() }),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  async ({ sessionId }) => {
+    try {
+      const sessions = watchManager.status(sessionId, WATCH_CLIENT_ID);
+      const i18n = getI18n();
+      if (sessions.length === 0) {
+        return {
+          content: [{ type: 'text', text: i18n.t('watch.none') as string }],
+          structuredContent: { sessions: [] },
+        };
+      }
+      const lines = [`# Watch 会话（${sessions.length}）`];
+      for (const s of sessions) {
+        lines.push(
+          `- \`${s.sessionId}\` [${s.state}] ${s.framework} ${s.fileKey}/${s.nodeId} · 变更 ${s.changeCount} 次 · ${s.write ? `落盘 ${s.outputDir}` : '内存'}`,
+        );
+      }
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: {
+          sessions: sessions.map((s) => ({ ...s, lastGeneratedFiles: watchLastOutput.get(s.sessionId)?.map((f) => f.path) })),
+        },
+      };
+    } catch (error) {
+      if (error instanceof WatchError) {
+        return { content: [{ type: 'text', text: watchErrorText(error.code) }], isError: true };
+      }
+      throw error;
+    }
+  },
+);
+
+// ============================================================
+// v1.4.20 WBS-P1-3：代码差异对比
+// ============================================================
+
+server.registerTool(
+  'figma_compare_code',
+  {
+    title: '对比现状代码与 Figma 最新生成结果（unified diff，v1.4.20 新增）',
+    description: `现状侧三选一：currentCode（单文件文本）/ currentFilePath（项目内单文件，需 projectRoot）/ currentFiles（多产物，如小程序四件套，最多 8 个）。
+生成侧由 figmaUrl 或 fileKey+nodeId 定位，按 framework 实时生成；对比前默认 Prettier 归一化消除格式噪音（归一化失败自动按原文对比）。
+安全：路径越权拒绝（FDT-COMPARE-PATH-TRAVERSAL）、总输入 512KB 上限、二进制文件拒绝；返回文件级状态（added/removed/changed/unchanged）+ unified diff + 行级 stats。`,
+    inputSchema: z.object({
+      framework: z.enum(['react', 'vue', 'svelte', 'weapp']).default('react').describe('生成侧框架（默认 react）'),
+      fileKey: z.string().optional(),
+      nodeId: z.string().optional(),
+      figmaUrl: z.string().optional().describe('Figma URL（可替代 fileKey+nodeId）'),
+      componentName: z.string().optional().describe('生成组件名（用于匹配产物文件名）'),
+      styleFormat: z.string().optional().describe('样式方案（默认 tailwind）'),
+      vueVersion: z.union([z.literal(2), z.literal(3)]).optional(),
+      projectRoot: z.string().optional().describe('currentFilePath/currentFiles 相对读取的项目根（默认 cwd）'),
+      currentCode: z.string().optional().describe('现状侧：单文件文本'),
+      currentFileExt: z.string().optional().describe('currentCode 的扩展名（如 tsx/vue/svelte，默认按框架推断）'),
+      currentFilePath: z.string().optional().describe('现状侧：项目内单文件相对路径'),
+      currentFiles: z
+        .array(z.object({ path: z.string().describe('相对 projectRoot 的路径'), code: z.string().optional().describe('省略则从磁盘读取') }))
+        .max(8)
+        .optional()
+        .describe('现状侧：多产物（weapp 建议此项）'),
+      normalize: z.boolean().default(true).describe('对比前 Prettier 归一化（默认 true）'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
+    }),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  async (params) => {
+    try {
+      const i18n = getI18n();
+      // 1) 现状侧组装
+      const root = params.projectRoot ?? process.cwd();
+      const currentFiles: CompareSideFile[] = [];
+      if (params.currentCode !== undefined) {
+        const ext = params.currentFileExt ?? defaultExt(params.framework);
+        currentFiles.push({ path: `current.${ext}`, content: params.currentCode });
+      } else if (params.currentFilePath) {
+        const { content } = readCompareFile(root, params.currentFilePath);
+        currentFiles.push({ path: params.currentFilePath, content });
+      } else if (params.currentFiles) {
+        for (const f of params.currentFiles) {
+          const content = f.code ?? readCompareFile(root, f.path).content;
+          currentFiles.push({ path: f.path, content });
+        }
+      } else {
+        return { content: [{ type: 'text', text: i18n.t('compare.errors.missing-current') as string }], isError: true };
+      }
+
+      // 2) 生成侧（复用 watch 再生成器的合成会话，不落盘）
+      let resolvedKey = params.fileKey;
+      let resolvedNode = params.nodeId;
+      if (params.figmaUrl) {
+        const parsed = parseFigmaUrl(params.figmaUrl);
+        if (parsed?.fileKey) resolvedKey = parsed.fileKey;
+        if (parsed?.nodeId) resolvedNode = parsed.nodeId;
+      }
+      if (!resolvedKey || !resolvedNode) {
+        return { content: [{ type: 'text', text: '请提供 figmaUrl 或 fileKey+nodeId 定位 Figma 设计稿' }], isError: true };
+      }
+      const client = await getFigmaClient(params.tokenProfile);
+      const syntheticSession: WatchSession = {
+        sessionId: 'compare',
+        clientId: 'compare',
+        fileKey: resolvedKey,
+        nodeId: resolvedNode,
+        framework: params.framework,
+        state: 'running',
+        pollIntervalMs: 5000,
+        write: false,
+        changeCount: 0,
+        startedAt: Date.now(),
+        styleFormat: params.styleFormat,
+        vueVersion: params.vueVersion,
+        // R1 QA：componentName 真正生效——决定生成侧文件名，便于与现状文件配对
+        componentName: params.componentName || undefined,
+      };
+      const generated = await regenerateWatchSession(syntheticSession, client);
+
+      // 3) 配对：basename → 路径后缀 → 同扩展名唯一（current.tsx vs Card.tsx、weapp 四件套）
+      const paired: CompareInputFile[] = pairCompareFiles(
+        currentFiles,
+        generated.files.map((f) => ({ path: f.path, content: f.content })),
+      );
+
+      const result = params.normalize === false ? compareCodes(paired) : await compareCodesNormalized(paired);
+
+      const lines: string[] = [
+        `# 代码差异对比（${params.framework}，归一化 ${params.normalize === false ? '关' : '开'}）`,
+        `文件 ${result.summary.files}：新增 ${result.summary.added} / 删除 ${result.summary.removed} / 变更 ${result.summary.changed} / 一致 ${result.summary.unchanged}`,
+        '',
+      ];
+      for (const f of result.files) {
+        lines.push(`## ${f.status.toUpperCase()} · ${f.path}（+${f.stats.added} -${f.stats.removed}）`);
+        if (f.unifiedDiff) {
+          const diffLines = f.unifiedDiff.split('\n');
+          lines.push('```diff');
+          lines.push(...diffLines.slice(0, 200));
+          if (diffLines.length > 200) lines.push(`…（diff 共 ${diffLines.length} 行，完整内容见 structuredContent）`);
+          lines.push('```');
+        }
+      }
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: { ...result, files: result.files.map((f) => ({ ...f })) },
+      };
+    } catch (error) {
+      if (error instanceof CompareError) {
+        const key = error.code.replace(/^FDT-COMPARE-/, '').toLowerCase() as 'path-traversal' | 'input-too-large' | 'binary-unsupported';
+        const text = (getI18n().t(`compare.errors.${key}`) as string) || error.code;
+        return { content: [{ type: 'text', text }], isError: true };
+      }
+      return buildToolErrorResponse('代码差异对比', error, await getFigmaClientSafe(params.tokenProfile));
+    }
+  },
+);
+
+function defaultExt(framework: WatchFramework): string {
+  switch (framework) {
+    case 'vue':
+      return 'vue';
+    case 'svelte':
+      return 'svelte';
+    case 'weapp':
+      return 'wxml';
+    default:
+      return 'tsx';
   }
 }
 
@@ -2202,7 +2747,7 @@ v1.2.0 增强：输出包含语义标签建议、a11y 属性建议、设计系�
       nodeId: z.string().describe('节点 ID（必需）'),
       figmaUrl: z.string().optional().describe('Figma URL（自动解析 fileKey/nodeId）'),
       maxDepth: z.number().min(1).max(30).default(15).describe('最大节点树深度（默认15）'),
-      accessToken: z.string().optional().describe('Figma Access Token'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
     }),
     annotations: {
       readOnlyHint: true,
@@ -2211,13 +2756,13 @@ v1.2.0 增强：输出包含语义标签建议、a11y 属性建议、设计系�
       openWorldHint: false,
     },
   },
-  async ({ fileKey, nodeId, figmaUrl, maxDepth, accessToken }) => {
+  async ({ fileKey, nodeId, figmaUrl, maxDepth, tokenProfile }) => {
     try {
       const key = figmaUrl ? extractFileKey(figmaUrl) || fileKey : fileKey;
       const nId = figmaUrl ? extractNodeId(figmaUrl) || nodeId : nodeId;
       if (!key || !nId) return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId' }], isError: true };
 
-      const client = getFigmaClient(accessToken);
+      const client = await getFigmaClient(tokenProfile);
       const ctxService = createDesignContextService(client);
       const context = await ctxService.getDesignContext(key, nId, maxDepth);
 
@@ -2237,7 +2782,7 @@ v1.2.0 增强：输出包含语义标签建议、a11y 属性建议、设计系�
         structuredContent: toStructuredNode(context.node),
       };
     } catch (error) {
-      return buildToolErrorResponse('获取结构化数据', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('获取结构化数据', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -2418,7 +2963,7 @@ server.registerTool(
       figmaUrl: z
         .string()
         .describe('Figma 设计稿 URL（含 node-id 参数，如 https://www.figma.com/design/xxx?node-id=14-7721）'),
-      accessToken: z
+      tokenProfile: z
         .string()
         .optional()
         .describe('Figma Access Token（可选，优先使用环境变量 FIGMA_ACCESS_TOKEN）'),
@@ -2446,10 +2991,10 @@ server.registerTool(
       openWorldHint: true,
     },
   },
-  async ({ figmaUrl, accessToken, devicePixelRatio, framework, inlineScreenshot }) => {
+  async ({ figmaUrl, tokenProfile, devicePixelRatio, framework, inlineScreenshot }) => {
     try {
       const token =
-        accessToken || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
+        tokenProfile || process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_OAUTH_TOKEN;
       if (!token) {
         return {
           content: [
@@ -2620,7 +3165,7 @@ server.registerTool(
         .string()
         .optional()
         .describe('差异热力图与截图缓存输出目录，默认系统临时目录'),
-      accessToken: z
+      tokenProfile: z
         .string()
         .optional()
         .describe('Figma Access Token（可选，优先使用环境变量）'),
@@ -2648,7 +3193,7 @@ server.registerTool(
     viewportWidth,
     viewportHeight,
     outputDir,
-    accessToken,
+    tokenProfile,
     figmaScale,
   }) => {
     try {
@@ -2674,7 +3219,7 @@ server.registerTool(
           };
         }
 
-        const client = getFigmaClient(accessToken);
+        const client = await getFigmaClient(tokenProfile);
         const imageResult = await client.getImages(key, [nId], 'png', figmaScale);
         const imageUrl = imageResult.images[nId];
         if (!imageUrl) {
@@ -2803,7 +3348,7 @@ server.registerTool(
         structuredContent: structured,
       };
     } catch (error) {
-      return buildToolErrorResponse('还原度校验', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('还原度校验', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
@@ -2838,7 +3383,7 @@ server.registerTool(
 - oem：OCR 引擎模式（1 = LSTM 推荐，默认）
 - autoScreenshot：原生提取无文本时是否自动截图做 OCR 兜底（默认 true，需 figmaUrl）
 - screenshotScale：自动截图缩放比例（1-4，默认 2）
-- accessToken：Figma Access Token（可选，优先使用环境变量）
+- tokenProfile：Figma Access Token（可选，优先使用环境变量）
 
 依赖：tesseract.js（可选依赖，仅在图片 OCR 时需要，未安装时给出安装提示）`,
     inputSchema: z.object({
@@ -2879,7 +3424,7 @@ server.registerTool(
         .max(4)
         .optional()
         .describe('自动截图缩放比例（1-4，默认 2）'),
-      accessToken: z
+      tokenProfile: z
         .string()
         .optional()
         .describe('Figma Access Token（可选，优先使用环境变量）'),
@@ -2891,7 +3436,7 @@ server.registerTool(
       openWorldHint: true,
     },
   },
-  async ({ figmaUrl, imagePath, language, psm, oem, autoScreenshot, screenshotScale, accessToken }) => {
+  async ({ figmaUrl, imagePath, language, psm, oem, autoScreenshot, screenshotScale, tokenProfile }) => {
     try {
       const optionsToUpdate: Partial<OcrOptions> = {};
       if (language !== undefined) optionsToUpdate.language = language;
@@ -2920,7 +3465,7 @@ server.registerTool(
           };
         }
 
-        const client = getFigmaClient(accessToken);
+        const client = await getFigmaClient(tokenProfile);
         if (nodeId) {
           figmaNode = (await client.getNode(fileKey, nodeId, -1)) ?? undefined;
         } else {
@@ -2960,7 +3505,7 @@ server.registerTool(
           nodeId
         ) {
           try {
-            const client = getFigmaClient(accessToken);
+            const client = await getFigmaClient(tokenProfile);
             const images = await client.getImages(fileKey, [nodeId], 'png', screenshotScale ?? 2);
             const screenshotUrl = images.images[nodeId];
             if (screenshotUrl) {
@@ -3044,13 +3589,342 @@ server.registerTool(
         structuredContent: structured,
       };
     } catch (error) {
-      return buildToolErrorResponse('OCR 文本提取', error, getFigmaClientSafe(accessToken));
+      return buildToolErrorResponse('OCR 文本提取', error, await getFigmaClientSafe(tokenProfile));
+    }
+  },
+);
+
+// ============================================================
+// figma_generate_weapp - 微信小程序组件生成（v1.4.20 新增）
+// ============================================================
+
+server.registerTool(
+  'figma_generate_weapp',
+  {
+    title: '生成微信小程序组件代码（v1.4.20 新增）',
+    description: `将 Figma 设计稿转换为微信小程序原生组件，输出 WXML + WXSS + JS + JSON 四件套。
+
+核心特性：
+- 📱 微信小程序原生标签（view / text / image / button / navigator）
+- 🎨 WXSS 样式自动生成，支持 rpx 响应式单位（默认 750 设计稿基准）
+- 🧩 Component 构造器 + Page 页面两种模式
+- 🔧 Flex 布局自动修复 + 无障碍增强
+- 🖼️ 图片资源自动检测，支持懒加载
+- ⚠️ 事件绑定自动生成占位（bindtap / bindinput）
+
+工作流建议：
+1. 先调用 figma_get_metadata 了解设计稿结构
+2. 调用 figma_generate_weapp 生成小程序四件套
+3. 如有图片，调用 figma_download_assets 下载到 images/ 目录
+4. 将生成文件放入小程序项目的 pages/ 或 components/ 目录
+5. 在 app.json 或页面 JSON 中注册组件
+
+注意：微信小程序样式能力为 CSS 子集，部分高级 CSS 特性（如伪元素、CSS 变量等）有限制，工具会自动降级并给出警告。`,
+    inputSchema: z.object({
+      fileKey: z.string().describe('Figma 文件 Key（URL 中 /design/<key>/ 部分）'),
+      nodeId: z.string().describe('目标节点 ID（URL 中 node-id= 参数）'),
+      figmaUrl: z.string().optional().describe('Figma URL（可替代 fileKey+nodeId）'),
+      componentName: z.string().optional().describe('生成的组件名（默认从节点名推断）'),
+      sceneName: z.string().optional().describe('场景名（用于资源路径 images/<场景>/）'),
+      maxDepth: z.number().min(1).max(30).default(15).describe('节点树最大遍历深度（默认 15）'),
+      designWidth: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('设计稿宽度（px→rpx 基准）；不传则按目标帧宽自动推断：≈375→375、≈750→750、其他按 750/帧宽 比例'),
+      unit: z.enum(['rpx', 'px']).default('rpx').describe('输出单位：rpx (推荐) | px'),
+      isPage: z.boolean().default(false).describe('是否为页面组件（影响 JS/JSON 模板，true=Page，false=Component）'),
+      skipEnhancements: z.boolean().default(false).describe('是否跳过增强功能（Flex 修复、a11y 等）'),
+      assetMode: z
+        .enum(['local', 'cdn', 'base64'])
+        .optional()
+        .describe('位图资源模式：local（默认，仅规划 images/ 路径，MCP 不写盘）| cdn（需 publicBaseUrl）| base64（小图内联）'),
+      iconStrategy: z
+        .enum(['image-local', 'image-cdn', 'base64'])
+        .optional()
+        .describe('图标策略（P0-31）：image-local（默认）| image-cdn | base64'),
+      publicBaseUrl: z
+        .string()
+        .optional()
+        .describe('cdn 模式资源托管的稳定 http(s) 基址；缺失时 cdn 资源标记 MISSING_PUBLIC_BASE_URL'),
+      pixelRatio: z
+        .union([z.literal(1), z.literal(2), z.literal(3)])
+        .optional()
+        .describe('位图导出倍率（getImages scale），默认 2'),
+      inference: z
+        .object({
+          list: z.boolean().optional().describe('重复组→wx:for 自动推断，默认 true；false 关闭'),
+          conditions: z
+            .boolean()
+            .optional()
+            .describe('tab/modal 等名称信号是否直接绑定 hidden，默认 false（仅在 conditionSuggestions 返回建议）'),
+          minRepeated: z.number().int().min(2).max(20).optional().describe('成组最小重复数，默认 3'),
+        })
+        .optional()
+        .describe('列表/条件推断开关（P0-1.1）'),
+      conditions: z
+        .array(
+          z.object({
+            nodeId: z.string().describe('目标节点 id'),
+            groupId: z.string().optional().describe('同组节点形成 if/elif/else 链（须同父级兄弟）'),
+            expression: z.string().optional().describe('{{ }} 内表达式；isElse=true 时省略'),
+            isElse: z.boolean().optional().describe('标记为链尾 else'),
+            directive: z.enum(['wx:if', 'hidden']).optional().describe('独立条件指令，默认 wx:if'),
+          }),
+        )
+        .optional()
+        .describe('用户确认的显式条件绑定（if/elif/else/hidden）'),
+      renderer: z
+        .enum(['webview', 'skyline'])
+        .optional()
+        .describe('目标渲染器：webview（默认，不做属性级拦截）| skyline（按官方 WXSS 兼容矩阵降级并产出 warning）'),
+      projectRoot: z
+        .string()
+        .optional()
+        .describe('小程序工程根（含 app.json）。提供时按全主包口径核算体积，>2MB 返回 FDT-WEAPP-BUNDLE-EXCEEDED 错误；不提供则只估算本次四件套字节，阈值不生效'),
+      tokenProfile: z.string().optional().describe('安全 Token Store 配置名（可选，省略时使用环境变量/default）'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async ({
+    fileKey,
+    nodeId,
+    figmaUrl,
+    componentName,
+    sceneName,
+    maxDepth,
+    designWidth,
+    unit,
+    isPage,
+    skipEnhancements,
+    assetMode,
+    iconStrategy,
+    publicBaseUrl,
+    pixelRatio,
+    inference,
+    conditions,
+    renderer,
+    projectRoot,
+    tokenProfile,
+  }) => {
+    try {
+      let resolvedKey = fileKey;
+      let resolvedNode = nodeId;
+      if (figmaUrl) {
+        const parsed = parseFigmaUrl(figmaUrl);
+        if (parsed?.fileKey) resolvedKey = parsed.fileKey;
+        if (parsed?.nodeId) resolvedNode = parsed.nodeId;
+      }
+      if (!resolvedKey || !resolvedNode) {
+        return { content: [{ type: 'text', text: '请提供 fileKey 和 nodeId，或 figmaUrl' }], isError: true };
+      }
+
+      const client = await getFigmaClient(tokenProfile);
+      const ctxService = createDesignContextService(client);
+      const weappGen = createWeappGenerator(client);
+
+      // 获取设计上下文
+      const ctx = await ctxService.getDesignContext(resolvedKey, resolvedNode, maxDepth);
+
+      // 生成小程序代码
+      const result = await weappGen.generateFromContext(ctx, {
+        componentName,
+        sceneName,
+        designWidth,
+        unit,
+        isPage,
+        skipEnhancements,
+        assetMode,
+        iconStrategy,
+        publicBaseUrl,
+        pixelRatio,
+        inference,
+        conditions,
+        renderer,
+      });
+
+      // P0-23：主包体积核算。提供 projectRoot 才是全主包口径并可阻断；
+      // 否则仅估算本次四件套字节（阈值不生效，附非全主包提示）。
+      let bundleReport: ReturnType<typeof measureMainPackage>;
+      if (projectRoot) {
+        bundleReport = measureMainPackage({ projectRoot });
+        if (bundleReport.blocked) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text:
+                  `${bundleReport.errorCode}: ${bundleReport.warnings.map((w) => w.message).join('；')}\n` +
+                  `建议外移分包：${bundleReport.subpackageSuggestions
+                    .slice(0, 8)
+                    .map((s) => `${s.path}→${s.suggestedRoot}/`)
+                    .join(', ')}`,
+              },
+            ],
+          };
+        }
+      } else {
+        bundleReport = measureMainPackage({
+          files: [
+            { path: `${result.componentName}.wxml`, bytes: Buffer.byteLength(result.wxml, 'utf8'), inMainPackage: true },
+            { path: `${result.componentName}.wxss`, bytes: Buffer.byteLength(result.wxss, 'utf8'), inMainPackage: true },
+            { path: `${result.componentName}.js`, bytes: Buffer.byteLength(result.js, 'utf8'), inMainPackage: true },
+            { path: `${result.componentName}.json`, bytes: Buffer.byteLength(result.json, 'utf8'), inMainPackage: true },
+          ],
+        });
+      }
+
+      // 格式化输出
+      const lines: string[] = [];
+      lines.push(`# ${result.componentName} - 微信小程序${isPage ? '页面' : '组件'}代码\n`);
+      lines.push(`> 设计稿：${ctx.fileKey} / ${ctx.nodeId}\n`);
+
+      // WXML
+      lines.push('## WXML 模板（.wxml）\n');
+      lines.push('```xml');
+      lines.push(result.wxml);
+      lines.push('```\n');
+
+      // WXSS
+      lines.push('## WXSS 样式（.wxss）\n');
+      lines.push('```css');
+      lines.push(result.wxss);
+      lines.push('```\n');
+
+      // JS
+      lines.push('## JS 逻辑（.js）\n');
+      lines.push('```javascript');
+      lines.push(result.js);
+      lines.push('```\n');
+
+      // JSON
+      lines.push('## JSON 配置（.json）\n');
+      lines.push('```json');
+      lines.push(result.json);
+      lines.push('```\n');
+
+      // 条件显隐候选建议（P0-12：默认不自动绑定，提示调用方确认）
+      if (result.conditionSuggestions && result.conditionSuggestions.length > 0) {
+        lines.push('## 🔀 条件显隐候选（默认未绑定，确认业务状态后可用 conditions 参数生成 wx:if/hidden）\n');
+        for (const s of result.conditionSuggestions.slice(0, 15)) {
+          lines.push(`- [${s.signal}] data.${s.suggestedDataKey}：${s.reason}`);
+        }
+        lines.push('');
+      }
+
+      // P0-81：WXSS 还原度覆盖率（方案 B：属性条数口径，发布闸门 ≥85%）
+      {
+        const f = result.fidelity;
+        lines.push('## 📊 WXSS 还原度覆盖率（方案 B）\n');
+        lines.push(`- 覆盖率：**${(f.rate * 100).toFixed(1)}%**（${f.matched}/${f.total} 条承诺属性）`);
+        lines.push(`- 缺口属性：${f.missing.length > 0 ? f.missing.join(', ') : '无'}`);
+        if (f.excluded.length > 0) {
+          const byProp = new Map<string, number>();
+          for (const e of f.excluded) byProp.set(e.property, (byProp.get(e.property) ?? 0) + 1);
+          lines.push(
+            `- 排除项（不进分母，共 ${f.excluded.length}）：${[...byProp.entries()]
+              .map(([p, n]) => `${p} ×${n}`)
+              .join('；')}`,
+          );
+        }
+        lines.push('');
+      }
+
+      // 警告
+      if (result.warnings && result.warnings.length > 0) {
+        lines.push('## ⚠️ 注意事项\n');
+        for (const w of result.warnings.slice(0, 15)) {
+          lines.push(`- ${w}`);
+        }
+        if (result.warnings.length > 15) {
+          lines.push(`- ... 还有 ${result.warnings.length - 15} 条警告`);
+        }
+        lines.push('');
+      }
+
+      // 待下载资源
+      if (result.pendingAssets && result.pendingAssets.length > 0) {
+        lines.push(`## 📦 待下载资源（${result.pendingAssets.length} 个）\n`);
+        lines.push('调用 `figma_download_assets` 下载以下资源：\n');
+        lines.push('| 节点 ID | 文件名 | 类型 |');
+        lines.push('|---------|--------|------|');
+        for (const asset of result.pendingAssets.slice(0, 10)) {
+          lines.push(`| ${asset.nodeId} | ${asset.name} | ${asset.type} |`);
+        }
+        if (result.pendingAssets.length > 10) {
+          lines.push(`| ... | 还有 ${result.pendingAssets.length - 10} 个资源 | ... |`);
+        }
+        lines.push('');
+      }
+
+      // 使用说明
+      lines.push('## 📖 使用说明\n');
+      if (isPage) {
+        lines.push('1. 将四个文件放入小程序 `pages/xxx/` 目录');
+        lines.push('2. 在 `app.json` 的 `pages` 数组中注册页面路径');
+        lines.push('3. 根据需要修改 JS 中的页面逻辑和数据');
+        lines.push('4. 如有图片资源，下载到 `images/` 目录并更新 src');
+      } else {
+        lines.push('1. 将四个文件放入小程序 `components/xxx/` 目录');
+        lines.push('2. 在使用页面的 JSON 中注册：`"usingComponents": { "xxx": "/components/xxx/xxx" }`');
+        lines.push('3. 根据需要在 properties 中添加组件属性');
+        lines.push('4. 在 methods 中实现组件方法（如 handleTap）');
+        lines.push('5. 如有图片资源，下载到 `images/` 目录并更新 src');
+      }
+      lines.push('');
+
+      const structured = {
+        componentName: result.componentName,
+        isPage,
+        wxml: result.wxml,
+        wxss: result.wxss,
+        js: result.js,
+        json: result.json,
+        warnings: result.warnings,
+        pendingAssets: result.pendingAssets,
+        designWidth: result.designWidth,
+        designWidthSource: result.designWidthSource,
+        // P0-22：资源清单（canonical，含 local/cdn/base64 与 unresolved）；MCP 不返回字节、不写盘
+        assetManifest: result.assetManifest,
+        // P0-12：显隐候选建议（默认不自动绑定，供调用方确认后经 conditions 回传）
+        conditionSuggestions: result.conditionSuggestions,
+        // P0-52：事件绑定汇总（handler 名已生成进 JS methods）
+        events: result.events,
+        // P0-81：WXSS 还原度覆盖率（方案 B：分母=视觉映射清单承诺属性，排除项可见不进分母）
+        fidelity: result.fidelity,
+        // P0-23：主包体积核算（无 projectRoot 时 isFullProject=false，仅四件套估算）
+        bundle: {
+          status: bundleReport.status,
+          isFullProject: bundleReport.isFullProject,
+          totalBytes: bundleReport.totalBytes,
+          scopeWarning: bundleReport.scopeWarning,
+          subPackageBytes: bundleReport.subPackageBytes,
+          subpackageSuggestions: bundleReport.subpackageSuggestions,
+        },
+        unit,
+      };
+
+      return {
+        content: [{ type: 'text', text: lines.join('\n') }],
+        structuredContent: structured,
+      };
+    } catch (error) {
+      return buildToolErrorResponse('小程序代码生成', error, await getFigmaClientSafe(tokenProfile));
     }
   },
 );
 
 export async function main(): Promise<void> {
   const transport = new StdioServerTransport();
+  transport.onclose = () => watchManager.disposeAll();
+  transport.onerror = () => watchManager.disposeAll();
   await server.connect(transport);
   console.error(`Figma Dev Tools MCP Server v${readPackageVersion()} running via stdio`);
 }

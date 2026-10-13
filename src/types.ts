@@ -981,7 +981,7 @@ export type CodeOutputFormat = 'react' | 'vue' | 'html' | 'tailwind-config' | 'c
 /**
  * 支持的前端框架
  */
-export type Framework = 'react' | 'vue';
+export type Framework = 'react' | 'vue' | 'svelte';
 
 /**
  * 样式格式选项（spec FR-05，v1.4.18 T7 扩展为 11 值可插拔联合）

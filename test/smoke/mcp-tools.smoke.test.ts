@@ -5,8 +5,8 @@
  * 验证最关键的发布契约：
  *
  * 1. initialize 握手成功，serverInfo 名称/版本与 package.json 一致；
- * 2. tools/list 返回的 22 个工具名与注册顺序形成快照基线
- *    （1.4.20 新增 figma_generate_weapp 后需显式更新为 23——快照即发布闸门）；
+ * 2. tools/list 返回的 28 个工具名与注册顺序形成快照基线
+ *    （1.4.20 新增 figma_generate_svelte / watch 三件套 / figma_compare_code——快照即发布闸门）；
  * 3. 每个工具具备 description 与对象型 inputSchema；
  * 4. 非法入参以协议错误或 isError 返回且进程不崩溃；
  * 5. fixture 工厂可构造整页 / 双模式变量 / 20k+ 压测大树。
@@ -22,7 +22,7 @@ import { McpTestHarness, type McpServerInfo, type McpToolDescriptor } from './mc
 import { countNodes, makeLargeTree } from '../fixtures/nodes.js';
 import { makeButtonComponent, makeCardPage, makeVariablesLightDark } from '../fixtures/page.js';
 
-/** v1.4.19 T20 基线的 22 个 MCP 工具（严格保持注册顺序） */
+/** v1.4.20 基线的 28 个 MCP 工具（严格保持注册顺序） */
 const BASELINE_TOOL_NAMES = [
   'figma_parse_url',
   'figma_get_file',
@@ -40,12 +40,18 @@ const BASELINE_TOOL_NAMES = [
   'figma_lint_design',
   'figma_generate_jsx',
   'figma_generate_vue',
+  'figma_generate_svelte',
   'figma_batch_generate',
+  'figma_watch_start',
+  'figma_watch_stop',
+  'figma_watch_status',
+  'figma_compare_code',
   'figma_get_structured_data',
   'figma_dev_fallback_status',
   'figma_dev_fallback_capture',
   'figma_verify_fidelity',
   'figma_ocr_extract',
+  'figma_generate_weapp',
 ] as const;
 
 /**
@@ -86,7 +92,7 @@ describe('MCP 冒烟：真实 stdio 子进程接口契约', () => {
     expect(serverInfo.version).toBe(readPackageVersion());
   });
 
-  it('tools/list 返回 22 个工具，名称与注册顺序匹配 v1.4.19 T20 基线快照', () => {
+  it('tools/list 返回 23 个工具，名称与注册顺序匹配 v1.4.20 基线快照', () => {
     expect(tools).toHaveLength(BASELINE_TOOL_NAMES.length);
     expect(tools.map((tool) => tool.name)).toEqual([...BASELINE_TOOL_NAMES]);
   });
@@ -203,8 +209,8 @@ describe('MCP 冒烟：真实 stdio 子进程接口契约', () => {
     expect(schema.properties?.nodeId?.type).toBe('string');
     expect(schema.properties?.nodeIds?.type).toBe('array');
     expect(schema.properties?.nodeIds?.items).toEqual({ type: 'string' });
-    // 框架可切换，默认 react；vueVersion 与 figma_generate_vue 同形（number+enum）
-    expect(schema.properties?.framework?.enum).toEqual(['react', 'vue']);
+    // 框架可切换，默认 react；v1.4.20 WBS-P1-1 追加 svelte；vueVersion 与 figma_generate_vue 同形
+    expect(schema.properties?.framework?.enum).toEqual(['react', 'vue', 'svelte']);
     expect(schema.properties?.framework?.default).toBe('react');
     expect(schema.properties?.vueVersion?.enum).toEqual([2, 3]);
     expect(schema.properties?.vueVersion?.default).toBe(3);

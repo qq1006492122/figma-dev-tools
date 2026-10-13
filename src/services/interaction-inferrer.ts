@@ -81,6 +81,25 @@ export interface InteractionInferrerResult {
 // ============ 交互推断类 ============
 
 /**
+ * 关键词列表 → 组合词边界正则（模块级记忆化，P3-12）。
+ * 每个节点会做十几次关键词匹配，每次 3-12 个词；实时 new RegExp 在
+ * 千节点页会产生数万次正则编译。关键词列表都是静态字面量，按 join 键
+ * 缓存「整组交替」正则，匹配语义与逐词 `(^|[^a-z0-9])kw([^a-z0-9]|$)` 完全等价。
+ */
+const KEYWORD_REGEX_CACHE = new Map<string, RegExp>();
+
+function getKeywordRegex(keywords: readonly string[]): RegExp {
+  const key = keywords.join('\u0000');
+  let cached = KEYWORD_REGEX_CACHE.get(key);
+  if (!cached) {
+    const alternation = keywords.map((kw) => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    cached = new RegExp(`(?:^|[^a-z0-9])(?:${alternation})(?:[^a-z0-9]|$)`, 'i');
+    KEYWORD_REGEX_CACHE.set(key, cached);
+  }
+  return cached;
+}
+
+/**
  * 交互推断器
  */
 export class InteractionInferrer {
@@ -122,15 +141,11 @@ export class InteractionInferrer {
   }
 
   /**
-   * 检查名称是否包含关键词（作为独立词部分，避免子串误匹配）
+   * 检查名称是否包含关键词（作为独立词部分，避免子串误匹配）。
+   * P3-12：整组关键词共用一个记忆化正则（getKeywordRegex），避免逐词编译。
    */
-  private _nameContains(name: string, keywords: string[]): boolean {
-    // 使用 (^|[^a-z]) 确保关键词不是单词的一部分
-    return keywords.some((kw) => {
-      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
-      return re.test(name);
-    });
+  private _nameContains(name: string, keywords: readonly string[]): boolean {
+    return getKeywordRegex(keywords).test(name);
   }
 
   /**

@@ -1,0 +1,70 @@
+<!--index.wxml-->
+<!-- figma-dev-tools 示例页：本地图片列表 + 搜索表单 + 条件块（WBS-P0-82） -->
+<view class="page">
+
+  <!-- 头部：本地图片（local 模式默认即可运行，无需任何外网配置） -->
+  <view class="hero">
+    <image class="hero-logo" src="/images/logo.png" mode="aspectFit" />
+    <text class="hero-title">figma-dev-tools 演示</text>
+    <text class="hero-subtitle">列表 · 表单 · 条件块 · 本地资源</text>
+  </view>
+
+  <!-- 搜索表单：bindsubmit 读取表单值，bindinput 实时过滤 -->
+  <form class="search-form" bindsubmit="onSearchSubmit">
+    <input
+      class="search-input"
+      name="keyword"
+      type="text"
+      placeholder="搜索商品名称，如「台灯」"
+      value="{{keyword}}"
+      confirm-type="search"
+      bindinput="onKeywordInput"
+    />
+    <button class="search-btn" form-type="submit">搜索</button>
+  </form>
+
+  <!-- 过滤行：switch 触发 bindchange；结果计数为条件文本 -->
+  <view class="filter-row">
+    <view class="filter-switch">
+      <switch class="filter-switch__switch" checked="{{inStockOnly}}" color="#07c160" bindchange="onStockToggle" />
+      <text class="filter-label">仅看有货</text>
+    </view>
+    <view class="filter-right">
+      <text class="result-count">共 {{filteredList.length}} 件商品</text>
+      <text class="reset-link" bindtap="onReset">重置</text>
+    </view>
+  </view>
+
+  <!-- 图片列表：wx:for 渲染，wx:key 使用稳定 id -->
+  <view class="goods-list" wx:if="{{filteredList.length > 0}}">
+    <view class="goods-card" wx:for="{{filteredList}}" wx:key="id">
+      <image class="goods-image" src="{{item.image}}" mode="aspectFill" />
+      <view class="goods-info">
+        <view class="goods-name-row">
+          <text class="goods-name">{{item.name}}</text>
+          <text class="stock-tag stock-tag--ok" wx:if="{{item.stock > 0}}">有货</text>
+          <text class="stock-tag stock-tag--out" wx:else>已售罄</text>
+        </view>
+        <text class="goods-desc">{{item.desc}}</text>
+        <view class="goods-bottom">
+          <text class="goods-price">¥{{item.price}}</text>
+          <button
+            class="add-btn {{item.stock > 0 ? '' : 'add-btn--disabled'}}"
+            size="mini"
+            data-id="{{item.id}}"
+            bindtap="onAddTap"
+          >加入购物车</button>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 条件块：过滤结果为空时展示空态（与列表互斥） -->
+  <view class="empty-state" wx:else>
+    <image class="empty-image" src="/images/empty-state.png" mode="aspectFit" />
+    <text class="empty-title">没有找到相关商品</text>
+    <text class="empty-desc">换个关键词，或关闭「仅看有货」试试</text>
+    <button class="empty-btn" size="mini" bindtap="onReset">清空筛选条件</button>
+  </view>
+
+</view>

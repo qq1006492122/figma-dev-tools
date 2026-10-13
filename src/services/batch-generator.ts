@@ -21,10 +21,12 @@ import type { DesignContext } from '../types/nodes.js';
 import type { Framework, SmartInferenceSwitches } from '../types.js';
 import { CodeGenerator, createCodeGenerator } from './code-generator.js';
 import { VueGenerator, createVueGenerator } from './vue-generator.js';
+import { SvelteGenerator, createSvelteGenerator } from './svelte-generator.js';
 import type { FigmaClient } from './figma-client.js';
 import type { BundlerKind } from './asset-paths.js';
 import type { StyleFormat, UnocssMode } from './style-renderers/index.js';
 import type { PageBlock } from './block-splitter.js';
+import type { ComponentLibraryChoice, DetectHooks, PackageJsonLike } from './component-library/index.js';
 
 /** 批量生成入参 */
 export interface BatchGenerateOptions {
@@ -36,6 +38,15 @@ export interface BatchGenerateOptions {
   styleFormat: StyleFormat;
   /** UnoCSS 模式（仅 unocss 生效） */
   unocssMode?: UnocssMode;
+  /**
+   * WBS-P2-12/13：组件库选择（auto/none/shadcn-ui/ant-design/element-plus/ant-design-vue）。
+   * 跨框架值由各区块生成器的 resolveLibrary 显式报错。
+   */
+  componentLibrary?: ComponentLibraryChoice;
+  /** auto 检测用的最近 package.json（CLI 读盘后传入；MCP 无 fs 可不传） */
+  projectPackageJson?: PackageJsonLike | null;
+  /** shadcn/ui 组件目录探测谓词（仅 framework=react + auto 生效） */
+  uiComponentExists?: DetectHooks['uiComponentExists'];
   /** 目标构建器（决定资源引用形态） */
   bundler?: BundlerKind;
   /** 是否跳过增强器链 */
@@ -53,7 +64,7 @@ export interface BatchFile {
   /** 文件完整内容 */
   readonly content: string;
   /** 文件语言标识（供 MCP Markdown fence / CLI 日志使用） */
-  readonly lang: 'ts' | 'tsx' | 'vue' | 'css' | 'less' | 'scss';
+  readonly lang: 'ts' | 'tsx' | 'vue' | 'svelte' | 'css' | 'less' | 'scss';
 }
 
 /** 区块元信息（报告/structuredContent 用） */
@@ -123,10 +134,12 @@ function sanitizePrefix(raw: string | undefined): string {
 export class BatchGenerator {
   private readonly _react: CodeGenerator;
   private readonly _vue: VueGenerator;
+  private readonly _svelte: SvelteGenerator;
 
-  constructor(react: CodeGenerator, vue: VueGenerator) {
+  constructor(react: CodeGenerator, vue: VueGenerator, svelte: SvelteGenerator) {
     this._react = react;
     this._vue = vue;
+    this._svelte = svelte;
   }
 
   /**
@@ -150,6 +163,7 @@ export class BatchGenerator {
 
     const prefix = sanitizePrefix(options.componentNamePrefix);
     const isVue = options.framework === 'vue';
+    const isSvelte = options.framework === 'svelte';
 
     const files: BatchFile[] = [];
     const blockMetas: BatchBlockMeta[] = [];
@@ -172,6 +186,8 @@ export class BatchGenerator {
           skipEnhancements: options.skipEnhancements ?? false,
           inference: options.inference,
           vueVersion: options.vueVersion ?? 3,
+          componentLibrary: options.componentLibrary ?? 'none',
+          projectPackageJson: options.projectPackageJson ?? null,
         });
         const mainFileName = `${componentName}.vue`;
         files.push({ fileName: mainFileName, content: vueResult.code, lang: 'vue' });
@@ -194,6 +210,28 @@ export class BatchGenerator {
         }
         for (const w of vueResult.warnings) warningsSet.add(w);
         for (const asset of vueResult.pendingAssets) assetsMap.set(asset.nodeId, asset);
+      } else if (isSvelte) {
+        // WBS-P1-13：Svelte SFC（css-modules 样式已内联 scoped <style>，无外置旁路）
+        const svelteResult = await this._svelte.generateFromContext(blockContext, {
+          componentName,
+          usePublicCdn: true,
+          bundler: options.bundler ?? 'none',
+          styleFormat: options.styleFormat as 'tailwind' | 'unocss' | 'css-modules',
+          unocssMode: options.unocssMode ?? 'wind',
+          skipEnhancements: options.skipEnhancements ?? false,
+        });
+        const mainFileName = `${componentName}.svelte`;
+        files.push({ fileName: mainFileName, content: svelteResult.code, lang: 'svelte' });
+        blockMetas.push({
+          kind: block.kind,
+          componentName,
+          fileName: mainFileName,
+          sourceName: block.sourceName,
+          nodeId: block.node.figmaId,
+        });
+        edges.push({ from: BARREL_FILE_NAME, to: mainFileName, kind: 'barrel' });
+        for (const w of svelteResult.warnings) warningsSet.add(w);
+        for (const asset of svelteResult.pendingAssets) assetsMap.set(asset.nodeId, asset);
       } else {
         const reactResult = await this._react.generateJsxFromContext(blockContext, {
           componentName,
@@ -203,6 +241,9 @@ export class BatchGenerator {
           unocssMode: options.unocssMode ?? 'wind',
           skipEnhancements: options.skipEnhancements ?? false,
           inference: options.inference,
+          componentLibrary: options.componentLibrary ?? 'none',
+          projectPackageJson: options.projectPackageJson ?? null,
+          uiComponentExists: options.uiComponentExists,
         });
         const mainFileName = `${componentName}.tsx`;
         files.push({ fileName: mainFileName, content: reactResult.code, lang: 'tsx' });
@@ -245,7 +286,8 @@ export class BatchGenerator {
       ' */',
     ];
     for (const meta of blockMetas) {
-      const specifier = isVue ? meta.fileName : meta.componentName;
+      // Vue/Svelte 以文件路径（含扩展名）再导出；React 以目录/index 解析模块名
+      const specifier = isVue || isSvelte ? meta.fileName : meta.componentName;
       barrelLines.push(`export { default as ${meta.componentName} } from './${specifier}';`);
     }
     files.push({ fileName: BARREL_FILE_NAME, content: `${barrelLines.join('\n')}\n`, lang: 'ts' });
@@ -272,5 +314,5 @@ export class BatchGenerator {
  * @returns BatchGenerator 实例
  */
 export function createBatchGenerator(client: FigmaClient): BatchGenerator {
-  return new BatchGenerator(createCodeGenerator(client), createVueGenerator(client));
+  return new BatchGenerator(createCodeGenerator(client), createVueGenerator(client), createSvelteGenerator(client));
 }

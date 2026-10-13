@@ -6,7 +6,7 @@
  *
  * Endpoints:
  *   GET  /              - GUI configuration panel
- *   GET  /api/status    - Get current configuration status
+ *   GET  /api/status    - Get current configuration status`n *   GET  /api/diagnostics/network - Diagnose DNS/proxy/TLS/HTTP connectivity
  *   POST /api/language  - Set display language
  *   POST /api/token     - Set and validate Figma Access Token
  *   GET  /api/editors   - Detect available AI editors
@@ -18,7 +18,9 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
+import dns from 'node:dns/promises';
 import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import * as tar from 'tar';
@@ -36,18 +38,218 @@ import {
   resolveConfigPath,
   type DetectionMethod,
 } from './editor-detector.js';
-import { createFigmaClient } from './figma-client.js';
+import { createFigmaClient, classifyNetworkFailure, type NetworkFailureDetail } from './figma-client.js';
 import { createTokenStore } from './token-store.js';
+import { FigmaApiError } from '../utils/errors.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const GUI_DIR = path.resolve(__dirname, '../../gui');
+export const GUI_VERSION_TOKEN = '{{FIGMA_DEV_TOOLS_VERSION}}';
 
 /** package.json 路径（作为版本号唯一来源） */
 const PKG_JSON_PATH = path.resolve(__dirname, '../../package.json');
 
+/**
+ * P3-32：探测占用端口的 GUI 实例版本（短超时；非本工具服务/失败返回 null）。
+ */
+function probeOccupantVersion(port: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const req = http.get(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/api/status',
+        timeout: 600,
+        headers: { Origin: 'http://localhost' },
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (chunk: Buffer) => {
+          body += chunk.toString('utf8');
+        });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as { version?: string };
+            resolve(typeof parsed.version === 'string' ? parsed.version : null);
+          } catch {
+            resolve(null);
+          }
+        });
+      },
+    );
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+
+export interface ProxyDiagnostic {
+  name: string;
+  configured: boolean;
+  protocol?: string;
+  host?: string;
+  port?: string;
+  authConfigured?: boolean;
+}
+
+export interface NetworkDiagnosticResult {
+  target: string;
+  targetHost: string;
+  startedAt: string;
+  totalMs: number;
+  dns?: { address: string; family: number; ms: number };
+  proxy: ProxyDiagnostic[];
+  tls?: {
+    protocol?: string;
+    cipher?: string;
+    authorized: boolean;
+    authorizationError?: string;
+    issuer?: string;
+    validTo?: string;
+  };
+  http?: { status: number; statusText: string; server?: string };
+  reachedFigma: boolean;
+  error?: { code: string; category: string; message: string; nextAction: string };
+}
+
+function sanitizeProxy(name: string, value: string | undefined): ProxyDiagnostic {
+  if (!value) return { name, configured: false };
+  try {
+    const url = new URL(value);
+    return {
+      name,
+      configured: true,
+      protocol: url.protocol.replace(':', ''),
+      host: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? '443' : '80'),
+      authConfigured: Boolean(url.username || url.password),
+    };
+  } catch {
+    return { name, configured: true, authConfigured: false };
+  }
+}
+
+export function snapshotProxyEnvironment(env: NodeJS.ProcessEnv = process.env): ProxyDiagnostic[] {
+  return [
+    sanitizeProxy('HTTPS_PROXY', env.HTTPS_PROXY || env.https_proxy),
+    sanitizeProxy('HTTP_PROXY', env.HTTP_PROXY || env.http_proxy),
+    sanitizeProxy('NO_PROXY', env.NO_PROXY || env.no_proxy),
+  ];
+}
+
+function isAllowedDiagnosticTarget(target: URL): boolean {
+  if (target.protocol !== 'https:' || target.username || target.password) return false;
+  const host = target.hostname.toLowerCase();
+  return host === 'figma.com' || host.endsWith('.figma.com');
+}
+
+export async function diagnoseNetwork(
+  targetUrl = 'https://api.figma.com/v1/me',
+  timeoutMs = 5_000,
+): Promise<NetworkDiagnosticResult> {
+  const startedAt = new Date();
+  const target = new URL(targetUrl);
+  if (!isAllowedDiagnosticTarget(target)) {
+    throw new Error('Network diagnostic target must be an HTTPS URL on figma.com');
+  }
+
+  const result: NetworkDiagnosticResult = {
+    target: target.toString(),
+    targetHost: target.hostname,
+    startedAt: startedAt.toISOString(),
+    totalMs: 0,
+    proxy: snapshotProxyEnvironment(),
+    reachedFigma: false,
+  };
+
+  const dnsStart = Date.now();
+  try {
+    const lookup = await dns.lookup(target.hostname, { all: true });
+    const first = lookup[0];
+    if (first) {
+      result.dns = { address: first.address, family: first.family, ms: Date.now() - dnsStart };
+    }
+  } catch (error) {
+    const detail = classifyNetworkFailure(error as Error & { code?: string });
+    result.totalMs = Date.now() - startedAt.getTime();
+    result.error = {
+      code: detail.code,
+      category: detail.category,
+      message: detail.message,
+      nextAction: detail.nextAction,
+    };
+    return result;
+  }
+
+  await new Promise<void>((resolve) => {
+    const request = https.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || 443,
+        path: `${target.pathname}${target.search}`,
+        method: 'HEAD',
+        timeout: timeoutMs,
+        headers: {
+          'User-Agent': 'figma-dev-tools-network-diagnostics',
+          Accept: 'application/json',
+        },
+      },
+      (response) => {
+        const tlsSocket = response.socket as import('node:tls').TLSSocket;
+        const certificate = tlsSocket.getPeerCertificate?.();
+        result.http = {
+          status: response.statusCode ?? 0,
+          statusText: response.statusMessage ?? '',
+          server: typeof response.headers.server === 'string' ? response.headers.server : response.headers.server?.[0],
+        };
+        result.tls = {
+          protocol: tlsSocket.getProtocol?.() ?? undefined,
+          cipher: tlsSocket.getCipher?.().name,
+          authorized: tlsSocket.authorized,
+          authorizationError: tlsSocket.authorizationError?.message,
+          issuer: typeof certificate?.issuer === 'string'
+            ? certificate.issuer
+            : Array.isArray(certificate?.issuer?.O)
+              ? certificate.issuer.O[0]
+              : certificate?.issuer?.O,
+          validTo: certificate?.valid_to,
+        };
+        result.reachedFigma = response.statusCode !== undefined;
+        response.resume();
+        response.on('end', resolve);
+      },
+    );
+
+    request.on('timeout', () => {
+      request.destroy(Object.assign(new Error('Request timed out'), { code: 'ETIMEDOUT' }));
+    });
+    request.on('error', (error) => {
+      const detail = classifyNetworkFailure(error as Error & { code?: string });
+      result.error = {
+        code: detail.code,
+        category: detail.category,
+        message: detail.message,
+        nextAction: detail.nextAction,
+      };
+      resolve();
+    });
+    request.end();
+  });
+
+  result.totalMs = Date.now() - startedAt.getTime();
+  return result;
+}
+/** 将 package.json 版本注入 GUI HTML，避免静态页面再出现独立版本号 */
+export function injectGuiVersion(content: string, version: string): string {
+  return content.split(GUI_VERSION_TOKEN).join(version);
+}
 /** 从 package.json 读取版本号 */
-function readVersion(): string {
+export function readGuiVersion(): string {
   try {
     const pkg = JSON.parse(fs.readFileSync(PKG_JSON_PATH, 'utf-8'));
     return pkg.version || 'unknown';
@@ -56,7 +258,7 @@ function readVersion(): string {
   }
 }
 
-const VERSION = readVersion();
+const VERSION = readGuiVersion();
 const BASE_PORT = 54321;
 const MAX_PORT_ATTEMPTS = 10;
 
@@ -97,6 +299,8 @@ interface ServerState {
   configuredEditors: Set<string>;
   framework: string;
   outputDir: string;
+  /** P3-32：组件库偏好（'auto' | 'none' | 具体库 id；默认 'auto'） */
+  componentLibrary: string;
 }
 
 /**
@@ -217,45 +421,79 @@ function getMimeType(filePath: string): string {
 }
 
 function sendJson(res: http.ServerResponse, statusCode: number, data: unknown): void {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
 }
 
 /** 请求体大小上限（1MB），防止恶意超大 body 导致内存耗尽 */
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
+/** 慢速/断开请求体的最长等待时间，避免 Promise 永久悬挂 */
+const REQUEST_BODY_TIMEOUT_MS = 30_000;
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+export function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
     let size = 0;
-    let aborted = false;
-    req.on('data', (chunk: Buffer) => {
-      if (aborted) return;
+    let settled = false;
+
+    const cleanup = () => {
+      clearTimeout(timeoutHandle);
+      req.off('data', onData);
+      req.off('end', onEnd);
+      req.off('error', onError);
+      req.off('aborted', onAborted);
+      req.off('close', onClose);
+    };
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      action();
+    };
+    const fail = (error: Error) => settle(() => reject(error));
+
+    const onData = (chunk: Buffer) => {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        aborted = true;
         req.destroy();
-        reject(new Error('Request body too large (max 1MB)'));
+        fail(new Error('Request body too large (max 1MB)'));
         return;
       }
       body += chunk.toString();
-    });
-    req.on('end', () => {
-      if (!aborted) resolve(body);
-    });
-    req.on('error', (err) => {
-      if (!aborted) reject(err);
-    });
+    };
+    const onEnd = () => settle(() => resolve(body));
+    const onError = (error: Error) => fail(error);
+    const onAborted = () => fail(new Error('Request aborted before body completion'));
+    const onClose = () => fail(new Error('Request closed before body completion'));
+    const timeoutHandle = setTimeout(() => {
+      req.destroy();
+      fail(new Error('Request body timed out'));
+    }, REQUEST_BODY_TIMEOUT_MS);
+    timeoutHandle.unref?.();
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+    req.on('aborted', onAborted);
+    req.on('close', onClose);
   });
 }
+export interface GuiServerOptions {
+  /** 默认打开浏览器；测试或后台启动可显式关闭 */
+  openBrowser?: boolean;
+  /** 起始端口；默认 54321 */
+  port?: number;
+}
 
-export async function startGuiServer(): Promise<http.Server> {
+export async function startGuiServer(options: GuiServerOptions = {}): Promise<http.Server> {
+  const preferredPort = options.port ?? BASE_PORT;
+  const shouldOpenBrowser = options.openBrowser ?? true;
   console.log('[GUI] Starting GUI server...');
   console.log('[GUI] Version:', VERSION);
   console.log('[GUI] Platform:', os.platform());
   console.log('[GUI] Node.js version:', process.version);
   console.log('[GUI] GUI directory:', GUI_DIR);
-  console.log('[GUI] Base port:', BASE_PORT);
+  console.log('[GUI] Base port:', preferredPort);
 
   const i18n = initI18nSync();
   const tokenStore = createTokenStore();
@@ -266,6 +504,7 @@ export async function startGuiServer(): Promise<http.Server> {
     configuredEditors: new Set(),
     framework: 'react',
     outputDir: './src/styles/figma',
+    componentLibrary: 'auto',
   };
 
   try {
@@ -283,14 +522,26 @@ export async function startGuiServer(): Promise<http.Server> {
   if (existingConfig) {
     if (typeof existingConfig.framework === 'string') state.framework = existingConfig.framework;
     if (typeof existingConfig.outputDir === 'string') state.outputDir = existingConfig.outputDir;
-    console.log('[GUI] Loaded existing config:', { framework: state.framework, outputDir: state.outputDir });
+    if (
+      typeof existingConfig.componentLibrary === 'string' &&
+      ['auto', 'none', 'shadcn-ui', 'ant-design', 'element-plus', 'ant-design-vue'].includes(
+        existingConfig.componentLibrary,
+      )
+    ) {
+      state.componentLibrary = existingConfig.componentLibrary;
+    }
+    console.log('[GUI] Loaded existing config:', {
+      framework: state.framework,
+      outputDir: state.outputDir,
+      componentLibrary: state.componentLibrary,
+    });
   }
 
-  let port = BASE_PORT;
+  let port = preferredPort;
   let server: http.Server;
 
   for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
-    port = BASE_PORT + attempt;
+    port = preferredPort + attempt;
     console.log('[GUI] Trying port:', port);
     try {
       server = http.createServer(async (req, res) => {
@@ -318,6 +569,20 @@ export async function startGuiServer(): Promise<http.Server> {
         }
 
         try {
+          if (pathname === '/api/diagnostics/network' && req.method === 'GET') {
+            const target = urlObj.searchParams.get('target') || 'https://api.figma.com/v1/me';
+            try {
+              const diagnostic = await diagnoseNetwork(target);
+              sendJson(res, diagnostic.error ? 200 : 200, { success: true, diagnostic });
+            } catch (error) {
+              sendJson(res, 400, {
+                success: false,
+                error: error instanceof Error ? error.message : 'Invalid diagnostic target',
+              });
+            }
+            return;
+          }
+
           if (pathname === '/api/status') {
             console.log('[GUI] /api/status request received');
             let hasToken = false;
@@ -335,6 +600,7 @@ export async function startGuiServer(): Promise<http.Server> {
               config: {
                 framework: state.framework,
                 outputDir: state.outputDir,
+                componentLibrary: state.componentLibrary,
               },
               configuredEditors: Array.from(state.configuredEditors),
               version: VERSION,
@@ -348,9 +614,21 @@ export async function startGuiServer(): Promise<http.Server> {
             const data = JSON.parse(body) as { language?: Language };
             if (data.language && (data.language === 'zh-CN' || data.language === 'en-US')) {
               state.language = data.language;
-              await i18n.setLanguage(data.language);
-              console.log('[GUI] Language set to:', data.language);
-              sendJson(res, 200, { success: true, language: data.language });
+              // 主目录配置文件可能因系统策略（受控目录访问/杀软/只读）不可写：
+              // i18n 内存切换在落盘前已完成，且语言会随 /api/config/complete 写入项目级
+              // figma-dev.config.json，因此落盘失败不阻断向导，仅降级为「本次会话有效」。
+              let persisted = true;
+              try {
+                await i18n.setLanguage(data.language);
+              } catch (err) {
+                persisted = false;
+                console.warn(
+                  '[GUI] Language switched in memory but user-config persistence failed:',
+                  err instanceof Error ? err.message : String(err),
+                );
+              }
+              console.log('[GUI] Language set to:', data.language, persisted ? '' : '(in-memory only)');
+              sendJson(res, 200, { success: true, language: data.language, persisted });
             } else {
               console.log('[GUI] Invalid language:', data.language);
               sendJson(res, 400, { success: false, error: 'Invalid language' });
@@ -363,38 +641,34 @@ export async function startGuiServer(): Promise<http.Server> {
             const body = await readBody(req);
             const data = JSON.parse(body) as { token?: string };
             const token = data.token;
-
-            console.log('[GUI] Received token validation request, token length:', token?.length);
-
             if (!token || token.length < 20 || !token.startsWith('figd_')) {
-              console.log('[GUI] Invalid token format');
-              sendJson(res, 400, { success: false, valid: false, error: 'Invalid token format' });
+              sendJson(res, 400, { success: false, valid: false, category: 'auth', error: 'Invalid token format' });
               return;
             }
-
             try {
-              console.log('[GUI] Validating token with Figma API...');
               const client = createFigmaClient({ accessToken: token });
-              const isValid = await client.validateToken();
-              console.log('[GUI] Figma API validation result:', isValid);
-
-              if (isValid) {
-                console.log('[GUI] Saving token to secure storage...');
+              const userInfo = await client.validateToken();
+              if (userInfo) {
                 await tokenStore.saveToken('default', token);
                 await tokenStore.setDefault('default');
                 state.tokenConfigured = true;
-                console.log('[GUI] Token saved successfully');
                 sendJson(res, 200, { success: true, valid: true });
               } else {
-                console.log('[GUI] Token validation failed');
-                sendJson(res, 200, { success: false, valid: false, error: 'Token validation failed' });
+                sendJson(res, 200, { success: false, valid: false, category: 'auth', error: 'Token validation failed' });
               }
             } catch (error) {
-              console.error('[GUI] Token error:', error);
+              const detail: NetworkFailureDetail = error instanceof FigmaApiError && error.status === 0
+                ? classifyNetworkFailure(new Error(error.message))
+                : classifyNetworkFailure(error as Error);
+              console.error('[GUI] Token validation error:', detail.code, detail.category);
               sendJson(res, 200, {
                 success: false,
                 valid: false,
-                error: error instanceof Error ? error.message : String(error),
+                category: detail.category,
+                code: detail.code,
+                retriable: detail.retriable,
+                error: detail.message,
+                nextAction: detail.nextAction,
               });
             }
             return;
@@ -716,14 +990,25 @@ export async function startGuiServer(): Promise<http.Server> {
           if (pathname === '/api/config/complete' && req.method === 'POST') {
             console.log('[GUI] /api/config/complete request received');
             const body = await readBody(req);
-            const data = JSON.parse(body) as { framework?: string; outputDir?: string };
+            const data = JSON.parse(body) as { framework?: string; outputDir?: string; componentLibrary?: string };
 
             if (data.framework) state.framework = data.framework;
             if (data.outputDir) state.outputDir = data.outputDir;
+            // P3-32：组件库偏好白名单校验（非法/跨框架值不写盘，保持 undefined 即省略）
+            const UI_LIB_VALUES = ['auto', 'none', 'shadcn-ui', 'ant-design', 'element-plus', 'ant-design-vue'];
+            const componentLibrary =
+              typeof data.componentLibrary === 'string' && UI_LIB_VALUES.includes(data.componentLibrary)
+                ? data.componentLibrary
+                : 'auto';
+            state.componentLibrary = componentLibrary;
 
-            console.log('[GUI] Saving config:', { framework: state.framework, outputDir: state.outputDir });
+            console.log('[GUI] Saving config:', {
+              framework: state.framework,
+              outputDir: state.outputDir,
+              componentLibrary,
+            });
 
-            const config = {
+            const config: Record<string, unknown> = {
               $schema: 'https://schema.figma-dev-tools.com/config.json',
               defaultToken: 'default',
               outputDir: state.outputDir,
@@ -735,6 +1020,9 @@ export async function startGuiServer(): Promise<http.Server> {
               importAlias: '@',
               language: state.language,
             };
+            if (componentLibrary && componentLibrary !== 'none') {
+              config.componentLibrary = componentLibrary;
+            }
 
             writeJson(configPath, config);
 
@@ -764,8 +1052,11 @@ export async function startGuiServer(): Promise<http.Server> {
           }
 
           if (fs.existsSync(normalizedPath) && fs.statSync(normalizedPath).isFile()) {
-            const content = fs.readFileSync(normalizedPath);
-            res.writeHead(200, { 'Content-Type': getMimeType(normalizedPath) });
+            let content = fs.readFileSync(normalizedPath);
+            if (normalizedPath === path.join(GUI_DIR, 'index.html')) {
+              content = Buffer.from(injectGuiVersion(content.toString('utf-8'), VERSION), 'utf-8');
+            }
+            res.writeHead(200, { 'Content-Type': getMimeType(normalizedPath), 'Cache-Control': 'no-store' });
             res.end(content);
             return;
           }
@@ -805,20 +1096,41 @@ export async function startGuiServer(): Promise<http.Server> {
       console.log(chalk.white('   🔢 Version: ') + chalk.gray(VERSION));
       console.log(chalk.white('   🖥️  Platform: ') + chalk.gray(os.platform()));
       console.log('');
-      console.log(chalk.yellow('   💡 The browser will open automatically.'));
+      if (shouldOpenBrowser) {
+        console.log(chalk.yellow('   💡 The browser will open automatically.'));
+      } else {
+        console.log(chalk.gray('   Browser auto-open is disabled for this session.'));
+      }
       console.log(chalk.gray('      Press Ctrl+C to stop the server.'));
       console.log('');
 
-      try {
-        await open(`http://localhost:${port}`);
-      } catch {
-        console.log(chalk.gray('   (Could not open browser automatically, please visit the URL above)'));
+      if (shouldOpenBrowser) {
+        try {
+          await open(`http://localhost:${port}`);
+        } catch {
+          console.log(chalk.gray('   (Could not open browser automatically, please visit the URL above)'));
+        }
       }
 
       return server;
     } catch (err) {
       if (err instanceof Error && err.message === 'EADDRINUSE') {
-        console.log(chalk.yellow(`   ⚠️  Port ${port} is in use, trying next port...`));
+        // P3-32：端口被占时探测占用方版本，提示用户「浏览器看到的可能是旧实例」
+        if (attempt === 0) {
+          const occupantVersion = await probeOccupantVersion(port).catch(() => null);
+          if (occupantVersion && occupantVersion !== VERSION) {
+            console.log(
+              chalk.yellow(
+                `   ⚠️  端口 ${port} 已被旧版本 GUI 占用（运行中 v${occupantVersion}，当前 v${VERSION}）。\n` +
+                  `      浏览器若仍打开 http://localhost:${preferredPort}/ 看到的会是旧版本；请结束旧实例后重试，或使用下方新端口。`,
+              ),
+            );
+          } else {
+            console.log(chalk.yellow(`   ⚠️  Port ${port} is in use, trying next port...`));
+          }
+        } else {
+          console.log(chalk.yellow(`   ⚠️  Port ${port} is in use, trying next port...`));
+        }
         continue;
       }
       console.error('[GUI] Failed to start server:', err);
@@ -826,5 +1138,5 @@ export async function startGuiServer(): Promise<http.Server> {
     }
   }
 
-  throw new Error(`Could not find an available port between ${BASE_PORT} and ${BASE_PORT + MAX_PORT_ATTEMPTS - 1}`);
+  throw new Error(`Could not find an available port between ${preferredPort} and ${preferredPort + MAX_PORT_ATTEMPTS - 1}`);
 }

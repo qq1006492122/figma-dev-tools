@@ -1,0 +1,129 @@
+{
+  "label": "baseline",
+  "recordedAt": "2026-10-12T08:41:57.413Z",
+  "env": {
+    "node": "v24.21.0",
+    "platform": "win32/x64",
+    "os": "Windows_NT 10.0.26200",
+    "cpu": "AMD Ryzen 7 H 255 w/ Radeon 780M Graphics",
+    "cores": 16,
+    "memTotalGB": 15.2
+  },
+  "fixture": {
+    "targetNodes": 1000,
+    "actualNodes": 998,
+    "seed": 20261012
+  },
+  "config": {
+    "warmup": 1,
+    "runs": 5,
+    "gcAvailable": true
+  },
+  "react": {
+    "runs": 5,
+    "gcAvailable": true,
+    "durationMs": {
+      "median": 373.88,
+      "min": 326.87,
+      "max": 417.92
+    },
+    "heapDeltaMB": {
+      "median": 24.42,
+      "max": 26.65
+    },
+    "rssMB": {
+      "median": 233.03,
+      "max": 236.93
+    },
+    "outputBytes": {
+      "median": 270944,
+      "stable": true
+    },
+    "samples": [
+      {
+        "ms": 402.9,
+        "heapDeltaMB": 26.65,
+        "rssMB": 170.28,
+        "outBytes": 270944
+      },
+      {
+        "ms": 417.92,
+        "heapDeltaMB": 24.42,
+        "rssMB": 232.61,
+        "outBytes": 270944
+      },
+      {
+        "ms": 373.88,
+        "heapDeltaMB": 24.42,
+        "rssMB": 233.03,
+        "outBytes": 270944
+      },
+      {
+        "ms": 326.87,
+        "heapDeltaMB": 24.61,
+        "rssMB": 236.93,
+        "outBytes": 270944
+      },
+      {
+        "ms": 338.61,
+        "heapDeltaMB": 21.27,
+        "rssMB": 234.58,
+        "outBytes": 270944
+      }
+    ]
+  },
+  "weapp": {
+    "runs": 5,
+    "gcAvailable": true,
+    "durationMs": {
+      "median": 50.22,
+      "min": 44.22,
+      "max": 67.04
+    },
+    "heapDeltaMB": {
+      "median": 28.66,
+      "max": 29.15
+    },
+    "rssMB": {
+      "median": 233.57,
+      "max": 233.6
+    },
+    "outputBytes": {
+      "median": 1031602,
+      "stable": true
+    },
+    "samples": [
+      {
+        "ms": 67.04,
+        "heapDeltaMB": 28.81,
+        "rssMB": 231.21,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 56.19,
+        "heapDeltaMB": 29.15,
+        "rssMB": 232.48,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 50.22,
+        "heapDeltaMB": 28.66,
+        "rssMB": 233.57,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 44.22,
+        "heapDeltaMB": 28.43,
+        "rssMB": 233.6,
+        "outBytes": 1031602
+      },
+      {
+        "ms": 44.27,
+        "heapDeltaMB": 27.86,
+        "rssMB": 233.6,
+        "outBytes": 1031602
+      }
+    ]
+  },
+  "weappReactRatio": 0.134
+}

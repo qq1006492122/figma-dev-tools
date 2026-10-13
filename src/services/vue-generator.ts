@@ -11,6 +11,7 @@
 import type { DesignContext, ProcessedNode } from '../types/nodes.js';
 import type { SmartInferenceSwitches } from '../types.js';
 import { escapeAttribute, sanitizeIdentifier, sanitizeText } from '../utils/security.js';
+import { getToolVersion } from '../utils/version.js';
 import { createA11yEnhancer } from './a11y-enhancer.js';
 import { formatCode } from './code-formatter.js';
 import type { EnhancementReports } from './code-generator.js';
@@ -43,6 +44,16 @@ import {
   type GeneratedVue2Props,
   type GeneratedVue3Props,
 } from './props-type-generator.js';
+import {
+  COMPONENT_LIBRARIES,
+  matchComponent,
+  renderVuePropAttr,
+  resolveLibrary,
+  type ComponentLibraryChoice,
+  type ComponentLibraryId,
+  type ComponentMatch,
+  type PackageJsonLike,
+} from './component-library/index.js';
 
 // ============ 类型定义 ============
 
@@ -62,6 +73,13 @@ export interface VueCodeGenOptions {
   inference?: SmartInferenceSwitches;
   /** Vue 大版本（v1.4.19 T18）：3（默认，<script setup>）| 2（Options API SFC） */
   vueVersion?: 2 | 3;
+  /**
+   * WBS-P2-13：组件库选择。'auto' 按 projectPackageJson 真实依赖检测，
+   * 'none'（默认）保持原生标签；显式库 id 不做依赖拦截（跨框架选择显式报错）。
+   */
+  componentLibrary?: ComponentLibraryChoice;
+  /** auto 检测用的最近 package.json（CLI 读盘后传入；MCP 无 fs 可不传） */
+  projectPackageJson?: PackageJsonLike | null;
 }
 
 export interface GeneratedVueComponent {
@@ -100,6 +118,13 @@ interface VueRenderContext {
   componentName: string;
   /** 父级节点在样式渲染器中注册的类名（v1.4.19 T16：Less/Sass 嵌套归属） */
   parentStyleIdentifier?: string;
+  /**
+   * WBS-P2-13：已解析的组件库 id（null=关闭组件映射，全部原生标签）。
+   * 由 generateFromContext 按 componentLibrary + package.json 依赖解析一次。
+   */
+  componentLibrary: ComponentLibraryId | null;
+  /** 组件库 import 收集：包名 → 命名导入集合（element-plus/ant-design-vue 均为单包聚合） */
+  uiImports: Map<string, Set<string>>;
 }
 
 const DEFAULT_VUE_OPTIONS: Required<VueCodeGenOptions> = {
@@ -113,7 +138,35 @@ const DEFAULT_VUE_OPTIONS: Required<VueCodeGenOptions> = {
   skipEnhancements: false,
   inference: {},
   vueVersion: 3,
+  componentLibrary: 'none',
+  projectPackageJson: null,
 };
+
+// ============ 组件库映射（WBS-P2-13） ============
+
+/** 结构需手工调整的组件（容器/组合式），替换标签时必须给警告 */
+const VUE_COMPOSITION_WARNING_COMPONENTS = new Set(['dialog', 'tabs', 'avatar']);
+
+/**
+ * 注册一次匹配到的组件 import（主组件 + 组合式子组件）。
+ * element-plus / ant-design-vue 均为单包命名导入：
+ * `import { ElButton, ElInput } from 'element-plus'`；
+ * `<script setup>` 中导入即自动可用，Vue2 Options API 另需 components 注册。
+ */
+function registerVueUiImport(
+  uiImports: Map<string, Set<string>>,
+  library: ComponentLibraryId,
+  match: ComponentMatch,
+): void {
+  const pkg = COMPONENT_LIBRARIES[library].packageName;
+  let set = uiImports.get(pkg);
+  if (!set) {
+    set = new Set<string>();
+    uiImports.set(pkg, set);
+  }
+  set.add(match.templateName ?? match.importName);
+  for (const sub of match.subImports) set.add(sub);
+}
 
 // ============ VueGenerator 类 ============
 
@@ -161,6 +214,19 @@ export class VueGenerator {
     const warnings: string[] = [];
     const imports = new Set<string>();
 
+    // WBS-P2-13：组件库解析（auto 必须有真实依赖证据；无证据/显式 none → 原生标签）
+    const resolvedComponentLibrary = resolveLibrary(
+      'vue',
+      options.componentLibrary ?? 'none',
+      options.projectPackageJson ?? null,
+    );
+    const uiImports = new Map<string, Set<string>>();
+    if (options.componentLibrary === 'auto' && !resolvedComponentLibrary) {
+      warnings.push(
+        'componentLibrary=auto 未检测到 element-plus/ant-design-vue 依赖，已降级为原生标签（显式指定 componentLibrary 可覆盖）',
+      );
+    }
+
     // 透传 design-context 层的警告（如陈旧缓存降级）
     if (context.warnings && context.warnings.length > 0) {
       warnings.push(...context.warnings);
@@ -197,6 +263,8 @@ export class VueGenerator {
         fileKey: context.fileKey,
         svgRenderer: this._svgRenderer,
         componentName,
+        componentLibrary: resolvedComponentLibrary,
+        uiImports,
       },
       true,
     );
@@ -204,6 +272,14 @@ export class VueGenerator {
     // 仅当模板实际出现 publicCdnUrl() 调用时才导入（v1.4.18：非 none 构建器不产出该调用）
     if (templateContent.includes('publicCdnUrl')) {
       imports.add("import { publicCdnUrl } from '@/lib/asset-path';");
+    }
+
+    // WBS-P2-13：组件库 import 收口（element-plus / ant-design-vue 单包聚合）
+    const uiComponentNames: string[] = [];
+    for (const [pkg, names] of uiImports) {
+      const nameList = [...names];
+      imports.add(`import { ${nameList.join(', ')} } from '${pkg}';`);
+      uiComponentNames.push(...nameList);
     }
 
     // 样式旁路文件（v1.4.18 T9 css-modules；v1.4.19 T16 less/sass；vanilla-extract 不支持 Vue 已在校验闸被拒）
@@ -228,6 +304,7 @@ export class VueGenerator {
         Array.from(imports),
         vue2Props,
         advisoryCommentLines,
+        uiComponentNames,
       );
     } else {
       const generatedProps = generateVue3Props(context.node.componentProperties ?? [], {
@@ -402,7 +479,22 @@ export class VueGenerator {
     const buildClassAttr = (value: string): string =>
       isCssModuleBinding ? `:class="$style['${value}']"` : `class="${value}"`;
 
-    const tag = this._selectTag(node);
+    let tag = this._selectTag(node);
+
+    // WBS-P2-13：组件库映射（保守门控，未命中保持原生标签）
+    const uiMatch = ctx.componentLibrary ? matchComponent(node, ctx.componentLibrary) : null;
+    if (uiMatch && ctx.componentLibrary) {
+      tag = uiMatch.templateName ?? uiMatch.tagName ?? uiMatch.importName;
+      registerVueUiImport(ctx.uiImports, ctx.componentLibrary, uiMatch);
+      for (const advice of uiMatch.compositionAdvice ?? []) {
+        const warning = `[${node.name || node.figmaId}] ${uiMatch.tagName ?? uiMatch.importName}: ${advice}`;
+        if (!ctx.warnings.includes(warning)) ctx.warnings.push(warning);
+      }
+      if (VUE_COMPOSITION_WARNING_COMPONENTS.has(uiMatch.component)) {
+        const structural = `[${node.name || node.figmaId}] ${tag} 结构与原生素材不同（${uiMatch.component} 子结构/受控状态/src 绑定），已替换容器标签，请按组件库文档手工调整子节点结构`;
+        if (!ctx.warnings.includes(structural)) ctx.warnings.push(structural);
+      }
+    }
 
     // 文本节点（XSS 防护：清理文本内容）
     if (node.originalType === 'TEXT' || node.role === 'text') {
@@ -416,9 +508,10 @@ export class VueGenerator {
       return `${indent}<${tag}${textAttrStr}>${textContent}</${tag}>`;
     }
 
-    // ============ 图片节点特殊处理（增强版 v1.4.0） ============
+    // ============ 图片节点特殊处理（增强版 v1.4.0；组件映射后交由 Avatar 等组件处理） ============
     const isImageNode =
-      (node.originalType === 'RECTANGLE' && node.fills?.some((f) => f.type === 'image')) || node.asset || tag === 'img';
+      !uiMatch &&
+      ((node.originalType === 'RECTANGLE' && node.fills?.some((f) => f.type === 'image')) || node.asset || tag === 'img');
 
     if (isImageNode) {
       const attrs: string[] = [];
@@ -530,7 +623,8 @@ export class VueGenerator {
     if (nodeEnhancements._a11y?.role && nodeEnhancements._a11y.role !== tag) {
       attrs.push(`role="${escapeAttribute(nodeEnhancements._a11y.role)}"`);
     }
-    if (tag === 'button' || nodeEnhancements._a11y?.isButton) attrs.push('type="button"');
+    // 组件库 Button 的 type 是 variant 口径（primary/default…），不能注入原生 type=button
+    if (!uiMatch && (tag === 'button' || nodeEnhancements._a11y?.isButton)) attrs.push('type="button"');
 
     // 图标节点默认 aria-hidden
     if (node.role === 'icon' && !nodeEnhancements._a11y?.ariaHidden && !nodeEnhancements._a11y?.ariaLabel) {
@@ -548,6 +642,33 @@ export class VueGenerator {
       attrs.push(`:style="{ ${styleEntries} }"`);
     }
 
+    // WBS-P2-13：组件库 Props 注入（Vue 模板属性口径；无法静态输出的运行时 prop 由结构警告覆盖）
+    if (uiMatch && ctx.componentLibrary) {
+      for (const prop of uiMatch.props) {
+        const attr = renderVuePropAttr(ctx.componentLibrary, uiMatch.component, prop);
+        if (attr) attrs.push(attr);
+      }
+    }
+
+    const attrStr = attrs.length > 0 ? ' ' + attrs.join(' ') : '';
+
+    // WBS-P2-13：组件库叶子组件（Button/Badge 等）仅含文本子节点时，
+    // 文案直接内联为插槽内容（<el-button type="primary">Save</el-button>），
+    // 避免文本被 <p>/<span> 包裹而不符合组件库用法
+    if (
+      uiMatch &&
+      node.children &&
+      node.children.length > 0 &&
+      node.children.every((c) => c.role === 'text' || c.originalType === 'TEXT')
+    ) {
+      const textContent = node.children
+        .map((c) => (c.textContent ? sanitizeText(c.textContent) : ''))
+        .join('');
+      if (textContent) {
+        return `${indent}<${tag}${attrStr}>${textContent}</${tag}>`;
+      }
+    }
+
     let children = '';
     if (node.children && node.children.length > 0) {
       // v1.4.19 T16：向子节点传递当前样式归属（Less/Sass 嵌套输出；其他渲染器忽略）
@@ -561,8 +682,6 @@ export class VueGenerator {
       );
       children = childResults.filter(Boolean).join('\n');
     }
-
-    const attrStr = attrs.length > 0 ? ' ' + attrs.join(' ') : '';
 
     if (children) {
       return `${indent}<${tag}${attrStr}>\n${children}\n${indent}</${tag}>`;
@@ -650,7 +769,7 @@ export class VueGenerator {
     const lines: string[] = [];
 
     lines.push(`<script setup${lang}>`);
-    lines.push(`// ${componentName} - Generated by figma-dev-tools v1.4.0`);
+    lines.push(`// ${componentName} - Generated by figma-dev-tools v${getToolVersion()}`);
     if (smartCommentLines.length > 0) {
       lines.push(...smartCommentLines);
     }
@@ -705,12 +824,13 @@ export class VueGenerator {
     scriptImports: string[],
     generatedProps: GeneratedVue2Props,
     smartCommentLines: string[] = [],
+    uiComponentNames: readonly string[] = [],
   ): string {
     const lang = useTs ? ' lang="ts"' : '';
     const lines: string[] = [];
 
     lines.push(`<script${lang}>`);
-    lines.push(`// ${componentName} - Generated by figma-dev-tools v1.4.19 (Vue 2 Options API)`);
+    lines.push(`// ${componentName} - Generated by figma-dev-tools v${getToolVersion()} (Vue 2 Options API)`);
     if (smartCommentLines.length > 0) {
       lines.push(...smartCommentLines);
     }
@@ -730,6 +850,10 @@ export class VueGenerator {
 
     lines.push(useTs ? 'export default defineComponent({' : 'export default {');
     lines.push(`  name: '${componentName}',`);
+    // WBS-P2-13：Options API 不会自动注册 <script setup> 式导入，组件库组件需显式注册
+    if (uiComponentNames.length > 0) {
+      lines.push(`  components: { ${uiComponentNames.join(', ')} },`);
+    }
     lines.push('  props: {');
     // 始终保留 class 透传契约（与 Vue3 script setup 输出一致）
     lines.push("    class: { type: String, default: '' },");

@@ -1,13 +1,13 @@
 ---
 name: 'figma-dev-tools'
 description:
-  'Figma 设计到代码增强工具集 v1.4.19 -
-  22个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、React（9套样式）与Vue（Vue3 setup/Vue2 Options API，5套样式）一级高保真代码生成及整页批量生成，Svelte/HTML等其他框架通过框架无关结构化数据支持；智能推断仅以注释/报告给建议（Grid/图标/暗色/动效、交互骨架、列表数据化、语义命名）。解决div
+  'Figma 设计到代码增强工具集 v1.4.20-dev -
+  23个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测（管线内增强，非独立工具）、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、React（9套样式）与Vue（Vue3 setup/Vue2 Options API，5套样式）一级高保真代码生成、整页批量生成及微信小程序四件套生成（v1.4.20开发版，能力补齐中），Svelte/HTML等其他框架通过框架无关结构化数据支持；智能推断仅以注释/报告给建议（Grid/图标/暗色/动效、交互骨架、列表数据化、语义命名）。解决div
   soup、上下文爆炸、hex写死、资源路径处理、深层嵌套截断、层级混乱等问题。支持Trae/VS
-  Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code等10+编辑器。'
+  Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code共8个编辑器。'
 ---
 
-# Figma Dev Tools v1.4.19 - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.4.20-dev - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 
@@ -45,11 +45,11 @@ description:
 | 7   | **禁止 emoji 图标**              | SVG 图标通过 publicCdnUrl 引用                               | 使用 ❌✅📌 等 emoji 代替图标        |
 | 8   | **新色必须 @theme 扩展**         | 在 CSS 中 `@theme inline { --color-xxx: ... }`               | 直接写 `bg-[#new-color]`             |
 | 9   | **Token 安全**                   | .env 中配置，不提交 Git                                      | 将 Token 硬编码在代码或配置里        |
-| 10  | **框架选对生成工具（v1.4.19）** | Vue 项目直接用 `figma_generate_vue`（Vue3/Vue2）；整页用 `figma_batch_generate`；Svelte/HTML/Angular/Solid 仍先 `figma_get_structured_data` | Vue 误用 `figma_generate_jsx`；Svelte 误用任一代码生成工具 |
+| 10  | **框架选对生成工具（v1.4.20）** | Vue 项目直接用 `figma_generate_vue`（Vue3/Vue2）；**Svelte 4 项目用 `figma_generate_svelte`（样式仅 tailwind/unocss/css-modules）**；微信小程序用 `figma_generate_weapp`（WXML/WXSS/JS/JSON 四件套，开发版）；整页用 `figma_batch_generate`（framework 可选 react/vue/svelte）；HTML/Angular/Solid 仍先 `figma_get_structured_data` | Vue/Svelte 误用 `figma_generate_jsx`；Svelte 传 styled/emotion/less/sass 等不支持的样式（触网前报错）；小程序误用 web 生成工具 |
 
 ---
 
-## 🚀 标准工作流（v1.4.19：A React / B 其他框架 / C Vue 一级 / D 批量）
+## 🚀 标准工作流（A React / B 其他框架 / C Vue 一级 / D 批量 / E 微信小程序）
 
 > **根据目标框架选择对应工作流，严格按步骤调用工具，不要跳步！**
 
@@ -100,11 +100,12 @@ Step 2: figma_get_design_context ← 目标区块精简上下文
    ↓
 Step 3: figma_get_screenshot     ← 视觉基准截图（2x）
    ↓
-Step 4: figma_generate_vue       ← 一键生成 .vue SFC
-   │   · vueVersion=3（默认）：<script setup lang="ts">
-   │   · vueVersion=2：Options API（defineComponent + PropType/validator）
-   │   · styleFormat：tailwind / unocss / css-modules / less / sass
-   │     （styled/emotion/vanilla-extract/panda 为 React 专属，会触网前报错）
+Step 4: figma_generate_vue / figma_generate_svelte
+  │   · Vue：vueVersion=3（默认，<script setup>）| 2（Options API）
+  │   · Svelte 4（v1.4.20）：export let props + on:* 事件 + {#if}/{#each}
+  │   · Vue 样式：tailwind/unocss/css-modules/less/sass
+  │   · Svelte 样式仅：tailwind / unocss / css-modules（scoped style，非 hash 语义）
+  │     （styled/emotion/vanilla-extract/panda 为 React 专属，会触网前报错）
    ↓
 Step 5: figma_download_assets    ← 下载图片/SVG 资源
    ↓
@@ -120,6 +121,31 @@ Step 7: 高保真检查
 - 需要精确控制时传 `nodeIds` 显式指定区块；`componentNamePrefix` 给区块组件统一前缀（如 `Landing`）。
 - MCP 不写磁盘；CLI `figma-dev batch <url> --out <dir>` 直接落盘多文件目录。
 - 智能推断产出（T21 四类 + T22 交互/列表/命名）**全部是头注释与 structuredContent 里的建议，不自动改写显式样式/代码**；不需要时用 `inference` 分项关闭或 `skipEnhancements` 总闸关闭。
+
+### 工作流 E：微信小程序（v1.4.20 开发版，能力补齐中）
+
+```
+Step 1: figma_get_metadata        ← 高层概览
+   ↓
+Step 2: figma_get_design_context  ← 目标区块精简上下文
+   ↓
+Step 3: figma_get_screenshot      ← 视觉基准截图（2x）
+   ↓
+Step 4: figma_generate_weapp      ← 生成 WXML/WXSS/JS/JSON 四件套
+   │   · isPage=true 生成 Page 页面；默认 Component 组件
+   │   · designWidth 按设计帧宽度设置（375 帧用 375，默认 750）
+   │   · unit=rpx（默认）或 px
+   ↓
+Step 5: 资源落盘（CLI）            ← MCP 只返回代码与 asset manifest
+   │   · figma-dev weapp <url> --output ./pages/xxx --page
+   ↓
+Step 6: 人工微调 + 微信开发者工具验证
+```
+
+注意：
+- 小程序是 WXML 而非 HTML：不要把 web 生成结果中的 `<div>/<span>/<img>`、CSS 变量、内联 SVG、aria-* 直接搬进小程序。
+- 图片资源在小程序中受**合法域名（CDN 模式）**与**主包 2MB 体积**约束；生成结果中 `src=""` 占位与 pendingAssets 必须经 CLI 落盘或配置 CDN 后才可运行，不要假装资源已就位。
+- 该工作流为开发版能力；wx:for/wx:if、完整资源管线、scroll-view/rich-text 等仍在补齐，遇到不支持的样式以工具 warnings 为准。
 
 ---
 
@@ -189,7 +215,11 @@ Step 7: 高保真检查
   figmaUrl: "https://www.figma.com/design/xxxxx/...?node-id=23-11032",
   componentName: "HeroSection",  // PascalCase 组件名
   sceneName: "landing-page",     // kebab-case 场景名，用于资源路径
-  maxDepth: 8
+  maxDepth: 8,
+  // v1.4.20：项目使用组件库时显式指定，语义节点直接产出库标签+import：
+  // React: 'shadcn-ui' | 'ant-design'  Vue: 'element-plus' | 'ant-design-vue'
+  // 'auto' 按 package.json 依赖与 components/ui 目录检测；不确定就省略（默认 none）
+  componentLibrary: "auto",
 }
 ```
 
@@ -450,12 +480,17 @@ Variables、Svelte 的 CSS custom properties 等）。
 ### 工具调用正确性
 
 - [ ] **调用顺序正确**：React: metadata → design_context → screenshot →
-      generate_jsx → download_assets；Vue（v1.4.19 一级）: metadata →
+      generate_jsx → download_assets；Vue（一级）: metadata →
       design_context → screenshot → generate_vue → download_assets；
-      其他框架（Svelte/HTML/Angular/Solid）: metadata → structured_data →
+      微信小程序: metadata → design_context → screenshot →
+      generate_weapp → CLI 资源落盘；
+      Svelte 4: metadata → design_context → screenshot →
+      figma_generate_svelte（样式限 tailwind/unocss/css-modules）；
+      其他框架（HTML/Angular/Solid）: metadata → structured_data →
       screenshot → (tokens) → 生成代码；整页可改用 figma_batch_generate
-- [ ] **框架工具未混用**：Vue 用 `figma_generate_vue`（不是 generate_jsx）；
-      Svelte/HTML 等只用 `figma_get_structured_data`
+- [ ] **框架工具未混用**：Vue 用 `figma_generate_vue`、Svelte 用 `figma_generate_svelte`（不是 generate_jsx；Svelte 样式仅 tailwind/unocss/css-modules）；
+      微信小程序用 `figma_generate_weapp`（产物是 WXML/WXSS，不是 HTML）；
+      HTML/Angular/Solid 只用 `figma_get_structured_data`
 - [ ] **未使用旧版工具**：React 用 `figma_generate_jsx` 而非
       `figma_generate_component`
 - [ ] **maxDepth 合理**：大区块拆分处理，单次 maxDepth 不超过 8（structured_data 不超过10）
@@ -523,8 +558,10 @@ Variables、Svelte 的 CSS custom properties 等）。
 | 颜色看起来偏色/不对              | oklch 色彩空间在某些浏览器渲染差异，或透明度丢失 | 尝试切换 `colorFormat: "hex"`；检查 fills 中的 opacity 属性                |
 | 图片加载 404                     | 路径错误或未用正确引用方式                       | 确认资源已下载；React 用 `publicCdnUrl()`，其他框架用对应路径方式          |
 | 大区块生成时间超长/截断          | 节点数过多（>100），单次深度太大                 | 拆分为多个子区块分别处理                                                   |
-| Svelte/HTML/Angular/Solid 误用 generate_jsx / generate_vue | 工具选择错误                             | 使用 `figma_get_structured_data` 获取框架无关JSON，再生成对应框架代码      |
+| Svelte 项目误用 generate_jsx / generate_vue（v1.4.20 起） | 工具选择错误 | 改用 `figma_generate_svelte`（Svelte 4；样式限 tailwind/unocss/css-modules，非法组合触网前报错）；整页用 `figma_batch_generate --framework svelte` |
+| HTML/Angular/Solid 误用 generate_jsx / generate_vue | 暂无一级生成工具 | 使用 `figma_get_structured_data` 获取框架无关 JSON，再生成对应框架代码 |
 | Vue 项目误用 generate_jsx（v1.4.19 起） | Vue 已有一级生成工具                     | 改用 `figma_generate_vue`（`vueVersion: 2|3`，5 套样式）；整页用 `figma_batch_generate` |
+| 微信小程序误用 generate_jsx/vue，或直接搬 web 产物 | 小程序只认 WXML/WXSS，标签/CSS/SVG 规则不同 | 改用 `figma_generate_weapp`；图片经 CLI 落盘或配 CDN 合法域名；designWidth 按帧宽度设置 |
 
 ### Mac 窗口交通灯标准组件（React，可直接复用）
 
@@ -551,9 +588,10 @@ function TrafficLights() {
 
 ---
 
-## 🔧 MCP 工具快速参考（22个）
+## 🔧 MCP 工具快速参考（23个）
 
 > 调用参数格式：直接以 JSON 对象传入，无需额外包装。
+> 数量口径：v1.4.20 开发版代码实际注册 23 个（以 `test/smoke/mcp-tools.smoke.test.ts` 枚举为发布闸门）；npm latest v1.4.19 为 22 个（不含 `figma_generate_weapp`）。动画/交互检测是管线内增强服务，不是独立工具。
 
 ### 核心工作流工具
 
@@ -567,31 +605,41 @@ function TrafficLights() {
 | `figma_generate_jsx`       | ⭐ 一键生成React TSX   | `{ figmaUrl: "...", componentName: "Xxx", sceneName: "xxx" }` |
 | `figma_download_assets`    | 下载图片/SVG到public   | `{ fileKey: "...", sceneName: "xxx", assetNodeIds: ["..."] }` |
 
-**Vue 一级支持 + 整页批量（v1.4.19 新）：**
+**Vue / Svelte 一级支持 + 整页批量（v1.4.19 / v1.4.20）：**
 
 | 工具                        | 一句话用途                                        | 最小调用示例                                                                   |
 | --------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `figma_generate_vue`        | ⭐ 一键生成 Vue3/Vue2 SFC（5 套样式）             | `{ figmaUrl: "...", componentName: "Xxx", vueVersion: 3, styleFormat: "sass" }` |
-| `figma_batch_generate`      | ⭐ 整页语义区块批量生成 + barrel（React/Vue）      | `{ figmaUrl: "...", nodeId: "1-2", framework: "vue", componentNamePrefix: "Landing" }` |
+| `figma_generate_svelte`     | ⭐ 一键生成 Svelte 4 SFC（仅 tailwind/unocss/css-modules，css-modules 为 scoped style 非 hash 语义） | `{ figmaUrl: "...", componentName: "Xxx", styleFormat: "tailwind" }` |
+| `figma_batch_generate`      | ⭐ 整页语义区块批量生成 + barrel（React/Vue/Svelte） | `{ figmaUrl: "...", nodeId: "1-2", framework: "svelte", componentNamePrefix: "Landing" }` |
 
-**多框架支持（v1.3.2 新，Svelte/HTML/Angular/Solid 等）：**
+**多框架支持（Svelte/HTML/Angular/Solid 等）：**
 
 | 工具                        | 一句话用途                               | 最小调用示例                       |
 | --------------------------- | ---------------------------------------- | ---------------------------------- |
 | `figma_get_structured_data` | ⭐ 框架无关JSON结构（非React/Vue 框架）  | `{ figmaUrl: "...", maxDepth: 8 }` |
+
+**微信小程序（v1.4.20 开发版，能力补齐中）：**
+
+| 工具                     | 一句话用途 | 最小调用示例 |
+| ------------------------ | ---------- | ------------ |
+| `figma_generate_weapp`   | ⭐ 生成 WXML/WXSS/JS/JSON 四件套（Page/Component 双模式，rpx 适配） | `{ figmaUrl: "...", componentName: "Xxx", isPage: false, designWidth: 750 }` |
 
 ### 辅助工具
 
 | 工具                       | 用途                                           | 调用示例                                                      |
 | -------------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
 | `figma_parse_url`          | 解析URL得fileKey/nodeId                        | `{ url: "https://www.figma.com/design/xxx/...?node-id=1-2" }` |
-| `figma_validate_token`     | 验证 Token 有效性                              | `{ accessToken: "figd_xxx" }`                                 |
+| `figma_validate_token`     | 验证 Token 有效性                              | `{ tokenProfile: "default" }`                                 |
 | `figma_get_file`           | 获取文件页面列表                               | `{ figmaUrl: "..." }`                                         |
 | `figma_list_components`    | 列出文件中可复用组件                           | `{ fileKey: "xxx" }`                                          |
 | `figma_extract_tokens`     | 提取全量设计 Tokens                            | `{ figmaUrl: "...", colorFormat: "oklch" }`                   |
 | `figma_generate_styles`    | 生成CSS/Tailwind主题                           | `{ tokens: {...}, outputFormat: "tailwind-v4" }`              |
 | `figma_sync_to_project`    | 写入tokens到项目文件                           | `{ tokens: {...}, outputDir: "/abs/path/to/styles" }`         |
 | `figma_generate_component` | ⚠️ 旧版组件生成（不推荐，React用generate_jsx） | `{ figmaUrl: "...", styleFormat: "tailwind" }`                |
+| `figma_lint_design`        | 设计规范/层级结构预检                          | `{ figmaUrl: "...", maxDepth: 15 }`                           |
+| `figma_create_icon_sprite` | 批量 SVG 合并为 Sprite + TS 类型               | `{ svgDir: "...", outputPath: "...", prefix: "icon" }`        |
+| `figma_ocr_extract`        | OCR 文本提取（原生 JSON 优先 + tesseract 兜底）| `{ figmaUrl: "..." }`                                         |
 
 **v1.4.4 付费墙兜底工具：**
 
@@ -675,7 +723,7 @@ import { publicCdnUrl } from '@/lib/utils';
 
 ---
 
-## 🖥️ 支持的编辑器（10+）
+## 🖥️ 支持的编辑器（8 个）
 
 | 编辑器                             | 配置格式        | 说明                         |
 | ---------------------------------- | --------------- | ---------------------------- |
