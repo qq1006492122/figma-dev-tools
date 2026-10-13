@@ -19,7 +19,7 @@
 | 5 | Watch（核心逻辑 5 文件 43 例） | 自动化 | ✅ 通过 | test/services/watch/* |
 | 6 | Compare（核心逻辑 15 例） | 自动化 | ✅ 通过 | test/services/compare-code.test.ts |
 | 7 | 微信开发者工具（6 场景） | **人工** | ✅ 2026-10-12 已执行通过（上一轮记录） | scripts/weapp-demo-smoke.mjs（静态 15/15）；§4.1 |
-| 8 | Svelte dev 目检 | **人工**+自动 | ✅ 2026-10-13 自动化部分通过（§4.2-B 三组合+no-ts 对真实稿生成，svelte/compiler 编译 4/4 OK，非法样式 1.4s 触网前失败）；**浏览器交互目检 §4.2-A 仍待 QA** | §4.2 |
+| 8 | Svelte dev 目检 | **人工**+自动 | ✅ 2026-10-14 全部通过（§4.2-B 三组合+no-ts 真实稿 svelte/compiler 4/4 OK，非法样式触网前失败；§4.2-A 浏览器目检渲染/交互/空态/事件/HMR 全过） | §4.2 |
 | 9 | Watch 四框架实况 | **人工** | ⏳ 待 QA 执行 | §4.3 |
 | 10 | Compare 可视化目检 | **人工** | ⏳ 待 QA 执行 | §4.4 |
 | 11 | React/Vue 真实项目抽测 | **人工（建议）** | ✅ 2026-10-13 自动化通过（鸿溟平台真实稿：antd/element-plus/ant-design-vue auto、shadcn 显式、无依赖降级、antd 产物 tsc strict 0 错） | §4.5 |
@@ -83,7 +83,25 @@ R1 新增自动化（test/smoke/r1-qa.smoke.test.ts，10 例）：
 | 代码区无 runes（$props/$state/$derived，注释除外） | ✅ |
 | css-modules 组合为内联 scoped `<style>` | ✅ |
 | `--style styled` 触网前拒绝（1.35s，exit 1，「样式方案不支持 svelte 框架」） | ✅ |
-| 浏览器 dev 交互/HMR（步骤 1，§4.2-A） | ⏳ 待 QA 目检 |
+| 浏览器 dev 交互/HMR（步骤 1，§4.2-A） | ✅ 2026-10-14 通过（Chrome DevTools 自动化目检，见下方 §4.2-A 记录） |
+
+### 4.2-A 执行记录（2026-10-14，Chrome DevTools 自动化目检，localhost:5173）
+
+环境：`npm ci`（36 包）+ `npm run dev`（VITE v5.4.21，仅 2478ms 启动，无 esbuild 异常）。
+
+| 检查点 | 结果 |
+|--------|------|
+| 首屏渲染：h1/副标题/搜索框/仅看有货/4 张商品卡片（名称/库存标签/描述/价格） | ✅ |
+| 售罄商品（便携保温杯 stock=0）按钮 `disabled`，库存标签「已售罄」 | ✅ |
+| 控制台无业务报错 | ✅（仅 `[vite] connected`；1 条 form 控件建议补 id/name 的 a11y suggestion；favicon 404 = I-05 已知非阻断） |
+| 网络：@vite/client、svelte-hmr、App/GoodsList 编译产物全部 200 | ✅（21 个请求，唯一 404 为 /favicon.ico） |
+| 搜索过滤：输入「键盘」→ 仅机械键盘 1 件 | ✅（on:input → dispatch keyword → keyed each 重算） |
+| 空结果分支：「键盘x」→ 0 件 + 「没有找到相关商品」空态（{#each}{:else}） | ✅ |
+| 「仅看有货」勾选：清空关键词后剩 3 件，售罄保温杯被过滤（on:change → $: 响应式） | ✅ |
+| 「加入购物车」点击：`add to cart` 事件经 dispatch 冒泡到 App 接收 | ✅ console 收到日志 |
+| HMR：临时修改 App.svelte 副标题，页面无刷新热更新；还原后恢复（svelte-hmr 全量资源 200） | ✅ |
+
+> 备注：自动化 fill 工具清空输入框时不会派发有效 input 事件（DOM value 置空但 Svelte 状态未变），改用真实键盘 Backspace 后过滤链路完全正常——属测试工具行为，非 demo 缺陷。截图证据：%TEMP%/svelte-demo-qa-42A.png。
 
 ### 4.3 Watch 四框架实况
 

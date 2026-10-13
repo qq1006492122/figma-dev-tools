@@ -1,26 +1,36 @@
-# 🎨 Figma Dev Tools v1.4.20
+# 🎨 Figma Dev Tools v1.4.21
 
 > Figma → Any Frontend Framework — Design-to-Code MCP Server
 
 **English** | **[中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/README.md)**
 
-A **complete toolchain bridging Figma design and frontend development** — GUI visual configuration wizard, intelligent design token extraction, high-fidelity component generation (React/Vue/Svelte/HTML), automatic asset downloading, and cross-editor MCP integration. Optimized for AI Agents.
+A **complete toolchain bridging Figma design and frontend development** — GUI visual configuration wizard, intelligent design token extraction, high-fidelity component generation (React/Vue/Svelte/**WeChat Mini Program**/HTML), automatic asset downloading, cross-editor MCP integration, **automatic re-generation on design changes (Watch)** and **diff against current code (Compare)**. Optimized for AI Agents.
+
+---
+
+## ✨ What's New in v1.4.20–v1.4.21
+
+| Capability | Description |
+| --- | --- |
+| 📱 **First-class WeChat Mini Program** | `figma-dev weapp` / `figma_generate_weapp`: WXML/WXSS/JS/JSON quartet, rpx units with automatic design-width inference, `wx:for` lists / `wx:if` conditions / `bind·catch` events, scroll-view/swiper/picker/rich-text native components, local/cdn/base64 asset pipeline, Skyline property-matrix degradation |
+| 🟠 **First-class Svelte 4** | `figma-dev svelte` / `figma_generate_svelte`: `export let` props, `on:` events, `{#each}/{#if}`; Tailwind/UnoCSS(attributify)/scoped CSS style combos with fast-fail validation; Svelte 5 runes are only suggested via comments |
+| 🔄 **Watch auto-regeneration** | `figma_watch_start/stop/status`: 5s coarse poll of the Figma file version, automatic regeneration on change; 429 exponential backoff; automatic backup on write with preserve markers and `*.figma.json` user-field retention; failed versions are retried (signature not committed), disconnect cleanup |
+| 🔀 **Code compare** | `figma_compare_code`: unified diff between local current code and the latest Figma output; paste code, project paths, or the mini-program quartet; single-file pairing by extension/component name; Prettier normalization by default |
+| 🧩 **Direct component-library output** | React (shadcn-ui / ant-design) and Vue (element-plus / ant-design-vue): `auto` detects real dependencies from package.json, conservative gate (dual evidence ≥70 score) with zero false replacements, cross-framework values fail before any network call |
+| 🧮 **WXSS fidelity gate** | Compares by **node + property value** (wrong color / wrong size / cross-node same-name declarations don't count as hits); six golden fixtures at 86–100%; main-package budget warns at 1.5MB / blocks at 2MB (auto-detects the app.json project root; `--project-root` in v1.4.21) |
+| ⚡ **Generation performance** | On the 998-node fixture: React 373.9ms→225.7ms (-39.6%), Mini Program 50.2ms→28.3ms (-43.6%), byte-identical output |
+| 🧱 **Paywall browser fallback** | Playwright screenshot fallback on API paywall + visual approximation mode + pixel fidelity scoring (since v1.4.4) |
 
 ---
 
 ## ✨ Key Features by Version
 
-### v1.4.4 — Paywall Fallback + Fidelity Restoration + Performance
+### v1.4.21 — Release Gate Hardening + Docs
 
 | Feature | Description |
 | --- | --- |
-| 🧱 **Paywall Browser Fallback** | `BrowserFallbackService`: Playwright auto-captures screenshot when REST API hits paywall |
-| 🤖 **Visual Approximation** | VLM generates ~75% code skeleton from screenshot when node JSON unavailable |
-| 🎯 **Fidelity Scoring** | `figma_verify_fidelity`: pixel diff + heatmap + quantified score (0-100%) |
-| 📏 **DPR Awareness** | 1x/2x/3x screenshots matching user's `devicePixelRatio` |
-| 📐 **Position/Style Restoration** | Absolute positioning, gradients, multi-shadow, clip-path, dashed borders, rich text |
-| 🌍 **i18n Errors** | Error messages output in GUI-selected language (zh-CN/en-US) |
-| 🚀 **Performance** | Browser instance pool, screenshot LRU cache, tiered timeouts, exponential backoff retry, warmup |
+| � **Project-root bundle accounting** | `figma-dev weapp --project-root <dir>` (or auto-walk ≤6 levels upward from the output dir to find `app.json`); the 1.5MB/2MB thresholds previously never fired against component subdirectories; symlinked fake `app.json` is rejected |
+| 🛡️ **GUI framework×library guard** | `/api/config/complete` now rejects cross-framework combos (e.g. `framework=react` + `element-plus`) with 400 `FDT-UI-LIB-FRAMEWORK-MISMATCH` and does not write `figma-dev.config.json` |
 
 ### v1.4.18 — Component Props + DTCG Tokens + Enterprise Network
 
@@ -41,14 +51,15 @@ A **complete toolchain bridging Figma design and frontend development** — GUI 
 | 📦 **Batch Generation** | `figma_batch_generate`: semantic block splitting (Header/Hero/Footer…) + barrel index |
 | 🧠 **Smart Inference** | Grid/icons/dark-mode/motion hints, interaction scaffolds, TS interfaces + mock data (advisory comments only) |
 
-### v1.4.20 — WeApp, Watch, Compare, Direct Component-Library Generation
+### v1.4.20 — WeApp, Svelte, Watch, Compare, Direct Component-Library Generation
 
 | Feature | Description |
 | --- | --- |
-| 📱 **WeChat Mini Program** | `figma_generate_weapp`: WXML/WXSS/JS/JSON, rpx, bind/catch events, rich-text nodes, fidelity gate |
+| 📱 **WeChat Mini Program** | `figma_generate_weapp`: WXML/WXSS/JS/JSON, rpx + auto design-width, wx:for/wx:if, bind/catch events, scroll-view/swiper/picker/rich-text, local/cdn/base64 asset pipeline, rich-text nodes, node+value WXSS fidelity gate |
+| 🟠 **Svelte 4** | `figma_generate_svelte`: `export let` props, `on:` events, `{#if}/{#each}`; tailwind/unocss/css-modules only (css-modules renders as scoped `<style>`); illegal combos fail before any network call; Svelte 5 runes are comment-only suggestions |
 | 🧩 **Direct component-library output** | New `componentLibrary` option (`--component-library` on CLI) replaces semantic nodes with real library tags + imports: `shadcn-ui` / `ant-design` for React, `element-plus` / `ant-design-vue` for Vue. `auto` detects from package.json dependencies and the shadcn `components/ui` directory; conservative gate (role+name evidence, zero false replacements); cross-framework values fail before any network call (`FDT-UI-LIB-*`). Not applicable to Svelte. |
-| 🔄 **Watch mode** | `figma_watch_*`: 5-session cap, 429 backoff, write-safe JSON merge, preserve markers |
-| 📝 **Code compare** | `figma_compare_code`: unified diff, Prettier-normalized, 512KB cap, path traversal blocked |
+| 🔄 **Watch mode** | `figma_watch_*`: 5-session cap, client isolation, idempotent start, 429 backoff, write-safe JSON merge, preserve markers, failure retries |
+| � **Code compare** | `figma_compare_code`: unified diff, Prettier-normalized, single/multi-file pairing, 512KB cap, LCS cell cap, path traversal blocked |
 
 ---
 
@@ -90,6 +101,14 @@ figma-dev jsx "https://www.figma.com/design/xxx/MyProject?node-id=23-11032" \
 figma-dev vue "https://www.figma.com/design/xxx/MyProject?node-id=23-11032" \
   --name HeroSection --style sass
 
+# CLI: generate Svelte 4 component
+figma-dev svelte "https://www.figma.com/design/xxx/MyProject?node-id=23-11032" \
+  --name HeroCard --style tailwind
+
+# CLI: generate a WeChat Mini Program page (rpx, quartet written to disk)
+figma-dev weapp "https://www.figma.com/design/xxx/MyProject?node-id=1-2" \
+  --name GoodsList --page --unit rpx
+
 # CLI: full-page batch generation
 figma-dev batch "https://www.figma.com/design/xxx/MyProject?node-id=1-2" \
   --prefix Landing --out src/components/landing
@@ -103,7 +122,7 @@ figma-dev sync "https://www.figma.com/design/xxx/MyProject" \
 
 ## 🔧 MCP Tool Reference
 
-23 tools organized by usage flow:
+28 tools organized by usage flow (the smoke-test enum is the release gate):
 
 | # | Tool | Function | Version |
 | --- | --- | --- | --- |
@@ -116,7 +135,7 @@ figma-dev sync "https://www.figma.com/design/xxx/MyProject" \
 | 7 | `figma_get_screenshot` | High-res node screenshot | v1 |
 | 8 | `figma_get_structured_data` | Framework-agnostic structured JSON | v1.1.0 |
 | 9 | `figma_lint_design` | Design spec pre-check | **v1.3.2** |
-| 10 | `figma_generate_jsx` | One-click React TSX (9 styles, TS Props, smart inference) | **v1.4.19** |
+| 10 | `figma_generate_jsx` | One-click React TSX (9 styles, TS Props, smart inference, component library) | **v1.4.19** |
 | 11 | `figma_generate_component` | Basic component (legacy; prefer `generate_jsx`) | v1 |
 | 12 | `figma_download_assets` | Download + SVGO optimize assets | **v1.4.18** |
 | 13 | `figma_create_icon_sprite` | Generate SVG Sprite | **v1.3.2** |
@@ -127,10 +146,14 @@ figma-dev sync "https://www.figma.com/design/xxx/MyProject" \
 | 18 | `figma_dev_fallback_capture` | Trigger browser fallback screenshot | **v1.4.4** |
 | 19 | `figma_verify_fidelity` | Fidelity verification (pixel diff + heatmap) | **v1.4.4** |
 | 20 | `figma_ocr_extract` | OCR text extraction (native + tesseract.js) | **v1.4.14** |
-| 21 | `figma_generate_vue` | One-click Vue SFC (Vue3/Vue2, 5 styles) | **v1.4.19** |
+| 21 | `figma_generate_vue` | One-click Vue SFC (Vue3/Vue2, 5 styles, component library) | **v1.4.19** |
 | 22 | `figma_generate_svelte` | One-click Svelte 4 SFC (tailwind/unocss/css-modules only) | **v1.4.20** |
 | 23 | `figma_batch_generate` | Batch generation (semantic blocks + barrel index; react/vue/svelte) | **v1.4.19** |
-| 24 | `figma_generate_weapp` | WeChat Mini Program (WXML/WXSS/JS/JSON, dev preview) | **v1.4.20-dev** |
+| 24 | `figma_generate_weapp` | WeChat Mini Program quartet (WXML/WXSS/JS/JSON, asset pipeline, fidelity gate) | **v1.4.20** |
+| 25 | `figma_watch_start` | Start watching a node; auto-regenerate on design change | **v1.4.20** |
+| 26 | `figma_watch_stop` | Stop a watch session (idempotent) | **v1.4.20** |
+| 27 | `figma_watch_status` | List/inspect watch sessions for this client | **v1.4.20** |
+| 28 | `figma_compare_code` | Diff current code vs the latest Figma output | **v1.4.20** |
 
 > 📖 Run `figma-dev --help <tool>` or see [QUICKSTART.en-US.md](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md) for detailed parameters.
 
@@ -146,10 +169,11 @@ figma-dev sync "https://www.figma.com/design/xxx/MyProject" \
 | `figma-dev lang` | Language settings (set/list/switch) | **v1.3.2** |
 | `figma-dev token` | Token secure management (set/get/list/delete) | **v1.3.2** |
 | `figma-dev lint <url>` | Design spec pre-check | **v1.3.2** |
-| `figma-dev jsx <url>` | Generate React TSX (9 styles, TS Props, smart inference) | **v1.4.19** |
-| `figma-dev vue <url>` | Generate Vue SFC (Vue3/Vue2, 5 styles) | **v1.4.19** |
+| `figma-dev jsx <url>` | Generate React TSX (9 styles, TS Props, smart inference, `--component-library`) | **v1.4.19** |
+| `figma-dev vue <url>` | Generate Vue SFC (Vue3/Vue2, 5 styles, `--component-library`) | **v1.4.19** |
 | `figma-dev svelte <url>` | Generate Svelte 4 SFC (tailwind/unocss/css-modules only) | **v1.4.20** |
 | `figma-dev batch <url>` | Full-page batch generation (semantic split) | **v1.4.19** |
+| `figma-dev weapp <url>` | WeChat Mini Program quartet (WXML/WXSS/JS/JSON); `--asset-mode local\|cdn\|base64` `--renderer webview\|skyline` `--project-root <root>` (root flag: v1.4.21) | **v1.4.20** |
 | `figma-dev structured <url>` | Framework-agnostic structured data | v1.1.0 |
 | `figma-dev sync <url>` | Sync Design Tokens (css/tailwind/json/dtcg) | **v1.4.18** |
 | `figma-dev assets <url>` | Download assets (SVGO optimized) | **v1.4.18** |
@@ -161,7 +185,7 @@ figma-dev sync "https://www.figma.com/design/xxx/MyProject" \
 
 ---
 
-## 🖥️ Supported Editors (8+)
+## 🖥️ Supported Editors (8)
 
 | Editor | Auto-detect | One-click Install |
 | --- | --- | --- |
@@ -208,19 +232,22 @@ Priority: CLI parameters > environment variables > .env file > defaults
 
 ## 🎻 Framework × Style Matrix
 
-| Style | React (`jsx`) | Vue (`vue`) | HTML (`structured`) |
-| --- | --- | --- | --- |
-| Tailwind | ✅ | ✅ | ✅ |
-| UnoCSS (attributify) | ✅ | ✅ | ✅ |
-| CSS Modules | ✅ | ✅ | ✅ |
-| Styled Components | ✅ | — | — |
-| Emotion | ✅ | — | — |
-| Less | ✅ | ✅ | ✅ |
-| Sass/SCSS | ✅ | ✅ | ✅ |
-| vanilla-extract | ✅ | — | — |
-| Panda CSS | ✅ | — | — |
+| Style | React (`jsx`) | Vue 3 (`vue`) | Vue 2 | Svelte 4 (`svelte`) | WeChat Mini Program (`weapp`) |
+| --- | --- | --- | --- | --- | --- |
+| Tailwind | ✅ | ✅ | ✅ | ✅ | — (atomic-class hints; styles land as WXSS rules) |
+| UnoCSS (attributify) | ✅ | ✅ | ✅ | ✅ | — |
+| CSS Modules | ✅ | ✅ | ✅ | ✅ (compiles to scoped `<style>`) | — |
+| Styled Components | ✅ | — | — | — | — |
+| Emotion | ✅ | — | — | — | — |
+| Less | ✅ | ✅ | ✅ | — | — |
+| Sass/SCSS | ✅ | ✅ | ✅ | — | — |
+| vanilla-extract | ✅ | — | — | — | — |
+| Panda CSS | ✅ | — | — | — | — |
+| `inline-styles` | ✅¹ | — | — | — | — |
+| Native WXSS | — | — | — | — | ✅ (rpx, 750 baseline, Skyline 109-property degradation matrix) |
+| CSS variables (`css-variables`) | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 (planned v1.5.0; pure-function skeleton ready, advisory only today) |
 
-> Unsupported combinations fail fast via dual zod/registry validation. `inline-styles` is legacy-only; `css-variables` planned for v1.5.0.
+> ¹ Legacy pipeline (`figma_generate_component`) only. Unsupported combinations fail fast via dual zod/registry validation before any network call (e.g. Svelte with `styled` is rejected). `figma-dev weapp` is a formal capability since v1.4.20; uni-app/Taro remain planned as experimental integrations.
 
 ---
 
@@ -231,7 +258,7 @@ Priority: CLI parameters > environment variables > .env file > defaults
 │                  MCP Server (stdio)                   │
 ├──────────┬──────────┬───────────────┬────────────────┤
 │ CLI Layer│ GUI Layer│ Service Layer │   Tool Layer   │
-│          │          │ figma-client  │   22 MCP       │
+│          │          │ figma-client  │   28 MCP       │
 │          │          │ node-processor│   tools        │
 │          │          │ tailwind-mapper│               │
 │          │          │ asset-downloader│              │
@@ -249,10 +276,10 @@ Priority: CLI parameters > environment variables > .env file > defaults
 | Question | Answer |
 | --- | --- |
 | **First-time setup?** | Run `npx figma-dev-tools gui` and follow the wizard |
-| **MCP won't start?** | Check Node.js ≥ 18, Token configured, port not occupied |
+| **MCP won't start?** | Check Node.js ≥ 20, Token configured, port not occupied |
 | **API 401?** | Token expired or missing *File content (Read only)* permission |
 | **Icons deformed?** | v1.3.2+ auto-fixes Flex issues; manually add `flex-shrink: 0` if needed |
-| **Want Vue/Svelte/other?** | Use `figma-dev vue` for Vue, `figma-dev svelte` for Svelte 4 (tailwind/unocss/css-modules), or `figma_get_structured_data` for framework-agnostic JSON |
+| **Want Vue/Svelte/Mini Program?** | Use `figma-dev vue` for Vue, `figma-dev svelte` for Svelte 4 (tailwind/unocss/css-modules), `figma-dev weapp` for WeChat Mini Program, or `figma_get_structured_data` for framework-agnostic JSON |
 | **Colors/spacing off?** | Run `figma_lint_design` → `figma_extract_tokens` → `figma_sync_to_project` → regenerate |
 | **Too many nested divs?** | `hierarchyFix` enabled by default in v1.4.0+; `figma_lint_design` reports nesting depth |
 | **Corporate proxy/CA?** | Set `FIGMA_CA_CERT_PATH` (v1.4.18+) |
@@ -274,7 +301,7 @@ figma-dev-tools/
 │   ├── tools/        # MCP tool implementations
 │   ├── types/        # TypeScript types
 │   └── index.ts      # MCP server entry
-├── test/             # Tests (95 tests)
+├── test/             # Tests (81 files, 1061 tests)
 └── docs/             # Documentation
 ```
 
@@ -284,6 +311,8 @@ figma-dev-tools/
 
 | Version | Date | Highlights |
 | --- | --- | --- |
+| **v1.4.21** | 2026-10 | WeApp bundle accounting via `--project-root`/auto app.json detection; GUI framework×component-library 400 guard; completed zh/en README & QUICKSTART coverage for WeApp/Svelte/Watch/Compare |
+| **v1.4.20** | 2026-10 | Svelte 4 first class; WeChat Mini Program first class (quartet, asset pipeline, WXSS fidelity gate); Watch auto-regeneration; Compare unified diff; direct component-library output (shadcn/Antd/Element Plus/Ant Design Vue); node+value fidelity; CLI `--output` fix; ~40% generation speedup |
 | **v1.4.19** | 2025-07 | 11 style renderers, first-class Vue, batch generation, smart inference, component mapping |
 | **v1.4.18** | 2025-06 | TS Props inference, W3C DTCG tokens, enterprise CA, import organizing |
 | **v1.4.14** | 2025-05 | OCR text extraction (native node + tesseract.js fallback) |

@@ -100,3 +100,16 @@ export function resolveLibrary(
   }
   return framework === 'react' ? detectReactLibrary(pkg, hooks) : detectVueLibrary(pkg);
 }
+
+/**
+ * 纯布尔判定：具体组件库是否适用于目标框架（供 GUI 配置保存等不适合抛异常的场景）。
+ * auto/none 对任何框架都合法（运行期再解析）；未知库返回 false。
+ */
+export function isLibraryCompatibleWithFramework(
+  framework: string,
+  choice: string,
+): boolean {
+  if (choice === 'auto' || choice === 'none') return true;
+  const definition = COMPONENT_LIBRARIES[choice as ComponentLibraryId];
+  return definition?.framework === framework;
+}

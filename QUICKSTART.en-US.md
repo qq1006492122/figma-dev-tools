@@ -1,13 +1,13 @@
-# ⚡ figma-dev-tools Quick Start Guide v1.4.20
+# ⚡ figma-dev-tools Quick Start Guide v1.4.21
 
 > [中文](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.md) / English
-> From install to your first Figma → React/Vue component in ~5 minutes.
+> From install to your first Figma → React/Vue/Svelte/WeChat Mini Program component in ~5 minutes.
 
 ---
 
 ## What it is, in one minute
 
-A **MCP Server** + **CLI** + **GUI wizard** that runs underneath your AI editor (Trae / VS Code / Cursor / Windsurf / Claude Desktop / Zed / Cline / Roo Code, 8 editors). Feed it a Figma link and it generates frontend code (React / Vue / HTML), downloads images / SVG, and extracts design tokens.
+A **MCP Server** + **CLI** + **GUI wizard** that runs underneath your AI editor (Trae / VS Code / Cursor / Windsurf / Claude Desktop / Zed / Cline / Roo Code, 8 editors). Feed it a Figma link and it generates frontend code (React / Vue / Svelte / WeChat Mini Program / HTML), downloads images / SVG, extracts design tokens, and can watch the design file for changes and regenerate automatically.
 
 ---
 
@@ -86,6 +86,11 @@ figma-dev info "<figma-url>"
 # ② Generate component (--framework vue for Vue3; --style tailwind|unocss|css-modules)
 figma-dev jsx "<figma-url>" --name HeroSection --scene landing-page --style tailwind
 
+# ②b. Map directly to your project's component library (v1.4.20; auto = detect from deps)
+#    React: shadcn-ui | ant-design    Vue: element-plus | ant-design-vue
+figma-dev jsx "<figma-url>" --name SignupForm --component-library auto
+figma-dev vue "<figma-url>" --name UserCard --component-library element-plus
+
 # ③ Download assets (auto-placed into public/ or src/assets/ by bundler)
 figma-dev assets "<figma-url>" --scene landing-page --scale 2
 
@@ -94,24 +99,58 @@ figma-dev sync "<figma-url>" --format oklch --output ./src/styles/figma
 
 # ⑤ Output framework-agnostic JSON (for Vue/Svelte/HTML, etc.)
 figma-dev structured "<figma-url>"
+
+# ⑥ Generate a Svelte 4 component (--style only allows tailwind|unocss|css-modules; --no-ts for plain JS)
+figma-dev svelte "<figma-url>" --name GoodsCard --style tailwind --output ./src/lib/GoodsCard.svelte
+
+# ⑦ Generate the WeChat Mini Program quartet (WXML/WXSS/JS/JSON; rpx by default, design-width auto-inferred)
+figma-dev weapp "<figma-url>" --name GoodsList --page --output ./miniprogram/pages
+#    Assets: --asset-mode local (default) | cdn (needs a stable hosted base URL) | base64
+#    Bundle measurement auto-detects the project root containing app.json by walking up from --output (or pass --project-root)
 ```
+
+> `--output <file|dir>` writes artifacts to disk (file for jsx/vue/svelte, project dir for weapp); omit it to print to stdout only.
+
+### Way C: Watch design changes (MCP tools)
+
+Ask the agent in your AI editor to call the watch tools — edits in Figma trigger automatic regeneration:
+
+```
+figma_watch_start: figmaUrl + framework (react/vue/svelte/weapp)
+  · write=true + outputDir writes to disk (old files backed up to .figma-dev-backup/;
+    preserve blocks in code and user fields in *.figma.json are retained)
+  · 5s polling by default with exponential backoff on 429 (10s start, 2min cap)
+figma_watch_status: changeCount / latest artifacts / errors
+figma_watch_stop: stops watching (all watchers are also cleaned up when the editor disconnects)
+```
+
+### Way D: Compare local code against the latest design (MCP tool)
+
+`figma_compare_code` produces a unified diff between your locally edited code and the freshest Figma-generated result.
+You can paste `currentCode` directly (paired automatically by framework extension, e.g. your code ↔ `Card.tsx`), pass project paths, or use the weapp quartet; Prettier normalization removes formatting noise by default (`normalize=false` to disable).
 
 ---
 
 ## 4. Command reference
 
-| Command | Description |
+| Command / Tool | Description |
 |---------|-------------|
-| `figma-dev gui` | Visual config wizard |
+| `figma-dev gui` | Visual config wizard (incl. framework/component-library preferences) |
 | `figma-dev install` / `uninstall` | One-click install / uninstall editor MCP config |
 | `figma-dev validate` | Validate the token |
 | `figma-dev token set/get/list/delete` | Token management |
 | `figma-dev info <url>` / `metadata <url>` | File info / high-level overview |
 | `figma-dev lint <url>` | Design-fidelity pre-check |
-| `figma-dev jsx <url>` | Generate React/Vue component |
+| `figma-dev jsx <url>` | Generate React TSX (`--component-library auto/shadcn-ui/ant-design`) |
+| `figma-dev vue <url>` | Generate Vue 3 SFC (`--vue-version 2` for Options API; `--component-library element-plus/ant-design-vue`) |
+| `figma-dev svelte <url>` | Generate Svelte 4 component (tailwind/unocss/css-modules) |
+| `figma-dev weapp <url>` | Generate WeChat Mini Program quartet (`--page`, `--asset-mode`, `--renderer webview/skyline`) |
+| `figma-dev batch <url>` | Full-page batch generation (`--framework react/vue/svelte`) |
 | `figma-dev assets <url>` | Download images / SVG |
 | `figma-dev sync <url>` | Sync tokens → theme CSS / DTCG JSON |
 | `figma-dev structured <url>` | Output framework-agnostic JSON |
+| MCP `figma_watch_start/stop/status` | Watch design changes and regenerate (MCP only) |
+| MCP `figma_compare_code` | Unified diff of local code vs latest Figma output (MCP only) |
 
 > Full commands: `README.md` or `figma-dev --help`.
 

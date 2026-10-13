@@ -1,13 +1,13 @@
-# ⚡ figma-dev-tools 快速上手指南 v1.4.20
+# ⚡ figma-dev-tools 快速上手指南 v1.4.21
 
 > 中 / [English](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/QUICKSTART.en-US.md)
-> 从安装到产出第一个 Figma → React/Vue 组件，约 5 分钟。
+> 从安装到产出第一个 Figma → React/Vue/Svelte/微信小程序组件，约 5 分钟。
 
 ---
 
 ## 一分钟理解它是什么
 
-**MCP Server** + **CLI** + **GUI 配置向导**，运行在 AI 编辑器（Trae / VS Code / Cursor / Windsurf / Claude Desktop / Zed / Cline / Roo Code 等 8 个）下。给它一个 Figma 链接，即可生成前端代码（React / Vue / HTML）、下载图片/SVG、提取设计 Token。
+**MCP Server** + **CLI** + **GUI 配置向导**，运行在 AI 编辑器（Trae / VS Code / Cursor / Windsurf / Claude Desktop / Zed / Cline / Roo Code 等 8 个）下。给它一个 Figma 链接，即可生成前端代码（React / Vue / Svelte / 微信小程序 / HTML）、下载图片/SVG、提取设计 Token，并可监听设计稿变更自动再生成。
 
 ---
 
@@ -99,26 +99,60 @@ figma-dev sync "<figma-url>" --format oklch --output ./src/styles/figma
 
 # ⑤ 输出框架无关 JSON（供 Vue/Svelte/HTML 等消费）
 figma-dev structured "<figma-url>"
+
+# ⑥ 生成 Svelte 4 组件（--style 仅支持 tailwind|unocss|css-modules；--no-ts 输出纯 JS）
+figma-dev svelte "<figma-url>" --name GoodsCard --style tailwind --output ./src/lib/GoodsCard.svelte
+
+# ⑦ 生成微信小程序四件套（WXML/WXSS/JS/JSON；默认 rpx，自动推断 design-width）
+figma-dev weapp "<figma-url>" --name GoodsList --page --output ./miniprogram/pages
+#    资源模式：--asset-mode local（默认）| cdn（需稳定托管基址）| base64
+#    主包体积核算会从输出目录向上自动寻找含 app.json 的工程根（也可 --project-root 显式指定）
 ```
+
+> `--output <文件或目录>` 把产物直接写到磁盘（jsx/vue/svelte 写文件，weapp 写工程目录）；不传则只打印到终端。
+
+### 方式 C：监听设计稿变更（Watch，MCP 工具）
+
+在 AI 编辑器内让 Agent 调用 watch 工具，Figma 侧一改稿即自动重新生成：
+
+```
+figma_watch_start：figmaUrl + framework（react/vue/svelte/weapp）
+  · write=true + outputDir 时自动落盘（旧文件先备份到 .figma-dev-backup/，
+    代码 preserve 区块与 *.figma.json 用户字段自动保留）
+  · 默认 5 秒轮询，429 自动指数退避（10s 起，封顶 2min）
+figma_watch_status：查看 changeCount / 最近产物 / 错误
+figma_watch_stop：停止（编辑器断开连接时也会自动清理全部监听）
+```
+
+### 方式 D：对比现状代码与最新设计（Compare，MCP 工具）
+
+`figma_compare_code` 把你本地改过的代码与 Figma 最新生成结果做 unified diff：
+支持直接贴 `currentCode`（按框架扩展名自动配对，如 `Card.tsx` ↔ 现状代码）、给项目路径或 weapp 四件套；默认先做 Prettier 归一化消除格式噪音，`normalize=false` 可关闭。
 
 ---
 
 ## 四、命令速查
 
-| 命令 | 说明 |
+| 命令 / 工具 | 说明 |
 |------|------|
-| `figma-dev gui` | 可视化配置向导 |
+| `figma-dev gui` | 可视化配置向导（含框架/组件库偏好选择） |
 | `figma-dev install` / `uninstall` | 一键安装/卸载编辑器 MCP 配置 |
 | `figma-dev validate` | 校验 Token |
 | `figma-dev token set/get/list/delete` | Token 管理 |
 | `figma-dev info <url>` / `metadata <url>` | 文件信息 / 高层概览 |
 | `figma-dev lint <url>` | 设计还原质量预检 |
-| `figma-dev jsx <url>` | 生成 React/Vue 组件 |
+| `figma-dev jsx <url>` | 生成 React TSX（`--component-library auto/shadcn-ui/ant-design`） |
+| `figma-dev vue <url>` | 生成 Vue 3 SFC（`--vue-version 2` 出 Options API；`--component-library element-plus/ant-design-vue`） |
+| `figma-dev svelte <url>` | 生成 Svelte 4 组件（tailwind/unocss/css-modules） |
+| `figma-dev weapp <url>` | 生成微信小程序四件套（`--page`、`--asset-mode`、`--renderer webview/skyline`） |
+| `figma-dev batch <url>` | 整页批量生成（`--framework react/vue/svelte`） |
 | `figma-dev assets <url>` | 下载图片/SVG |
 | `figma-dev sync <url>` | 同步 Tokens → 主题 CSS / DTCG JSON |
 | `figma-dev structured <url>` | 输出框架无关 JSON |
+| MCP `figma_watch_start/stop/status` | 监听设计稿变更自动再生成（仅 MCP） |
+| MCP `figma_compare_code` | 现状代码 vs Figma 最新产物 unified diff（仅 MCP） |
 
-> 完整命令见 `README.md` 或 `figma-dev --help`。
+> 完整命令见 `README.md` 或 `figma-dev <command> --help`。
 
 ---
 

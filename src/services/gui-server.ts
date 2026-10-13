@@ -31,6 +31,7 @@ import open from 'open';
 
 import { initI18nSync } from '../i18n/index.js';
 import type { Language } from '../i18n/index.js';
+import { isLibraryCompatibleWithFramework } from './component-library/detect-library.js';
 import { canUseFallbackPackage, fetchLatestStableVersion } from '../cli/update-utils.js';
 import {
   detectAllEditors,
@@ -994,12 +995,26 @@ export async function startGuiServer(options: GuiServerOptions = {}): Promise<ht
 
             if (data.framework) state.framework = data.framework;
             if (data.outputDir) state.outputDir = data.outputDir;
-            // P3-32：组件库偏好白名单校验（非法/跨框架值不写盘，保持 undefined 即省略）
+            // P3-32：组件库偏好白名单校验（非法值不写盘，回退 auto）
             const UI_LIB_VALUES = ['auto', 'none', 'shadcn-ui', 'ant-design', 'element-plus', 'ant-design-vue'];
-            const componentLibrary =
+            const rawLibrary =
               typeof data.componentLibrary === 'string' && UI_LIB_VALUES.includes(data.componentLibrary)
                 ? data.componentLibrary
                 : 'auto';
+            // R1 QA：框架×组件库匹配校验（如 framework=react + element-plus 是无效配置，
+            // 前端选择器已限制，这里拦截直接构造的 API 请求，不落盘）
+            const frameworkForCheck = state.framework;
+            if (
+              (frameworkForCheck === 'react' || frameworkForCheck === 'vue') &&
+              !isLibraryCompatibleWithFramework(frameworkForCheck, rawLibrary)
+            ) {
+              sendJson(res, 400, {
+                success: false,
+                error: `组件库 "${rawLibrary}" 与框架 "${frameworkForCheck}" 不匹配（FDT-UI-LIB-FRAMEWORK-MISMATCH），配置未保存`,
+              });
+              return;
+            }
+            const componentLibrary = rawLibrary;
             state.componentLibrary = componentLibrary;
 
             console.log('[GUI] Saving config:', {

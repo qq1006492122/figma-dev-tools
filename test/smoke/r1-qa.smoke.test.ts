@@ -27,6 +27,11 @@ import { startGuiServer } from '../../src/services/gui-server.js';
 /** R1 冒烟固定端口（避开 54321 默认实例与开发机上的常驻 GUI） */
 const R1_GUI_PORT = 54401;
 
+/** 版本断言统一以 package.json 为准，版本 bump 后无需手工改快照 */
+const TOOL_VERSION = JSON.parse(
+  fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json'), 'utf-8'),
+).version as string;
+
 const CLI_ENTRY = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
@@ -116,9 +121,9 @@ describe('WBS-R1 / GUI 组件库选择器（真实 HTTP 服务）', () => {
     const res = await fetch(`${base}/`);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain('data-version="1.4.20"');
+    expect(html).toContain(`data-version="${TOOL_VERSION}"`);
     // 注入后标题携带真实版本（中文页默认语言），且不再残留占位符
-    expect(html).toContain('配置向导 v1.4.20');
+    expect(html).toContain(`配置向导 v${TOOL_VERSION}`);
     expect(html).not.toContain('{{FIGMA_DEV_TOOLS_VERSION}}');
   });
 
@@ -198,6 +203,24 @@ describe('WBS-R1 / GUI 组件库选择器（真实 HTTP 服务）', () => {
       fs.readFileSync(path.join(tempCwd, 'figma-dev.config.json'), 'utf-8'),
     ) as Record<string, unknown>;
     expect(writtenNone).not.toHaveProperty('componentLibrary');
+  });
+
+  it('react + element-plus 跨框架无效配置 → 400 拒绝且不落盘（R1 QA 框架匹配校验）', async () => {
+    const before = fs.existsSync(path.join(tempCwd, 'figma-dev.config.json'))
+      ? fs.readFileSync(path.join(tempCwd, 'figma-dev.config.json'), 'utf-8')
+      : null;
+    const res = await fetch(`${base}/api/config/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ framework: 'react', outputDir: './x', componentLibrary: 'element-plus' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toContain('FDT-UI-LIB-FRAMEWORK-MISMATCH');
+    // 配置文件保持上一次内容（vue element-plus），未被无效组合覆盖
+    const after = fs.readFileSync(path.join(tempCwd, 'figma-dev.config.json'), 'utf-8');
+    expect(after).toBe(before ?? after);
+    expect(JSON.parse(after).componentLibrary).not.toBe('element-plus');
   });
 });
 

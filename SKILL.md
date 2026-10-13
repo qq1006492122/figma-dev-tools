@@ -1,13 +1,13 @@
 ---
 name: 'figma-dev-tools'
 description:
-  'Figma 设计到代码增强工具集 v1.4.20-dev -
-  23个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测（管线内增强，非独立工具）、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、React（9套样式）与Vue（Vue3 setup/Vue2 Options API，5套样式）一级高保真代码生成、整页批量生成及微信小程序四件套生成（v1.4.20开发版，能力补齐中），Svelte/HTML等其他框架通过框架无关结构化数据支持；智能推断仅以注释/报告给建议（Grid/图标/暗色/动效、交互骨架、列表数据化、语义命名）。解决div
+  'Figma 设计到代码增强工具集 v1.4.21 -
+  28个MCP工具，智能层级解析与修复、XSS安全防护、SVG内联渲染、动画动效检测（管线内增强，非独立工具）、多级Token映射、资源自动下载、付费墙浏览器兜底、视觉近似模式、还原度像素diff校验、OCR文本提取（原生+图片）、零any类型确保类型安全、React（9套样式）与Vue（Vue3 setup/Vue2 Options API，5套样式）一级高保真代码生成、Svelte 4 一级支持（tailwind/unocss/css-modules）、微信小程序四件套一级支持（WXML/WXSS/JS/JSON，列表/条件/原生组件/资源管线/WXSS 还原度闸门）、Watch 变更自动再生成与 Compare 现状代码差异对比、整页批量生成；HTML/Angular/Solid等其他框架通过框架无关结构化数据支持；智能推断仅以注释/报告给建议（Grid/图标/暗色/动效、交互骨架、列表数据化、语义命名）。解决div
   soup、上下文爆炸、hex写死、资源路径处理、深层嵌套截断、层级混乱等问题。支持Trae/VS
   Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code共8个编辑器。'
 ---
 
-# Figma Dev Tools v1.4.20-dev - AI Agent 设计到代码增强管线
+# Figma Dev Tools v1.4.21 - AI Agent 设计到代码增强管线
 
 ## 🎯 何时使用此 Skill（触发条件）
 
@@ -45,7 +45,7 @@ description:
 | 7   | **禁止 emoji 图标**              | SVG 图标通过 publicCdnUrl 引用                               | 使用 ❌✅📌 等 emoji 代替图标        |
 | 8   | **新色必须 @theme 扩展**         | 在 CSS 中 `@theme inline { --color-xxx: ... }`               | 直接写 `bg-[#new-color]`             |
 | 9   | **Token 安全**                   | .env 中配置，不提交 Git                                      | 将 Token 硬编码在代码或配置里        |
-| 10  | **框架选对生成工具（v1.4.20）** | Vue 项目直接用 `figma_generate_vue`（Vue3/Vue2）；**Svelte 4 项目用 `figma_generate_svelte`（样式仅 tailwind/unocss/css-modules）**；微信小程序用 `figma_generate_weapp`（WXML/WXSS/JS/JSON 四件套，开发版）；整页用 `figma_batch_generate`（framework 可选 react/vue/svelte）；HTML/Angular/Solid 仍先 `figma_get_structured_data` | Vue/Svelte 误用 `figma_generate_jsx`；Svelte 传 styled/emotion/less/sass 等不支持的样式（触网前报错）；小程序误用 web 生成工具 |
+| 10  | **框架选对生成工具（v1.4.21）** | Vue 项目直接用 `figma_generate_vue`（Vue3/Vue2）；**Svelte 4 项目用 `figma_generate_svelte`（样式仅 tailwind/unocss/css-modules）**；微信小程序用 `figma_generate_weapp`（WXML/WXSS/JS/JSON 四件套，v1.4.20 起正式一级支持）；设计稿持续演进用 `figma_watch_start/stop/status`，现状代码对账用 `figma_compare_code`；整页用 `figma_batch_generate`（framework 可选 react/vue/svelte）；HTML/Angular/Solid 仍先 `figma_get_structured_data` | Vue/Svelte 误用 `figma_generate_jsx`；Svelte 传 styled/emotion/less/sass 等不支持的样式（触网前报错）；小程序误用 web 生成工具 |
 
 ---
 
@@ -117,12 +117,12 @@ Step 7: 高保真检查
 ### 工作流 D：整页批量生成（v1.4.19 新）
 
 - 页面/大 Frame 直接调 `figma_batch_generate`：自动按 Header/Hero/Features/Section/Sticky/Footer 语义拆区块，逐块产出组件文件 + `index.ts` barrel + 依赖图。
-- `framework: 'react' | 'vue'`（Vue 配 `vueVersion: 2 | 3`）；其余样式/`inference` 参数与单组件工具一致。
+- `framework: 'react' | 'vue' | 'svelte'`（Vue 配 `vueVersion: 2 | 3`，Svelte 样式仅 tailwind/unocss/css-modules）；其余样式/`inference` 参数与单组件工具一致。
 - 需要精确控制时传 `nodeIds` 显式指定区块；`componentNamePrefix` 给区块组件统一前缀（如 `Landing`）。
 - MCP 不写磁盘；CLI `figma-dev batch <url> --out <dir>` 直接落盘多文件目录。
 - 智能推断产出（T21 四类 + T22 交互/列表/命名）**全部是头注释与 structuredContent 里的建议，不自动改写显式样式/代码**；不需要时用 `inference` 分项关闭或 `skipEnhancements` 总闸关闭。
 
-### 工作流 E：微信小程序（v1.4.20 开发版，能力补齐中）
+### 工作流 E：微信小程序（v1.4.20 起正式一级支持）
 
 ```
 Step 1: figma_get_metadata        ← 高层概览
@@ -144,8 +144,8 @@ Step 6: 人工微调 + 微信开发者工具验证
 
 注意：
 - 小程序是 WXML 而非 HTML：不要把 web 生成结果中的 `<div>/<span>/<img>`、CSS 变量、内联 SVG、aria-* 直接搬进小程序。
-- 图片资源在小程序中受**合法域名（CDN 模式）**与**主包 2MB 体积**约束；生成结果中 `src=""` 占位与 pendingAssets 必须经 CLI 落盘或配置 CDN 后才可运行，不要假装资源已就位。
-- 该工作流为开发版能力；wx:for/wx:if、完整资源管线、scroll-view/rich-text 等仍在补齐，遇到不支持的样式以工具 warnings 为准。
+- 图片资源在小程序中受**合法域名（CDN 模式）**与**主包 2MB 体积**约束；资源必须为 local-resolved/cdn-resolved/base64-resolved 才可运行，unresolved 资源只产出 asset manifest + warning，不要假装资源已就位（CLI v1.4.21 支持 `--project-root` 或自动向上探测含 app.json 的工程根，按全主包口径核算 1.5MB 预警/2MB 阻断）。
+- 列表/条件（wx:for/wx:if/block）、scroll-view/swiper/picker/rich-text 原生组件、bind/catch/input/change/submit 事件、designWidth 自动推断（375/750）均已支持；条件推断默认仅输出建议，需显式开启才生成绑定；遇到不支持的样式以工具 warnings 与 WXSS 降级矩阵为准。
 
 ---
 
@@ -588,10 +588,10 @@ function TrafficLights() {
 
 ---
 
-## 🔧 MCP 工具快速参考（23个）
+## 🔧 MCP 工具快速参考（28个）
 
 > 调用参数格式：直接以 JSON 对象传入，无需额外包装。
-> 数量口径：v1.4.20 开发版代码实际注册 23 个（以 `test/smoke/mcp-tools.smoke.test.ts` 枚举为发布闸门）；npm latest v1.4.19 为 22 个（不含 `figma_generate_weapp`）。动画/交互检测是管线内增强服务，不是独立工具。
+> 数量口径：v1.4.20 起实际注册 28 个（以 `test/smoke/mcp-tools.smoke.test.ts` 枚举为发布闸门）；v1.4.20 新增 `figma_generate_svelte`、`figma_watch_start/stop/status`、`figma_compare_code` 共 5 个。动画/交互检测是管线内增强服务，不是独立工具。
 
 ### 核心工作流工具
 
@@ -619,11 +619,20 @@ function TrafficLights() {
 | --------------------------- | ---------------------------------------- | ---------------------------------- |
 | `figma_get_structured_data` | ⭐ 框架无关JSON结构（非React/Vue 框架）  | `{ figmaUrl: "...", maxDepth: 8 }` |
 
-**微信小程序（v1.4.20 开发版，能力补齐中）：**
+**微信小程序（v1.4.20 起正式一级支持）：**
 
 | 工具                     | 一句话用途 | 最小调用示例 |
 | ------------------------ | ---------- | ------------ |
-| `figma_generate_weapp`   | ⭐ 生成 WXML/WXSS/JS/JSON 四件套（Page/Component 双模式，rpx 适配） | `{ figmaUrl: "...", componentName: "Xxx", isPage: false, designWidth: 750 }` |
+| `figma_generate_weapp`   | ⭐ 生成 WXML/WXSS/JS/JSON 四件套（Page/Component 双模式，rpx 适配，local/cdn/base64 资源管线） | `{ figmaUrl: "...", componentName: "Xxx", isPage: false, designWidth: 750 }` |
+
+**Watch 自动再生成 + Compare 差异对比（v1.4.20）：**
+
+| 工具                     | 一句话用途 | 最小调用示例 |
+| ------------------------ | ---------- | ------------ |
+| `figma_watch_start`      | 轮询 Figma 文件版本，变更后自动再生成（默认不落盘；write=true 才写盘且 outputDir 必填） | `{ fileKey: "xxx", nodeId: "1-2", framework: "react", write: true, outputDir: "./src" }` |
+| `figma_watch_stop`       | 停止 watch 会话（幂等） | `{ sessionId: "..." }` |
+| `figma_watch_status`     | 查询本客户端会话状态 | `{ sessionId: "..." }` |
+| `figma_compare_code`     | 现状代码（贴码/路径/小程序四件套）vs Figma 最新产物的 unified diff | `{ framework: "react", currentCode: "...", figmaUrl: "..." }` |
 
 ### 辅助工具
 

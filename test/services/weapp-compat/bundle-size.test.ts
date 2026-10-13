@@ -12,11 +12,13 @@ import { join } from 'node:path';
 
 import {
   measureMainPackage,
+  findMiniProgramProjectRoot,
   MB,
   WARN_BYTES,
   BLOCK_BYTES,
   type BundleFileInput,
 } from '../../../src/services/weapp-compat/bundle-size.js';
+import * as path from 'node:path';
 
 function makeFiles(root: string, entries: Array<[string, number | string]>): void {
   for (const [rel, content] of entries) {
@@ -162,5 +164,55 @@ describe('P0-23 真实工程扫描（app.json 决定全主包口径）', () => {
     expect(r.status).toBe('blocked');
     expect(r.exitCode).toBe(2);
     expect(r.errorCode).toBe('FDT-WEAPP-BUNDLE-EXCEEDED');
+  });
+});
+
+describe('R1 QA findMiniProgramProjectRoot 工程根向上探测', () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'fdt-bundle-root-'));
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('组件目录在工程根下两层时，从组件目录向上找到含 app.json 的工程根', () => {
+    makeFiles(root, [
+      ['app.json', JSON.stringify({ pages: ['pages/index/index'] })],
+      ['pages/index/index.js', 100],
+    ]);
+    const componentDir = join(root, 'components', 'Card');
+    mkdirSync(componentDir, { recursive: true });
+    expect(findMiniProgramProjectRoot(componentDir)).toBe(path.resolve(root));
+  });
+
+  it('起始目录自身含 app.json（页面直接生成在工程根）→ 直接命中', () => {
+    makeFiles(root, [['app.json', JSON.stringify({ pages: [] })]]);
+    expect(findMiniProgramProjectRoot(root)).toBe(path.resolve(root));
+  });
+
+  it('向上都没有 app.json → null（调用方回退非全主包口径）', () => {
+    const deep = join(root, 'a', 'b', 'c');
+    mkdirSync(deep, { recursive: true });
+    expect(findMiniProgramProjectRoot(deep)).toBeNull();
+  });
+
+  it('app.json 是 symlink 而非普通文件 → 不认作工程根', () => {
+    const outside = join(root, 'outside');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'app.json'), '{}');
+    const proj = join(root, 'proj');
+    mkdirSync(proj, { recursive: true });
+    // 手工注入 fs：symlink 存在但 lstat.isFile()=false
+    const found = findMiniProgramProjectRoot(proj, {
+      exists: (p) => p === join(proj, 'app.json'),
+      stat: () => ({ isFile: () => false }),
+    });
+    expect(found).toBeNull();
+  });
+
+  it('maxUp=0 时只查起始目录，不向上', () => {
+    makeFiles(root, [['app.json', '{}']]);
+    const child = join(root, 'child');
+    mkdirSync(child, { recursive: true });
+    expect(findMiniProgramProjectRoot(child, { maxUp: 0 })).toBeNull();
   });
 });

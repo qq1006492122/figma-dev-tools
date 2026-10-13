@@ -1,33 +1,25 @@
-# 🎨 Figma Dev Tools v1.4.20
+# 🎨 Figma Dev Tools v1.4.21
 
 > Figma → 任意前端框架 设计到代码一键转换 MCP 服务器
 
 **[English](https://gitee.com/shanxi-youcha/figma-dev-tools/blob/master/README.en-US.md)** | **中文**
 
-**打通 Figma 设计与前端研发的完整工具链**，支持 🖥️ GUI 可视化配置向导、设计 Tokens 智能提取、高保真组件生成（React/Vue/Svelte/HTML 等）、资源自动下载、跨编辑器 MCP 集成。专为 AI Agent 优化，解决 div soup、上下文爆炸、hex 写死、资源路径处理、Flex 布局变形、无障碍缺失、响应式适配、**付费墙兜底**等核心痛点。
+**打通 Figma 设计与前端研发的完整工具链**，支持 🖥️ GUI 可视化配置向导、设计 Tokens 智能提取、高保真组件生成（React/Vue/Svelte/**微信小程序**/HTML 等）、资源自动下载、跨编辑器 MCP 集成、**设计稿变更自动再生成（Watch）** 与 **现状代码差异对比（Compare）**。专为 AI Agent 优化，解决 div soup、上下文爆炸、hex 写死、资源路径处理、Flex 布局变形、无障碍缺失、响应式适配、**付费墙兜底**等核心痛点。
 
 ---
 
-## ✨ v1.4.4 付费墙兜底 + 高保真还原 + 性能优化
+## ✨ v1.4.20–v1.4.21 新能力
 
-| 优化项 | 说明 | 类别 |
-| --- | --- | --- |
-| 🧱 **付费墙浏览器兜底** | `BrowserFallbackService`：API 付费墙失败时自动 Playwright 截图保底 | 还原 |
-| 🤖 **视觉近似模式** | `VisualApproximationService`：截图喂 VLM 生成近似代码骨架（~75%）+ TODO 清单 | 还原 |
-| 🎯 **还原度评分** | `figma_verify_fidelity`：Figma 截图 vs 代码截图像素 diff + 量化评分 | 还原 |
-| 📏 **DPR/屏幕尺寸感知** | 截图按 1x/2x/3x 输出，匹配不同渲染差异 | 还原 |
-| 📐 **绝对定位还原** | 修复 `layoutMode=NONE` 节点浮动元素旋转/偏移丢失 | 还原 |
-| 🎨 **渐变/多重阴影/内阴影** | 修复渐变填充、多重阴影、内阴影降级为纯色 | 还原 |
-| ✂️ **mask/clip-path** | 修复圆角头像、异形裁切失真 | 还原 |
-| ➖ **strokeDash 虚线** | 修复虚线/点线边框变实线 | 还原 |
-| 🔤 **富文本多段样式** | 修复 `styleOverrideTable` 未解析导致样式单一 | 还原 |
-| 🌍 **i18n 错误信息** | 硬编码中文改为 i18n key，按 GUI 语言输出 | 还原 |
-| 🚀 **浏览器实例池** | `BrowserPool` 复用实例，跳过 1-3s 启动，空闲 60s 回收 | 性能 |
-| 💾 **截图缓存** | `ScreenshotCache`：LRU + TTL，重复请求秒级返回 | 性能 |
-| ⏱️ **分级超时** | 导航/渲染/截图分别 20s/10s/5s，精准定位超时阶段 | 性能 |
-| 🧠 **混合智能等待** | `domcontentloaded` + 画布可见 + 网络空闲，解决 SPA 问题 | 性能 |
-| 🔁 **指数退避重试** | 网络/超时自动重试（2 次，500ms 指数退避） | 性能 |
-| 🔥 **预热机制** | `warmup()` 启动时预启动浏览器，消除首次延迟 | 性能 |
+| 能力 | 说明 |
+| --- | --- |
+| 📱 **微信小程序一级支持** | `figma-dev weapp` / `figma_generate_weapp`：WXML/WXSS/JS/JSON 四件套，rpx 单位与 design-width 自动推断、`wx:for` 列表/`wx:if` 条件/`bind·catch` 事件、scroll-view/swiper/picker/rich-text 原生组件、local/cdn/base64 三态资源管线、Skyline 属性矩阵降级 |
+| 🟠 **Svelte 4 一级支持** | `figma-dev svelte` / `figma_generate_svelte`：`export let` props、`on:` 事件、`{#each}/{#if}`；Tailwind/UnoCSS(attributify)/scoped CSS 三组合，非法样式触网前拒绝；Svelte 5 runes 仅给迁移注释 |
+| 🔄 **Watch 自动再生成** | `figma_watch_start/stop/status`：5s 粗筛 Figma 文件版本，变更自动重生成；429 指数退避；落盘自动备份 + preserve 区块/`*.figma.json` 用户字段保留；失败不跳过版本、断连自动清理 |
+| � **代码差异对比** | `figma_compare_code`：本地现状代码 vs Figma 最新产物 unified diff，支持贴代码/项目路径/小程序四件套，单文件按扩展名自动配对，默认 Prettier 归一化 |
+| 🧩 **组件库直接生成** | React（shadcn-ui / ant-design）与 Vue（element-plus / ant-design-vue）：auto 按 package.json 真实依赖检测，保守门控（双证据 ≥70 分）误替换为 0，跨框架触网前报错 |
+| 🧮 **WXSS 还原度闸门** | 按**节点 + 属性值**比对（错色/错尺寸/跨节点同名声明均不计命中），六张黄金 fixture 93–100%；主包体积 1.5MB 预警 / 2MB 阻断（自动向上探测 app.json 工程根） |
+| � **生成性能优化** | 998 节点夹具：React 373.9ms→225.7ms（-39.6%）、小程序 50.2ms→28.3ms（-43.6%），产物字节一致 |
+| 🧱 **付费墙浏览器兜底** | API 付费墙失败时 Playwright 截图保底 + 视觉近似模式 + 还原度像素评分（v1.4.4 起） |
 
 ---
 
@@ -35,6 +27,8 @@
 
 | 版本 | 主题 | 要点 |
 | --- | --- | --- |
+| **v1.4.21** | 发布闸门加固 + 文档完善 | weapp 主包体积核算支持 `--project-root` 与自动探测 app.json 工程根（1.5/2MB 阈值此前对组件目录不生效）；GUI 保存配置增加框架×组件库匹配校验（跨框架 400 拒绝）；中英文 README/QUICKSTART 补全小程序/Svelte/Watch/Compare 用法 |
+| **v1.4.20** | Svelte + 小程序 + Watch + 代码对比 + 组件库直出 + 更新链路加固 | `figma_generate_svelte` Svelte 4 SFC；`figma_generate_weapp` 微信小程序四件套；`figma_watch_start/stop/status` 变更监听自动再生成；`figma_compare_code` 现状 vs Figma unified diff；组件库直接生成（shadcn/Antd/Element Plus/Ant Design Vue）；还原度按节点+值比对；CLI `--output` 落盘修复；生成提速约 40%；`--update` 自动检测 npm registry/代理/CA + npmmirror 镜像兜底 + 网络错误分类建议 |
 | **v1.4.19** | 多样式 × React/Vue + 批量生成 + 智能推断 | 9 套样式可插拔；`figma_generate_vue` Vue SFC 一级入口；`figma_batch_generate` 语义区块拆分；T19 自定义组件库映射；T21/T22 智能推断建议（Grid/图标/暗色/动效 + 交互骨架/数据驱动/语义命名） |
 | **v1.4.18** | 多样式管线 + TS Props + DTCG + 企业适配 | 样式注册表（Tailwind/UnoCSS/CSS Modules）；Component Properties → TS Props；W3C DTCG Tokens；`FIGMA_CA_CERT_PATH` 企业 CA；构建器自动检测资源落位；import 自动整理；`--help` 双语示例 |
 | **v1.4.17** | 安全加固 + 版本发布 | npm 版本锁定 + tgz 双重校验；GUI 127.0.0.1 + Origin 白名单；升级临时目录 try/finally 清理 |
@@ -61,7 +55,7 @@
 | 特性 | 说明 | 版本 |
 | --- | --- | --- |
 | 🖥️ **GUI 可视化配置向导** | 浏览器图形界面：欢迎页→语言→Token 验证→编辑器检测一键安装→框架偏好→完成 | **v1.3.0** |
-| 🔗 **23 个 MCP 工具** | URL 解析 → Token 提取 → 组件生成 → 资源下载 → 付费墙兜底 → 还原度校验全流程 | v1.4.20（npm latest v1.4.19 为 22 个） |
+| 🔗 **28 个 MCP 工具** | URL 解析 → Token 提取 → 组件生成 → 资源下载 → 付费墙兜底 → 还原度校验全流程 | v1.4.20 |
 | 🧠 **框架无关结构化数据** | 输出 id/name/role/type/size/layout/styles/text/asset/children JSON，支持任意框架 | v1.1.0 |
 | ⚛️ **React + Tailwind 一级支持** | 语义标签 + Tailwind 映射 + `cn()` 合并 + TODO 标记，一键生成高保真 TSX | v1.3.2 |
 | 🔧 **Flex 布局自动修复** | 智能修复图标变形、文本截断、溢出等 Flex 问题 | v1.3.2 |
@@ -76,7 +70,7 @@
 | 🧩 **SVG Sprite 生成** | 批量图标合并为 Sprite，支持 CSS color 控制颜色 | v1.3.2 |
 | 🌍 **i18n 国际化** | 中英文双语，`figma-dev lang switch` 切换 | v1.3.2 |
 | 🔐 **安全 Token 存储** | 系统密钥链安全存储 Token | v1.3.2 |
-| 💻 **CLI 命令行** | 22 个顶层命令（32 条命令声明）支持脚本和 CI/CD 集成 | v1 (gui v1.3.0) |
+| 💻 **CLI 命令行** | 23 个顶层命令（33 条命令声明）支持脚本和 CI/CD 集成 | v1 (gui v1.3.0) |
 | 🔄 **8 个编辑器支持** | Trae/VS Code/Cursor/Windsurf/Claude Desktop/Zed/Cline/Roo Code 一键安装 | v1 (gui v1.3.0) |
 | 🚀 **零配置启动** | `npx -y figma-dev-tools --figma-api-key=xxx` 直接运行 | v1.2 |
 | 🔍 **OCR 文本提取** | 原生 JSON 优先（零依赖 100% 准确）+ tesseract.js OCR 兜底（中英文、SSRF 防护） | **v1.4.14** |
@@ -158,7 +152,7 @@ figma-dev lang switch            # 切换中英文
 
 ## 🔧 MCP 工具参考
 
-共 **23 个 MCP 工具**（v1.4.20 开发版代码实测，以冒烟测试枚举为发布闸门；npm latest v1.4.19 为前 22 个，不含 `figma_generate_weapp`），按使用流程排列：
+共 **28 个 MCP 工具**（v1.4.20，以冒烟测试枚举为发布闸门），按使用流程排列：
 
 | # | 工具名称 | 功能 | 关键参数 | 版本 |
 | --- | --- | --- | --- | --- |
@@ -291,23 +285,24 @@ figma-dev vue "<url>" --component-library element-plus
 figma-dev batch "<url>" --framework vue --component-library auto
 ```
 
-### 🧭 框架 × 样式支持矩阵（v1.4.19）
+### 🧭 框架 × 样式支持矩阵
 
-| 样式方案（styleFormat） | React | Vue 3 | Vue 2 | 说明 |
-| --- | --- | --- | --- | --- |
-| Tailwind（默认） | ✅ | ✅ | ✅ | tailwind-v4 映射；React 经 `cn()` 合流 |
-| UnoCSS（`unocss`） | ✅ | ✅ | ✅ | `unocssAttributify` 可开归因模式 |
-| CSS Modules（`css-modules`） | ✅ | ✅ | ✅ | 旁路 `*.module.css`；语义类名、`composes` 复用 |
-| Styled Components（`styled`） | ✅ | — | — | 模板字符串 + ThemeProvider 占位 |
-| Emotion（`emotion`） | ✅ | — | — | `css` prop / `css()` 对象样式 |
-| Less（`less`） | ✅ | ✅ | ✅ | 变量/嵌套/mixin；旁路 `.less` |
-| Sass/SCSS（`sass`） | ✅ | ✅ | ✅ | 变量/嵌套/mixin；旁路 `.scss` |
-| vanilla-extract | ✅ | — | — | 类型安全零运行时 `.css.ts` |
-| Panda CSS（`panda`） | ✅ | — | — | `css()` 对象 + cva/recipe |
-| inline-styles | ✅¹ | — | — | 仅旧管线 `figma_generate_component` |
-| CSS 变量（`css-variables`） | 🔜 | 🔜 | 🔜 | 计划 v1.5.0 |
+| 样式方案（styleFormat） | React | Vue 3 | Vue 2 | Svelte 4 | 微信小程序 | 说明 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Tailwind（默认） | ✅ | ✅ | ✅ | ✅ | —（生成原子化 class 视觉提示，样式落 WXSS 规则） | tailwind-v4 映射；React 经 `cn()` 合流 |
+| UnoCSS（`unocss`） | ✅ | ✅ | ✅ | ✅（含 `--attributify`） | — | `unocssAttributify` 可开归因模式 |
+| CSS Modules（`css-modules`） | ✅ | ✅ | ✅ | ✅（落地为编译器 scoped `<style>`） | — | 旁路 `*.module.css`；语义类名、`composes` 复用 |
+| Styled Components（`styled`） | ✅ | — | — | — | — | 模板字符串 + ThemeProvider 占位 |
+| Emotion（`emotion`） | ✅ | — | — | — | — | `css` prop / `css()` 对象样式 |
+| Less（`less`） | ✅ | ✅ | ✅ | — | — | 变量/嵌套/mixin；旁路 `.less` |
+| Sass/SCSS（`sass`） | ✅ | ✅ | ✅ | — | — | 变量/嵌套/mixin；旁路 `.scss` |
+| vanilla-extract | ✅ | — | — | — | — | 类型安全零运行时 `.css.ts` |
+| Panda CSS（`panda`） | ✅ | — | — | — | — | `css()` 对象 + cva/recipe |
+| inline-styles | ✅¹ | — | — | — | — | 仅旧管线 `figma_generate_component` |
+| 小程序原生 WXSS | — | — | — | — | ✅ | rpx、750 设计基准、Skyline 按 109 属性矩阵降级 |
+| CSS 变量（`css-variables`） | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 | 计划 v1.5.0（纯函数骨架已就绪，当前仅产出建议） |
 
-> ¹ 仅旧管线支持。不支持的组合会在触网前经 zod/注册表双重校验返回可读错误。微信小程序 `figma_generate_weapp` 已在 v1.4.20 开发版提供（WXML/WXSS/JS/JSON，能力持续补齐）；uni-app/Taro 计划后续版本 experimental 接入。
+> ¹ 仅旧管线支持。不支持的组合会在触网前经 zod/注册表双重校验返回可读错误（如 Svelte 指定 `styled` 在触网前被拒）。微信小程序 `figma-dev weapp` 自 v1.4.20 起为正式能力（WXML/WXSS/JS/JSON 四件套）；uni-app/Taro 计划后续版本 experimental 接入。
 
 ---
 
@@ -335,8 +330,9 @@ npx figma-dev-tools <command> [options]
 | `structured` | 框架无关结构化数据 | `--depth <n>` `--format pretty/json` `--output <file>` | v1.1.0 |
 | `jsx` | ⭐ 生成 React TSX（9 套样式、TS Props、智能推断、组件库直接映射） | `--name` `--scene` `--style <9 套>` `--component-library <auto/none/shadcn-ui/ant-design>` `--no-smart-*` | **v1.4.19** |
 | `vue` | ⭐ 生成 Vue SFC | `--vue-version 2\|3` `--style` `--component-library <auto/none/element-plus/ant-design-vue>` `--no-smart-*` | **v1.4.19** |
+| `svelte` | ⭐ 生成 Svelte 4 SFC（样式限 tailwind/unocss/css-modules） | `--name` `--style <3 套>` `--no-smart-*` `--no-ts` | **v1.4.20** |
 | `batch` | ⭐ 整页批量生成 | `--prefix` `--framework react\|vue\|svelte` `--component-library` `--out <dir>` | **v1.4.19** |
-| `weapp` | 📱 微信小程序四件套（开发版） | `--name` `--output` `--design-width` `--unit rpx\|px` `--page` | **v1.4.20** |
+| `weapp` | 📱 微信小程序四件套（WXML/WXSS/JS/JSON） | `--name` `--output` `--design-width` `--unit rpx\|px` `--page` `--asset-mode local\|cdn\|base64` `--renderer webview\|skyline` `--project-root <工程根>` | **v1.4.20**（`--project-root` v1.4.21） |
 | `component` | 基础组件生成（旧版，推荐 jsx/vue） | `--name` `--style` | v1 |
 | `assets` | 下载资源（SVGO 优化，按构建器落位） | `--scene` `--scale <n>` `--bundler auto\|vite\|webpack\|nextjs\|remix` | **v1.4.18** |
 | `sync` | 同步 Tokens（含 DTCG） | `--format oklch` `--output-format css\|tailwind\|json\|dtcg\|all` | **v1.4.18** |
@@ -369,6 +365,15 @@ figma-dev batch "https://www.figma.com/design/xxx/yyy" \
 
 # 🧠 关闭部分智能推断
 figma-dev jsx "<figma-url>" --name HeroSection --no-smart-dark --no-smart-motion
+
+# 🟠 生成 Svelte 4 组件
+figma-dev svelte "<figma-url>" --name HeroCard --style tailwind
+
+# 📱 生成微信小程序页面
+figma-dev weapp "<figma-url>" --name GoodsList --page --unit rpx
+
+# 🔄 启动 Watch 模式（Figma 变更自动再生成）
+figma-dev watch start "<figma-url>" --framework react --out ./src/components
 
 # 🪙 同步 W3C DTCG Tokens
 figma-dev sync "<figma-url>" --output-format dtcg

@@ -9,7 +9,20 @@
 - 纯内部重构、测试扩充、文档勘误不写入本文件（见 `audit-baseline.md`）。
 - 版本号管理遵循「永不复用」铁律：发布失败也不复用该版本号，回滚走 `npm deprecate` + 补丁版本。
 
-## [Unreleased]
+## [1.4.21] - 2026-10-14
+
+### 修复
+
+- 修复微信小程序主包体积核算的工程根口径：此前 `figma-dev weapp` 直接用「输出目录/组件名」核算，该目录通常不含 `app.json`，导致 1.5MB 预警 / 2MB 阻断阈值几乎永不生效；新增 `--project-root <dir>` 显式指定，并在未指定时从输出目录向上（≤6 层）自动探测含 `app.json` 的工程根，探测到后按全主包口径核算并在 CLI 打印实际核算根；含 symlink 的伪 app.json 不认作工程根。
+- 修复 GUI 配置向导 `/api/config/complete` 只校验组件库白名单、不校验框架匹配的问题：`framework=react` + `componentLibrary=element-plus`（及 vue 配 shadcn-ui/antd 等跨框架组合）现在返回 400 与 `FDT-UI-LIB-FRAMEWORK-MISMATCH`，不写入 `figma-dev.config.json`（前端选择器本就限制，此为直接构造 API 请求的服务端兜底）。
+
+### 文档
+
+- 完善中英文 README 与 QUICKSTART（v1.4.20 的微信小程序、Svelte、Watch、代码对比、组件库直出等能力补充完整用法与示例）；同步全部用户文档版本号至 v1.4.21。
+
+## [1.4.20 发布后补录]
+
+> 下列条目在 v1.4.20 发布周期内开发完成并已随 v1.4.20 一并发布（2026-10-13 晚发布提交时已包含），因 CHANGELOG 当时保留在 Unreleased 段未改标题，v1.4.21 在此补录归档，功能归属仍为 1.4.20。
 
 ### 新增
 

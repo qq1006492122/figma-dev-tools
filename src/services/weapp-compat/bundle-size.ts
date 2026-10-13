@@ -13,6 +13,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import * as path from 'node:path';
 import { join, relative, sep } from 'node:path';
 
 export const MB = 1024 * 1024;
@@ -83,6 +84,45 @@ const CODE_EXT_RE = /\.(js|wxml|wxss|json|wxs)$/i;
 
 function toPosix(p: string): string {
   return p.split(sep).join('/');
+}
+
+/** 向上查找工程根时最多跨越的目录层级（防止在文件系统根附近无限遍历） */
+export const PROJECT_ROOT_MAX_UP = 6;
+
+/**
+ * 从起始目录向上逐级查找含 app.json 的小程序工程根（R1 QA：weapp 的 --output
+ * 通常是「工程根/components 或 pages 下的组件目录」，直接拿组件目录核算会让
+ * 1.5/2MB 主包阈值永不生效）。
+ *
+ * 先查起始目录自身（页面直接生成在工程根的场景），再逐级向上；
+ * app.json 必须是普通文件（拒绝 symlink 指向的伪工程根）。
+ *
+ * @returns 工程根绝对路径；未找到返回 null
+ */
+export function findMiniProgramProjectRoot(
+  startDir: string,
+  options: {
+    maxUp?: number;
+    exists?: (p: string) => boolean;
+    stat?: (p: string) => { isFile(): boolean };
+  } = {},
+): string | null {
+  const exists = options.exists ?? ((p: string) => existsSync(p));
+  const stat = options.stat ?? ((p: string) => statSync(p));
+  const maxUp = options.maxUp ?? PROJECT_ROOT_MAX_UP;
+  let current = path.resolve(startDir);
+  for (let i = 0; i <= maxUp; i++) {
+    const appJson = join(current, 'app.json');
+    try {
+      if (exists(appJson) && stat(appJson).isFile()) return current;
+    } catch {
+      // 无权限等情况按不存在处理，继续向上
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
 }
 
 interface AppJsonModel {

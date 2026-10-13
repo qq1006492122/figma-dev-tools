@@ -57,7 +57,7 @@ import { selectBlocksByIds, splitPageIntoBlocks } from '../services/block-splitt
 // v1.4.20：微信小程序生成
 import { createWeappGenerator } from '../services/weapp-generator.js';
 import { writeWeappLocalAssets } from '../services/weapp-asset-writer.js';
-import { measureMainPackage, MB } from '../services/weapp-compat/bundle-size.js';
+import { findMiniProgramProjectRoot, measureMainPackage, MB } from '../services/weapp-compat/bundle-size.js';
 import {
   buildAppJsonSuggestion,
   buildProjectConfigSuggestion,
@@ -2010,6 +2010,7 @@ program
   .option('--no-inference-list', '关闭重复组→wx:for 自动推断（默认开启）')
   .option('--inference-conditions', '把 tab/modal 等名称信号直接绑定 hidden（默认仅输出建议，不猜测业务状态）', false)
   .option('--renderer <renderer>', '目标渲染器：webview（默认）| skyline（按官方 109 属性矩阵降级 WXSS）', 'webview')
+  .option('--project-root <dir>', '小程序工程根（含 app.json；用于 1.5/2MB 主包阈值核算，不传则从 --output 向上自动探测）')
   .action(async (target, cmdOptions) => {
     const opts = program.opts();
     // 同名 --output 被全局选项吞入 opts.output 时回收；weapp 子命令自身默认 './'（commander 丢默认值，这里兜底）
@@ -2283,9 +2284,16 @@ program
         console.log('  4. 在 methods 中实现组件方法');
       }
 
-      // P0-23：主包体积核算（--output 即项目/输出根；含 app.json 才按全主包阈值阻断）
-      const bundle = measureMainPackage({ projectRoot: outDir });
+      // P0-23（R1 QA 加固）：主包体积核算根 = 显式 --project-root > 从输出目录向上探测到的
+      // app.json 工程根 > 输出目录本身（非全主包口径，仅报告不阻断）。
+      // 直接用组件目录会让 1.5/2MB 阈值永不生效。
+      const bundleRoot =
+        (cmdOptions.projectRoot ? path.resolve(cmdOptions.projectRoot) : findMiniProgramProjectRoot(outDir)) ?? outDir;
+      const bundle = measureMainPackage({ projectRoot: bundleRoot });
       console.log(chalk.cyan('\n📦 主包体积核算：'));
+      if (bundle.isFullProject && bundleRoot !== outDir) {
+        console.log(chalk.gray(`  核算工程根：${bundleRoot}（从输出目录向上探测到 app.json）`));
+      }
       if (!bundle.isFullProject) {
         console.log(chalk.yellow(`  ⚠️  ${bundle.scopeWarning}`));
       }

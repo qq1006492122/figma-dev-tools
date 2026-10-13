@@ -22,7 +22,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** ── 单一事实来源：每次发版前更新这里 ── */
 const EXPECTED = {
-  version: '1.4.20',
+  version: '1.4.21',
   toolCount: 28, // server.registerTool 实际注册数（WBS-P1-2 watch×3 + P1-3 compare + P1-1 svelte）
   cliDeclarations: 33, // src/cli/index.ts 中 .command( 声明总数（WBS-P1-1 +svelte；watch/compare 仅 MCP）
   styleDescriptors: 11, // registry.ts 中 status: 'available'|'planned' 描述符数
